@@ -1,6 +1,16 @@
 # Zako Panel
 
-轻量代理节点管理面板。Cloudflare Worker 承担控制面，D1 保存数据，Vue SPA 提供管理界面，Debian Go Agent 负责节点侧采集与配置。架构与数据模型见 [docs/architecture.md](docs/architecture.md)。
+轻量代理节点管理面板。Cloudflare Worker 承担控制面，D1 保存数据，Vue SPA 提供管理界面，Debian 上的 Go Agent 负责采集 Xray 统计、同步用户并应用配置。Worker 不转发代理流量，不执行 Xray，不主动连接节点。
+
+## 能力
+
+- 节点、endpoint 与订阅档案管理，P0 支持 VLESS + REALITY
+- Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
+- Agent 心跳、流量上报与按小时幂等入账
+- 订阅用户、额度、周期与节点授权
+- Xray 配置版本化、发布与失败回滚
+
+阶段划分与设计边界见 [docs/architecture.md](docs/architecture.md)，交付顺序见 [docs/roadmap.md](docs/roadmap.md)。
 
 ## 技术栈
 
@@ -12,71 +22,50 @@
 ## 目录
 
 ```text
-apps/
-├── worker/          Worker 路由、服务、仓储、中间件与工具
-├── web/             Vue 管理界面（挂载在 /admin/）
-└── agent/           Debian 节点 Agent
-packages/contracts/  OpenAPI 契约、生成类型、跨语言 fixtures
-migrations/          D1 迁移
-deploy/              systemd unit 与安装脚本
-docs/                架构文档
+apps/worker/        Cloudflare Worker：路由、服务、D1 仓储、中间件
+apps/web/           Vue 3 管理界面，挂载在 /admin/
+apps/agent/         Debian 节点 Agent（Go）
+packages/contracts/ OpenAPI 契约、生成类型与跨语言 fixtures
+migrations/         D1 迁移
+deploy/             systemd unit 与安装脚本
+docs/               项目文档
 ```
 
-## 开发
+## 快速开始
 
-要求 Node.js 22+、npm 11+。Agent 另需 Go 1.24+。
+要求 Node.js 22+；构建 Agent 另需 Go 1.24+。
 
 ```bash
 npm install
-npm run contracts:generate      # openapi.yaml 变更后重新生成类型
 npm run db:migrate:local        # 本地 D1 建表
-npm run build                   # 构建 Web 静态资源到 apps/web/dist
 ```
 
-本地运行 Worker 与 Web 开发服务器（两个终端）：
+修改 `packages/contracts/openapi.yaml` 后运行 `npm run contracts:generate` 重新生成类型。
+
+本地启动 Worker 与 Web 开发服务器（两个终端）：
 
 ```bash
 npm run dev                     # Wrangler，http://127.0.0.1:8787
 npm run dev:web                 # Vite，http://127.0.0.1:5173/admin/
 ```
 
-Vite 开发服务器将 `/api` 与 `/sub` 代理到 Wrangler。`/admin/*` 页面由静态资源返回，`/api/*` 与 `/sub/*` 优先进入 Worker。
-
-本地 Access 配置写入 `.dev.vars`（参考 `.dev.vars.example`）。管理 API 校验 Cloudflare Access JWT 与 D1 中的管理员角色，生产环境不存在开发态旁路。
+Vite 将 `/api` 与 `/sub` 代理到 Wrangler。本地 Access 配置写入 `.dev.vars`，参考 `.dev.vars.example`。
 
 ## 校验
 
 ```bash
-npm run typecheck               # 全部 TypeScript workspace
-npm test                        # Worker 单元测试（Workers Vitest）
-npm run test:agent              # Go Agent 测试
-npm run test:all                # 两者
+npm run typecheck
+npm test
+npm run test:agent
 npm run format:check
 ```
 
+`npm run test:all` 先执行 Worker 测试再执行 Agent 测试；`npm run build` 校验类型并构建 Web 静态资源。
+
 ## 部署
 
-```bash
-npx wrangler d1 create zako-panel        # 将返回的 database_id 写入 wrangler.jsonc
-npx wrangler d1 migrations apply zako-panel --remote
-npm run deploy
-```
+面板与节点的完整步骤见 [docs/deployment.md](docs/deployment.md)。节点 Agent 的模块、配置与运行模型见 [docs/agent.md](docs/agent.md)。
 
-同时配置 `ACCESS_TEAM_DOMAIN`、`ACCESS_AUD` 与 `ENVIRONMENT`，并为 `/admin/*`、`/api/v1/admin/*` 设置 Access 策略；`/sub/*` 与 `/api/v1/agent/*` 必须排除在 Access 之外。
+## 文档
 
-## Agent
-
-```bash
-cd apps/agent
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/zako-agent-linux-amd64 ./cmd/zako-agent
-cd ../..
-sudo deploy/install.sh apps/agent/bin/zako-agent-linux-amd64
-```
-
-安装脚本创建 `zako-agent` 系统用户、`/etc/zako-agent` 与 `/var/lib/zako-agent`，安装 systemd unit 并 enable，但不启动服务。把面板签发的节点 token 写入 `/etc/zako-agent/token`，按 [config.example.yaml](apps/agent/config.example.yaml) 准备配置后再启动：
-
-```bash
-sudo systemctl start zako-agent
-```
-
-REALITY 私钥保存在节点本地 `/etc/xray/reality.key`；Worker 只保存公钥。
+完整文档索引见 [docs/README.md](docs/README.md)。

@@ -1,6 +1,6 @@
 // Package config loads the agent's node-local YAML configuration.
 //
-// Validation mirrors the deployment contract in docs/architecture.md §8.5:
+// Validation mirrors the deployment contract in docs/agent.md §2:
 // intervals are bounded by the Worker and D1 budgets, and the control plane must
 // be an absolute HTTPS origin because Agent auth is bearer-token only.
 package config
@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,9 @@ const (
 	defaultHeartbeatInterval = 5 * time.Minute
 	defaultSampleInterval    = 30 * time.Second
 	defaultReportInterval    = 15 * time.Minute
+	// defaultXrayAPIAddress is Xray's loopback StatsService/HandlerService
+	// listener configured by the installation guide.
+	defaultXrayAPIAddress = "127.0.0.1:10085"
 
 	minHeartbeatInterval = 60 * time.Second
 	maxHeartbeatInterval = 900 * time.Second
@@ -70,6 +75,7 @@ type Config struct {
 	XrayConfigPath        string          `yaml:"xray_config_path"`
 	XrayBinaryPath        string          `yaml:"xray_binary_path"`
 	RealityPrivateKeyPath string          `yaml:"reality_private_key_path"`
+	XrayAPIAddress        string          `yaml:"xray_api_address"`
 	HeartbeatInterval     Duration        `yaml:"heartbeat_interval"`
 	Collector             CollectorConfig `yaml:"collector"`
 }
@@ -133,6 +139,9 @@ func (c *Config) applyDefaults() {
 	if c.Collector.ReportInterval == 0 {
 		c.Collector.ReportInterval = Duration(defaultReportInterval)
 	}
+	if strings.TrimSpace(c.XrayAPIAddress) == "" {
+		c.XrayAPIAddress = defaultXrayAPIAddress
+	}
 }
 
 // validate aggregates every field problem so operators can fix one file in one
@@ -183,7 +192,29 @@ func (c *Config) validate() error {
 			minReportInterval, maxReportInterval, report)
 	}
 
+	if err := validateHostPort(c.XrayAPIAddress); err != nil {
+		add("xray_api_address", "%v", err)
+	}
+
 	return errors.Join(problems...)
+}
+
+// validateHostPort rejects a bare host, a bare port and non-numeric ports. The
+// gRPC dialer would otherwise block until the context deadline with a confusing
+// DNS error instead of failing at startup.
+func validateHostPort(raw string) error {
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil {
+		return fmt.Errorf("must be host:port: %w", err)
+	}
+	if strings.TrimSpace(host) == "" {
+		return errors.New("must include a host")
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("must include a port between 1 and 65535, got %q", port)
+	}
+	return nil
 }
 
 func validateControlPlaneURL(raw string) error {

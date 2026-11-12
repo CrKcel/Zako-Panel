@@ -22,7 +22,7 @@
 - `/sub/*` 与 `/api/v1/agent/*` 必须排除在 Access 之外，由订阅 token 与 Agent token 各自鉴权。
 - Access 身份仍需在 `admin_users` 中存在且启用。
 - 静态安全头由 `apps/web/public/_headers` 提供：CSP、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、受限 Permissions Policy；`/admin/assets/*` 使用 immutable 缓存。
-- `apps/web/public/_redirects` 将 `/` 302 到 `/admin/`。
+- `apps/web/public/_redirects` 将 `/admin/assets/*` 重写到 `/assets/*`（Vite 的 `base` 为 `/admin/`），并将 `/` 302 到 `/admin/`。
 
 ### 1.3 首次部署
 
@@ -34,14 +34,14 @@ npm run deploy
 
 ### 1.4 初始化数据
 
-首次部署后完成一次初始化：
+首次部署后执行初始化脚本，创建首个 `owner`、默认订阅档案、默认订阅用户、订阅记录与 `meta` 键（`users_ver`、`default_subscriber_id`）：
 
-1. 写入首个 `owner` 管理员（邮箱来自 `ADMIN_EMAIL`）。
-2. 创建默认订阅档案（`all` 节点、默认规则）。
-3. 创建默认订阅用户与订阅记录，生成随机 token 并只在交互终端输出一次。
-4. 写入 `meta.users_ver = 0`。
+```bash
+npm run bootstrap -- --email admin@example.com
+npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
+```
 
-生产环境不提供“空表首个登录者自动成为 owner”的运行时逻辑。
+脚本把订阅 token 只在终端输出一次，生成的 SQL 只包含 token 哈希与 ID。`bootstrap.sql` 已被忽略，不应提交。生产环境不提供“空表首个登录者自动成为 owner”的运行时逻辑。
 
 ## 2. 节点安装
 
@@ -65,7 +65,7 @@ sudo deploy/install.sh apps/agent/bin/zako-agent-linux-amd64
 启动前：
 
 1. 把面板签发的 Agent token 写入 `/etc/zako-agent/token`，保持属 `zako-agent`、权限 0600。
-2. 编辑 `/etc/zako-agent/config.yaml`，至少设置 `control_plane_url` 与 `node_id`；其余路径与间隔按实际环境调整。
+2. 编辑 `/etc/zako-agent/config.yaml`，至少设置 `control_plane_url` 与 `node_id`；`xray_api_address` 默认为 `127.0.0.1:10085`，需与 Xray API inbound 一致；其余路径与间隔按实际环境调整。
 3. 把安装时打印的 REALITY 公钥录入对应 endpoint 的 `public_key`。
 
 ```bash
@@ -73,4 +73,4 @@ sudo systemctl start zako-agent
 journalctl -u zako-agent -f
 ```
 
-P0 的 Xray 入站与默认用户需要在节点本地准备，统计配置见 [traffic.md](traffic.md)。systemd 单元的写路径与命令限制见 [security.md](security.md)。
+P0 的 Xray 入站与默认用户需要在节点本地准备，默认用户的 UUID 可从订阅 URI 获取，统计配置见 [traffic.md](traffic.md)。systemd 单元的写路径与命令限制见 [security.md](security.md)。

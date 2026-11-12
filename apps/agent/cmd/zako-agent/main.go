@@ -1,9 +1,9 @@
 // Command zako-agent runs the node-side agent.
 //
-// The skeleton wires configuration, state, the control-plane client and the run
-// loops. Xray transport, delta accounting and user sync are not implemented yet;
-// those loops therefore report typed not-implemented errors or stay idle instead
-// of pretending to have synchronized a node.
+// P0 wires StatsService sampling, delta accounting, the BoltDB outbox and the
+// shared heartbeat/traffic reporter. User sync and remote configuration are P1/P2
+// and have no implementation; the agent logs that explicitly instead of pretending
+// a node was synchronized.
 package main
 
 import (
@@ -21,11 +21,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zako-panel/zako-agent/internal/accounting"
 	"github.com/zako-panel/zako-agent/internal/collector"
 	"github.com/zako-panel/zako-agent/internal/config"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
-	"github.com/zako-panel/zako-agent/internal/syncer"
+	"github.com/zako-panel/zako-agent/internal/sysinfo"
 	"github.com/zako-panel/zako-agent/internal/xray"
 )
 
@@ -75,7 +76,36 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	configVersion, _, err := store.MetaInt64(state.KeyAppliedConfigVersion)
+	appliedVersion, _, err := store.MetaInt64(state.KeyAppliedConfigVersion)
+	if err != nil {
+		return err
+	}
+	outboxPending, err := store.OutboxLen()
+	if err != nil {
+		return err
+	}
+
+	stats, err := xray.NewStatsClient(cfg.XrayAPIAddress)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := stats.Close(); err != nil {
+			logger.Error("xray stats client close failed", "error", err)
+		}
+	}()
+
+	accountant, err := accounting.New(store, accounting.WithLogger(logger.With("component", "accounting")))
+	if err != nil {
+		return err
+	}
+
+	collectorLoop, err := collector.New(
+		cfg.Collector.SampleInterval.Duration(),
+		stats,
+		accountant.Handle,
+		logger.With("component", "collector"),
+	)
 	if err != nil {
 		return err
 	}
@@ -85,32 +115,17 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-
-	// The loopback gRPC client is not implemented, so every Xray capability
-	// returns xray.ErrNotImplemented. The agent must keep running without Xray.
-	stats := xray.Unimplemented{}
-
-	// Delta accounting (baselines, counter-gap flags, hourly splitting and outbox
-	// writes) is not implemented. Samples are read and then rejected explicitly.
-	sampleHandler := func(context.Context, collector.Sample) error {
-		return collector.ErrNotImplemented
-	}
-	collectorLoop, err := collector.New(
-		cfg.Collector.SampleInterval.Duration(),
-		stats,
-		sampleHandler,
-		logger.With("component", "collector"),
-	)
-	if err != nil {
-		return err
-	}
-
-	syncLoop, err := syncer.New(
-		reporterClient,
-		store,
-		cfg.UsersPath,
-		logger.With("component", "syncer"),
-	)
+	reporterLoop, err := reporter.NewLoop(reporter.LoopOptions{
+		Client:            reporterClient,
+		Store:             store,
+		Reports:           accountant,
+		Health:            collectorLoop,
+		ReadSys:           sysinfo.Read,
+		AgentVersion:      version,
+		HeartbeatInterval: cfg.HeartbeatInterval.Duration(),
+		TrafficInterval:   cfg.Collector.ReportInterval.Duration(),
+		Logger:            logger.With("component", "reporter"),
+	})
 	if err != nil {
 		return err
 	}
@@ -120,16 +135,17 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("agent started",
 		"control_plane_url", cfg.ControlPlaneURL,
+		"xray_api_address", cfg.XrayAPIAddress,
 		"heartbeat_interval", cfg.HeartbeatInterval.String(),
 		"sample_interval", cfg.Collector.SampleInterval.String(),
 		"report_interval", cfg.Collector.ReportInterval.String(),
 		"users_version", usersVersion,
-		"applied_config_version", configVersion,
+		"applied_config_version", appliedVersion,
+		"outbox_reports", outboxPending,
 	)
-	// Heartbeat and outbox scheduling need the same delta accounting as the
-	// collector plus ACK handling. Sending a report now would fabricate health and
-	// version fields, so the reporter stays idle until that pipeline exists.
-	logger.Info("reporter idle: heartbeat and outbox scheduling not implemented")
+	// P1 keeps user sync and HandlerService hot updates out of this build. Logging
+	// once keeps the gap visible without running a loop that cannot do work.
+	logger.Info("user sync not implemented", "stage", "P1")
 
 	var loops sync.WaitGroup
 	runLoop := func(name string, loop func(context.Context) error) {
@@ -142,10 +158,12 @@ func run(logger *slog.Logger) error {
 		}()
 	}
 	runLoop("collector", collectorLoop.Run)
-	runLoop("syncer", syncLoop.Run)
+	runLoop("reporter", reporterLoop.Run)
 
 	<-ctx.Done()
 	logger.Info("shutdown requested")
+	// Bolt writes are synchronous, so waiting for both loops drains the in-flight
+	// sample transaction and the in-flight report before the store is closed.
 	loops.Wait()
 	logger.Info("agent stopped")
 	return nil

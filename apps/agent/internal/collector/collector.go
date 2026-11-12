@@ -11,13 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/zako-panel/zako-agent/internal/xray"
 )
-
-// ErrNotImplemented signals that no delta-accounting handler is wired yet.
-var ErrNotImplemented = errors.New("collector: delta accounting not implemented")
 
 // Sample is one read of all counters at a single instant. Counters are cumulative
 // for the lifetime of the Xray process.
@@ -39,6 +37,7 @@ type Collector struct {
 	stats    xray.StatsReader
 	handle   Handler
 	logger   *slog.Logger
+	healthy  atomic.Bool
 }
 
 // New validates the sampling cadence and dependencies.
@@ -71,23 +70,31 @@ func (c *Collector) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			sample, err := c.sample(ctx)
-			if err != nil {
-				if errors.Is(err, xray.ErrNotImplemented) {
-					c.logger.Debug("collector sample unavailable", "error", err)
-					continue
-				}
-				c.logger.Warn("collector sample failed", "error", err)
-				continue
-			}
-			if err := c.handle(ctx, sample); err != nil {
-				if errors.Is(err, ErrNotImplemented) {
-					c.logger.Debug("collector sample not accounted", "error", err)
-					continue
-				}
-				c.logger.Warn("collector sample handler failed", "error", err)
-			}
+			c.runOnce(ctx)
 		}
+	}
+}
+
+// Healthy reports whether the last StatsService sample succeeded. Before the
+// first sample the node is reported as unhealthy rather than assumed healthy.
+func (c *Collector) Healthy() bool {
+	return c.healthy.Load()
+}
+
+// runOnce samples and handles once. Health reflects the StatsService read only: a
+// handler failure is a local accounting problem, not a dead Xray.
+func (c *Collector) runOnce(ctx context.Context) {
+	sample, err := c.sample(ctx)
+	if err != nil {
+		// The reporter turns this into stats_healthy=false on the next heartbeat.
+		// A transient StatsService outage must not terminate the agent.
+		c.healthy.Store(false)
+		c.logger.Warn("collector sample failed", "error", err)
+		return
+	}
+	c.healthy.Store(true)
+	if err := c.handle(ctx, sample); err != nil {
+		c.logger.Warn("collector sample handler failed", "error", err)
 	}
 }
 

@@ -32,3 +32,6 @@ coverage/
 # Logs
 logs/
 *.log
+
+# Generated initialization SQL
+bootstrap.sql

@@ -23,6 +23,7 @@
 		"contracts:generate": "npm run generate -w @zako/contracts",
 		"db:migrate:local": "wrangler d1 migrations apply zako-panel --local",
 		"db:migrate:remote": "wrangler d1 migrations apply zako-panel --remote",
+		"bootstrap": "node scripts/bootstrap.mjs",
 		"deploy": "npm run build && wrangler deploy",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."

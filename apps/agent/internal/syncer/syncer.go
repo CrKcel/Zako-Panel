@@ -1,9 +1,9 @@
 // Package syncer owns the users_ver -> Xray user set pipeline.
 //
 // The Worker advertises users_ver in every report response; a change triggers
-// GET /api/v1/agent/users with If-None-Match. Applying a set atomically to disk
-// and through HandlerService is not implemented in this skeleton, but the
-// dependencies and the ETag contract are fixed here.
+// GET /api/v1/agent/users with If-None-Match. This is a P1 capability: persisting
+// a set atomically to disk and applying it through HandlerService is not
+// implemented, and the agent logs that instead of claiming a node is in sync.
 package syncer
 
 import (
@@ -36,8 +36,8 @@ func (v UsersVersion) ETag() string {
 }
 
 // Syncer applies versioned user sets. User sync and remote config application
-// share one mutation lock in the full implementation (§9.3); this skeleton has no
-// apply path, so no lock is acquired yet.
+// share one mutation lock (docs/agent.md §4.3); this P1 placeholder has no apply
+// path, so no lock is acquired yet.
 type Syncer struct {
 	reporter  *reporter.Reporter
 	state     *state.Store

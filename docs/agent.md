@@ -2,6 +2,8 @@
 
 Agent 以单一 Go 二进制运行在 Debian 节点上，由 systemd 管理，通过出站 HTTPS 与 Worker 通信，通过 loopback gRPC 读取 Xray 统计并热更新用户。安装步骤见 [deployment.md](deployment.md)，采样与上报规则见 [traffic.md](traffic.md)，远程配置见 [config-delivery.md](config-delivery.md)。
 
+当前交付为 P0：StatsService 采样、增量入账、outbox 与心跳/流量上报。用户集合同步与热更新属于 P1，远程配置属于 P2，均未实现。
+
 ## 1. 模块职责
 
 | 模块 | 职责 |
@@ -28,6 +30,7 @@ users_path: /var/lib/zako-agent/users.json
 xray_config_path: /etc/xray/config.json
 xray_binary_path: /usr/local/bin/xray
 reality_private_key_path: /etc/xray/reality.key
+xray_api_address: 127.0.0.1:10085
 heartbeat_interval: 5m
 collector:
   sample_interval: 30s

@@ -10,9 +10,6 @@ const items = [
 	{ path: '/profiles', label: '订阅档案' },
 	{ path: '/subscriptions', label: '订阅' },
 	{ path: '/traffic', label: '流量' },
-	{ path: '/subscribers', label: '订阅用户' },
-	{ path: '/admins', label: '管理员' },
-	{ path: '/configs', label: '配置中心' },
 ];
 
 const activeMenu = computed(() => (route.path.startsWith('/nodes') ? '/nodes' : route.path));

@@ -6,6 +6,7 @@ users_path: /var/lib/zako-agent/users.json
 xray_config_path: /etc/xray/config.json
 xray_binary_path: /usr/local/bin/xray
 reality_private_key_path: /etc/xray/reality.key
+xray_api_address: 127.0.0.1:10085
 heartbeat_interval: 5m
 collector:
   sample_interval: 30s

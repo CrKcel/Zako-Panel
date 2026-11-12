@@ -1,1 +1,2 @@
+/admin/assets/* /assets/:splat 200
 / /admin/ 302

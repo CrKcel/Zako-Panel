@@ -45,6 +45,35 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if got, want := cfg.Collector.ReportInterval.Duration(), 15*time.Minute; got != want {
 		t.Errorf("report_interval = %s, want %s", got, want)
 	}
+	if got, want := cfg.XrayAPIAddress, "127.0.0.1:10085"; got != want {
+		t.Errorf("xray_api_address = %q, want %q", got, want)
+	}
+}
+
+func TestLoadParsesXrayAPIAddress(t *testing.T) {
+	body := baseConfig + "xray_api_address: 127.0.0.1:19085\n"
+	cfg, err := Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := cfg.XrayAPIAddress, "127.0.0.1:19085"; got != want {
+		t.Errorf("xray_api_address = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidXrayAPIAddress(t *testing.T) {
+	for _, address := range []string{"127.0.0.1", "127.0.0.1:not-a-port", "127.0.0.1:0", "127.0.0.1:70000", ":10085"} {
+		t.Run(address, func(t *testing.T) {
+			body := baseConfig + "xray_api_address: \"" + address + "\"\n"
+			_, err := Load(writeConfig(t, body))
+			if err == nil {
+				t.Fatalf("Load accepted xray_api_address %q", address)
+			}
+			if !strings.Contains(err.Error(), "xray_api_address") {
+				t.Errorf("error %q does not name xray_api_address", err)
+			}
+		})
+	}
 }
 
 func TestLoadParsesDurations(t *testing.T) {

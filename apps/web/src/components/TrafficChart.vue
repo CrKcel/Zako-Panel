@@ -4,6 +4,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type EChartsType } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { formatBytes } from '../utils/format';
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -18,11 +19,17 @@ let observer: ResizeObserver | null = null;
 
 function render(): void {
 	chart?.setOption({
-		tooltip: { trigger: 'axis' },
+		tooltip: {
+			trigger: 'axis',
+			valueFormatter: (value: unknown) => formatBytes(Number(value)),
+		},
 		legend: { data: props.series.map((item) => item.name) },
-		grid: { left: 48, right: 24, top: 40, bottom: 32 },
+		grid: { left: 72, right: 24, top: 40, bottom: 32 },
 		xAxis: { type: 'category', boundaryGap: false, data: props.categories },
-		yAxis: { type: 'value' },
+		yAxis: {
+			type: 'value',
+			axisLabel: { formatter: (value: number | string) => formatBytes(Number(value)) },
+		},
 		series: props.series.map((item) => ({
 			name: item.name,
 			type: 'line',

@@ -1,14 +1,13 @@
 # Zako Panel
 
-轻量代理节点管理面板。Cloudflare Worker 承担控制面，D1 保存数据，Vue SPA 提供管理界面，Debian 上的 Go Agent 负责采集 Xray 统计、同步用户并应用配置。Worker 不转发代理流量，不执行 Xray，不主动连接节点。
+轻量代理节点管理面板。Cloudflare Worker 承担控制面，D1 保存数据，Vue SPA 提供管理界面，Debian 上的 Go Agent 负责采集 Xray 统计并上报心跳与流量。Worker 不转发代理流量，不执行 Xray，不主动连接节点。
 
 ## 能力
 
 - 节点、endpoint 与订阅档案管理，P0 支持 VLESS + REALITY
 - Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
-- Agent 心跳、流量上报与按小时幂等入账
-- 订阅用户、额度、周期与节点授权
-- Xray 配置版本化、发布与失败回滚
+- Agent 心跳、Xray 统计采样、流量上报与按小时幂等入账
+- 派生节点状态、站点/节点流量汇总与保留期清理
 
 阶段划分与设计边界见 [docs/architecture.md](docs/architecture.md)，交付顺序见 [docs/roadmap.md](docs/roadmap.md)。
 
@@ -28,6 +27,7 @@ apps/agent/         Debian 节点 Agent（Go）
 packages/contracts/ OpenAPI 契约、生成类型与跨语言 fixtures
 migrations/         D1 迁移
 deploy/             systemd unit 与安装脚本
+scripts/            一次性初始化脚本
 docs/               项目文档
 ```
 
@@ -38,7 +38,10 @@ docs/               项目文档
 ```bash
 npm install
 npm run db:migrate:local        # 本地 D1 建表
+npm run bootstrap -- --email you@example.com   # 初始化 owner、默认档案与订阅
 ```
+
+`bootstrap` 生成的 `bootstrap.sql` 需按输出提示导入 D1；订阅 token 只在终端输出一次。
 
 修改 `packages/contracts/openapi.yaml` 后运行 `npm run contracts:generate` 重新生成类型。
 

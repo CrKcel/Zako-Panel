@@ -1,8 +1,9 @@
 // Package xray defines the agent's boundary to Xray-core.
 //
-// P0 talks to StatsService and HandlerService over loopback gRPC. This package
-// intentionally exposes interfaces and data types only, so a generated gRPC
-// client can be added behind them without changing collector, syncer or cmd.
+// P0 reads StatsService over loopback gRPC through StatsClient. HandlerService
+// (user add/remove) belongs to P1 and is exposed as an interface only. Message
+// encoding is hand written in proto.go, so the agent does not vendor xray-core
+// or depend on protoc.
 package xray
 
 import (
@@ -66,9 +67,9 @@ type UserManager interface {
 	RemoveUser(ctx context.Context, email string) error
 }
 
-// Unimplemented fails every capability explicitly. It keeps assembly honest while
-// the loopback gRPC client is absent: callers see ErrNotImplemented instead of
-// zero counters that would look like idle traffic.
+// Unimplemented fails every capability explicitly. Tests and future call sites use
+// it to get ErrNotImplemented instead of zero counters that would look like idle
+// traffic.
 type Unimplemented struct{}
 
 func (Unimplemented) UserTraffic(context.Context) ([]UserCounters, error) {

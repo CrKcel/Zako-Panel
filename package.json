@@ -1,16 +1,35 @@
 {
-  "name": "my-worker",
-  "version": "0.0.0",
-  "private": true,
-  "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "start": "wrangler dev",
-    "cf-typegen": "wrangler types"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.6",
-    "typescript": "^5.5.2",
-    "wrangler": "^4.160.0"
-  }
+	"name": "zako-panel",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Lightweight proxy node management panel",
+	"engines": {
+		"node": ">=22"
+	},
+	"workspaces": [
+		"apps/worker",
+		"apps/web",
+		"packages/contracts"
+	],
+	"scripts": {
+		"dev": "wrangler dev",
+		"dev:web": "npm run dev -w @zako/web",
+		"build": "npm run build -w @zako/web",
+		"build:worker": "wrangler deploy --dry-run",
+		"typecheck": "npm run typecheck --workspaces --if-present",
+		"test": "npm run test --workspaces --if-present",
+		"test:agent": "cd apps/agent && go test ./...",
+		"test:all": "npm test && npm run test:agent",
+		"contracts:generate": "npm run generate -w @zako/contracts",
+		"db:migrate:local": "wrangler d1 migrations apply zako-panel --local",
+		"db:migrate:remote": "wrangler d1 migrations apply zako-panel --remote",
+		"deploy": "npm run build && wrangler deploy",
+		"format": "prettier --write .",
+		"format:check": "prettier --check ."
+	},
+	"devDependencies": {
+		"prettier": "^3.10.1",
+		"typescript": "^5.9.3",
+		"wrangler": "^4.160.1"
+	}
 }

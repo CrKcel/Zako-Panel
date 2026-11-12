@@ -1,0 +1,32 @@
+{
+	"sent_at": 1780000000,
+	"agent_version": "0.1.0",
+	"xray_version": "25.10.1",
+	"xray_healthy": true,
+	"stats_healthy": true,
+	"applied_config_version": 3,
+	"users_ver": 12,
+	"sys": {
+		"cpu": 0.12,
+		"mem": 0.41,
+		"load": 0.3,
+		"uptime": 86400
+	},
+	"traffic": {
+		"report_id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
+		"period_start": 1780000000,
+		"period_end": 1780000900,
+		"has_counter_gap": false,
+		"node": {
+			"uplink_bytes": 10240,
+			"downlink_bytes": 204800
+		},
+		"users": [
+			{
+				"xray_email": "u_01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
+				"uplink_bytes": 10240,
+				"downlink_bytes": 204800
+			}
+		]
+	}
+}

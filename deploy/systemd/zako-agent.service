@@ -1,0 +1,41 @@
+[Unit]
+Description=Zako Panel node agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=zako-agent
+Group=zako-agent
+ExecStart=/usr/local/bin/zako-agent -config /etc/zako-agent/config.yaml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+
+# The agent needs no privileges: it only opens outbound HTTPS, loopback gRPC and
+# files below the two writable paths. /etc/xray may be absent until Xray is
+# installed, so that entry is optional for startup.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ReadWritePaths=/var/lib/zako-agent -/etc/xray
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

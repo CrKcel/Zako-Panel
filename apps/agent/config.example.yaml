@@ -1,0 +1,12 @@
+control_plane_url: https://panel.example.com
+node_id: 01J2Z6Q8Y3V9M4K7T1B5C0D2E6
+agent_token_file: /etc/zako-agent/token
+state_path: /var/lib/zako-agent/state.db
+users_path: /var/lib/zako-agent/users.json
+xray_config_path: /etc/xray/config.json
+xray_binary_path: /usr/local/bin/xray
+reality_private_key_path: /etc/xray/reality.key
+heartbeat_interval: 5m
+collector:
+  sample_interval: 30s
+  report_interval: 15m

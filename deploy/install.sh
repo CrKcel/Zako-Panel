@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+#
+# zako-agent installer for Debian 12/13.
+#
+# Installs a prebuilt static binary, creates the service account and state
+# directories, installs the systemd unit and enables it. The service is not
+# started: a node token and validated config must be in place first.
+#
+# Usage: install.sh [path-to-zako-agent-binary]
+#        ZAKO_AGENT_BINARY=/path/to/binary install.sh
+set -euo pipefail
+export LC_ALL=C
+
+readonly SERVICE_USER="zako-agent"
+readonly SERVICE_GROUP="zako-agent"
+readonly BIN_PATH="/usr/local/bin/zako-agent"
+readonly CONFIG_DIR="/etc/zako-agent"
+readonly STATE_DIR="/var/lib/zako-agent"
+readonly UNIT_PATH="/etc/systemd/system/zako-agent.service"
+readonly TOKEN_PATH="${CONFIG_DIR}/token"
+readonly CONFIG_PATH="${CONFIG_DIR}/config.yaml"
+readonly REALITY_KEY="/etc/xray/reality.key"
+readonly XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+log() {
+	printf '[zako-agent] %s\n' "$*"
+}
+
+warn() {
+	printf '[zako-agent] warning: %s\n' "$*" >&2
+}
+
+die() {
+	printf '[zako-agent] error: %s\n' "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<'EOF'
+Usage: install.sh [path-to-zako-agent-binary]
+
+Installs and enables zako-agent on Debian 12/13. The binary may be passed as the
+first argument or via ZAKO_AGENT_BINARY. If omitted, the installer looks for
+apps/agent/bin/zako-agent-linux-<arch> in this repository.
+
+The service is enabled but not started. Write the node token issued by the panel
+to /etc/zako-agent/token and review /etc/zako-agent/config.yaml first.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+	usage
+	exit 0
+fi
+
+if [[ "${EUID}" -ne 0 ]]; then
+	die "must be run as root"
+fi
+umask 077
+
+if [[ ! -r /etc/os-release ]]; then
+	die "cannot read /etc/os-release; Debian 12/13 is required"
+fi
+# shellcheck disable=SC1091
+. /etc/os-release
+if [[ "${ID:-}" != "debian" ]]; then
+	die "unsupported distribution ${ID:-unknown}; Debian 12/13 is required"
+fi
+case "${VERSION_ID:-}" in
+	12 | 13) ;;
+	*) warn "Debian ${VERSION_ID:-unknown} is outside the tested 12/13 range" ;;
+esac
+
+case "$(uname -m)" in
+	x86_64 | amd64) ARCH="amd64" ;;
+	aarch64 | arm64) ARCH="arm64" ;;
+	*) die "unsupported architecture $(uname -m); amd64 and arm64 are supported" ;;
+esac
+
+command -v systemctl >/dev/null 2>&1 || die "systemctl is required"
+
+BINARY_SRC="${ZAKO_AGENT_BINARY:-${1:-}}"
+if [[ -z "${BINARY_SRC}" ]]; then
+	BINARY_SRC="${REPO_ROOT}/apps/agent/bin/zako-agent-linux-${ARCH}"
+fi
+if [[ ! -f "${BINARY_SRC}" ]]; then
+	die "agent binary not found at ${BINARY_SRC}; build it with: cd apps/agent && CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -trimpath -o bin/zako-agent-linux-${ARCH} ./cmd/zako-agent"
+fi
+install -m 0755 -o root -g root "${BINARY_SRC}" "${BIN_PATH}"
+log "installed ${BIN_PATH} from ${BINARY_SRC} (${ARCH})"
+
+if ! getent group "${SERVICE_GROUP}" >/dev/null 2>&1; then
+	groupadd --system "${SERVICE_GROUP}"
+fi
+if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+	useradd --system \
+		--gid "${SERVICE_GROUP}" \
+		--home-dir "${STATE_DIR}" \
+		--no-create-home \
+		--shell /usr/sbin/nologin \
+		"${SERVICE_USER}"
+fi
+
+install -d -m 0700 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${CONFIG_DIR}" "${STATE_DIR}"
+
+if [[ -e "${CONFIG_PATH}" ]]; then
+	log "preserving existing ${CONFIG_PATH}"
+else
+	config_example=""
+	for candidate in \
+		"${SCRIPT_DIR}/zako-agent.example.yaml" \
+		"${SCRIPT_DIR}/config.example.yaml" \
+		"${REPO_ROOT}/apps/agent/config.example.yaml"; do
+		if [[ -f "${candidate}" ]]; then
+			config_example="${candidate}"
+			break
+		fi
+	done
+	if [[ -n "${config_example}" ]]; then
+		install -m 0640 -o root -g "${SERVICE_GROUP}" "${config_example}" "${CONFIG_PATH}"
+		log "installed config example ${config_example} to ${CONFIG_PATH}"
+	else
+		warn "no config example found; create ${CONFIG_PATH} before starting the service"
+	fi
+fi
+
+if [[ ! -e "${TOKEN_PATH}" ]]; then
+	install -m 0600 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /dev/null "${TOKEN_PATH}"
+fi
+if [[ ! -s "${TOKEN_PATH}" ]]; then
+	warn "no agent token in ${TOKEN_PATH}; write the token issued by the panel before starting"
+fi
+
+if [[ ! -f "${SCRIPT_DIR}/systemd/zako-agent.service" ]]; then
+	die "systemd unit not found at ${SCRIPT_DIR}/systemd/zako-agent.service"
+fi
+install -m 0644 -o root -g root "${SCRIPT_DIR}/systemd/zako-agent.service" "${UNIT_PATH}"
+systemctl daemon-reload
+systemctl enable zako-agent.service
+log "installed and enabled zako-agent.service (not started)"
+
+if [[ -x "${XRAY_BIN}" ]]; then
+	install -d -m 0755 /etc/xray
+	if [[ -e "${REALITY_KEY}" ]]; then
+		log "preserving existing ${REALITY_KEY}"
+	else
+		if ! keypair="$("${XRAY_BIN}" x25519)"; then
+			die "xray x25519 failed; REALITY key was not generated"
+		fi
+		private_key="$(printf '%s\n' "${keypair}" | sed -nE 's/^Private[[:space:]]*[Kk]ey[[:space:]]*:[[:space:]]*//p' | head -n 1)"
+		public_key="$(printf '%s\n' "${keypair}" | sed -nE 's/^(Public[[:space:]]*[Kk]ey|Password)[[:space:]]*:[[:space:]]*//p' | head -n 1)"
+		if [[ -z "${private_key}" || -z "${public_key}" ]]; then
+			die "could not parse xray x25519 output; REALITY key was not written"
+		fi
+		(umask 077; printf '%s\n' "${private_key}" >"${REALITY_KEY}")
+		chown "${SERVICE_USER}:${SERVICE_GROUP}" "${REALITY_KEY}"
+		chmod 0600 "${REALITY_KEY}"
+		log "wrote REALITY private key to ${REALITY_KEY} (0600, ${SERVICE_USER})"
+		printf 'REALITY public key: %s\n' "${public_key}"
+	fi
+else
+	warn "xray not found at ${XRAY_BIN}; skipped REALITY key generation"
+fi
+
+cat <<EOF
+
+zako-agent is installed and enabled, not started.
+Next steps:
+  1. Write the node token issued by the panel to ${TOKEN_PATH}.
+     Keep the file owned by ${SERVICE_USER} and mode 0600.
+  2. Review ${CONFIG_PATH}; control_plane_url, node_id and Xray paths are required.
+  3. Start with: systemctl start zako-agent
+  4. Follow logs with: journalctl -u zako-agent -f
+EOF

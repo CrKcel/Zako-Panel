@@ -1,0 +1,18 @@
+{
+	"name": "@zako/contracts",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./fixtures/*": "./fixtures/*"
+	},
+	"scripts": {
+		"generate": "openapi-typescript openapi.yaml -o src/schema.d.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"devDependencies": {
+		"openapi-typescript": "^7.13.0",
+		"typescript": "^5.9.3"
+	}
+}

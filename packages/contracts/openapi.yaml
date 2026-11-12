@@ -1,0 +1,2146 @@
+openapi: 3.1.0
+info:
+  title: Zako Panel API
+  version: 0.1.0
+  description: Control-plane API for the Zako Panel worker.
+servers:
+  - url: https://panel.example.com
+tags:
+  - name: admin
+    description: Cloudflare Access protected management API.
+  - name: agent
+    description: Node agent API authenticated with a per-node bearer token.
+  - name: subscription
+    description: Public subscription endpoints authenticated by URL token.
+paths:
+  /api/v1/admin/nodes:
+    get:
+      operationId: listNodes
+      tags: [admin]
+      summary: List nodes
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Node page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createNode
+      tags: [admin]
+      summary: Create a node with its first endpoint and agent token
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeRequest'
+      responses:
+        '201':
+          description: Node created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [node, endpoint, agent_token]
+                    properties:
+                      node:
+                        $ref: '#/components/schemas/Node'
+                      endpoint:
+                        $ref: '#/components/schemas/Endpoint'
+                      agent_token:
+                        type: string
+                        description: Plaintext token returned once.
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/nodes/{nodeId}:
+    get:
+      operationId: getNode
+      tags: [admin]
+      summary: Get node with endpoints
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Node detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [node, endpoints]
+                    properties:
+                      node:
+                        $ref: '#/components/schemas/Node'
+                      endpoints:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Endpoint'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateNode
+      tags: [admin]
+      summary: Update node settings
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNodeRequest'
+      responses:
+        '200':
+          description: Updated node
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/agent-token/rotate:
+    post:
+      operationId: rotateAgentToken
+      tags: [admin]
+      summary: Rotate the agent token and return the plaintext once
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Rotated token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [agent_token]
+                    properties:
+                      agent_token:
+                        type: string
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/status:
+    get:
+      operationId: getNodeStatus
+      tags: [admin]
+      summary: Get derived heartbeat and health status
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Node status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/NodeStatusDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/endpoints:
+    get:
+      operationId: listEndpoints
+      tags: [admin]
+      summary: List endpoints of a node
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Endpoint list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Endpoint'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createEndpoint
+      tags: [admin]
+      summary: Create an endpoint
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEndpointRequest'
+      responses:
+        '201':
+          description: Endpoint created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Endpoint'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}:
+    patch:
+      operationId: updateEndpoint
+      tags: [admin]
+      summary: Update or enable an endpoint
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/EndpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEndpointRequest'
+      responses:
+        '200':
+          description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Endpoint'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: disableEndpoint
+      tags: [admin]
+      summary: Disable an endpoint
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/EndpointId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/profiles:
+    get:
+      operationId: listProfiles
+      tags: [admin]
+      summary: List subscription profiles
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Profile page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Profile'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createProfile
+      tags: [admin]
+      summary: Create a subscription profile
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProfileRequest'
+      responses:
+        '201':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProfileDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/profiles/{profileId}:
+    get:
+      operationId: getProfile
+      tags: [admin]
+      summary: Get a subscription profile
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+      responses:
+        '200':
+          description: Profile detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProfileDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateProfile
+      tags: [admin]
+      summary: Update a subscription profile
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProfileDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteProfile
+      tags: [admin]
+      summary: Delete a profile with no subscriptions
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/subscriptions:
+    get:
+      operationId: listSubscriptions
+      tags: [admin]
+      summary: List subscriptions
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Subscription page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Subscription'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createSubscription
+      tags: [admin]
+      summary: Create a subscription and return its plaintext token once
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [subscription, token]
+                    properties:
+                      subscription:
+                        $ref: '#/components/schemas/Subscription'
+                      token:
+                        type: string
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/subscriptions/{subscriptionId}/rotate:
+    post:
+      operationId: rotateSubscription
+      tags: [admin]
+      summary: Rotate a subscription token
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Rotated token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [token]
+                    properties:
+                      token:
+                        type: string
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/subscriptions/{subscriptionId}/revoke:
+    post:
+      operationId: revokeSubscription
+      tags: [admin]
+      summary: Revoke a subscription
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Revoked subscription
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Subscription'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/traffic/summary:
+    get:
+      operationId: getTrafficSummary
+      tags: [admin]
+      summary: Aggregate traffic by node, subscriber or site
+      security:
+        - AccessJwt: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Unix seconds, normalized to an hour boundary.
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: groupBy
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [node, subscriber, site]
+        - name: nodeId
+          in: query
+          schema:
+            type: string
+        - name: subscriberId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Traffic summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TrafficSummary'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/admin/subscribers:
+    get:
+      operationId: listSubscribers
+      tags: [admin]
+      summary: List subscribers
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Subscriber page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Subscriber'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createSubscriber
+      tags: [admin]
+      summary: Create a subscriber
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriberRequest'
+      responses:
+        '201':
+          description: Subscriber created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Subscriber'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/subscribers/{subscriberId}:
+    get:
+      operationId: getSubscriber
+      tags: [admin]
+      summary: Get a subscriber
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriberId'
+      responses:
+        '200':
+          description: Subscriber detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SubscriberDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSubscriber
+      tags: [admin]
+      summary: Update a subscriber
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriberRequest'
+      responses:
+        '200':
+          description: Updated subscriber
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Subscriber'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/subscribers/{subscriberId}/nodes:
+    put:
+      operationId: replaceSubscriberNodes
+      tags: [admin]
+      summary: Replace node grants and create or disable node clients
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/SubscriberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceSubscriberNodesRequest'
+      responses:
+        '200':
+          description: Updated subscriber detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SubscriberDetail'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/admins:
+    get:
+      operationId: listAdmins
+      tags: [admin]
+      summary: List administrators
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Administrator page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminUser'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createAdmin
+      tags: [admin]
+      summary: Add an administrator
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+      responses:
+        '201':
+          description: Administrator created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AdminUser'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/admins/{adminId}:
+    patch:
+      operationId: updateAdmin
+      tags: [admin]
+      summary: Update an administrator role or enabled state
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/AdminId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAdminRequest'
+      responses:
+        '200':
+          description: Updated administrator
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AdminUser'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/configs:
+    get:
+      operationId: listNodeConfigs
+      tags: [admin]
+      summary: List immutable configuration versions
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Configuration version page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ConfigVersion'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: publishNodeConfig
+      tags: [admin]
+      summary: Create and publish a configuration version
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishConfigRequest'
+      responses:
+        '201':
+          description: Published configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ConfigVersion'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/admin/nodes/{nodeId}/configs/{version}:
+    get:
+      operationId: getNodeConfig
+      tags: [admin]
+      summary: Get one configuration version
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/ConfigVersion'
+      responses:
+        '200':
+          description: Configuration version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ConfigVersion'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback:
+    post:
+      operationId: rollbackNodeConfig
+      tags: [admin]
+      summary: Create a new version from a historical definition
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/ConfigVersion'
+      responses:
+        '201':
+          description: New configuration version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ConfigVersion'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/agent/report:
+    post:
+      operationId: submitAgentReport
+      tags: [agent]
+      summary: Submit heartbeat and traffic in one request
+      security:
+        - AgentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentReport'
+      responses:
+        '200':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentReportResponse'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/agent/users:
+    get:
+      operationId: getAgentUsers
+      tags: [agent]
+      summary: Fetch the user set for this node
+      security:
+        - AgentToken: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Users version as an entity tag.
+      responses:
+        '200':
+          description: User set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentUsers'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '304':
+          description: Version unchanged
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/agent/config:
+    get:
+      operationId: getAgentConfig
+      tags: [agent]
+      summary: Fetch the desired static configuration definition
+      security:
+        - AgentToken: []
+      responses:
+        '200':
+          description: Desired configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentConfig'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '204':
+          description: Agent already runs the desired version
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/agent/config/result:
+    post:
+      operationId: reportAgentConfigResult
+      tags: [agent]
+      summary: Report the outcome of applying a configuration version
+      security:
+        - AgentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentConfigResult'
+      responses:
+        '200':
+          description: Result accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentConfigResult'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /sub/{token}/clash.yaml:
+    get:
+      operationId: getClashSubscription
+      tags: [subscription]
+      summary: Render a Clash.Meta subscription
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionToken'
+      responses:
+        '200':
+          description: Clash.Meta YAML
+          headers:
+            subscription-userinfo:
+              schema:
+                type: string
+            profile-update-interval:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /sub/{token}/uri:
+    get:
+      operationId: getUriSubscription
+      tags: [subscription]
+      summary: Render a universal URI subscription
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionToken'
+        - name: encoding
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [base64, plain]
+            default: base64
+      responses:
+        '200':
+          description: URI list
+          headers:
+            subscription-userinfo:
+              schema:
+                type: string
+            profile-update-interval:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    AccessJwt:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+    AgentToken:
+      type: http
+      scheme: bearer
+      description: '`<node_id>.<secret>`'
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+    EndpointId:
+      name: endpointId
+      in: path
+      required: true
+      schema:
+        type: string
+    ProfileId:
+      name: profileId
+      in: path
+      required: true
+      schema:
+        type: string
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema:
+        type: string
+    SubscriberId:
+      name: subscriberId
+      in: path
+      required: true
+      schema:
+        type: string
+    AdminId:
+      name: adminId
+      in: path
+      required: true
+      schema:
+        type: string
+    ConfigVersion:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    SubscriptionToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    NoContent:
+      description: No content
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated but not permitted
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflicting state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Payload exceeds the endpoint limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Semantically invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Rate limited
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: No distributable nodes
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Meta:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+    ListMeta:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+        next_cursor:
+          type: [string, 'null']
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
+    NodeStatus:
+      type: string
+      enum: [online, degraded, offline, disabled]
+    NodeStatusDetail:
+      type: object
+      required:
+        - node_id
+        - status
+        - heartbeat_interval_seconds
+      properties:
+        node_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+        heartbeat_interval_seconds:
+          type: integer
+        last_seen_at:
+          type: [integer, 'null']
+        xray_healthy:
+          type: [boolean, 'null']
+        stats_healthy:
+          type: [boolean, 'null']
+        agent_version:
+          type: [string, 'null']
+        xray_version:
+          type: [string, 'null']
+        last_config_error:
+          type: [string, 'null']
+    Node:
+      type: object
+      required:
+        - id
+        - name
+        - enabled
+        - status
+        - heartbeat_interval_seconds
+        - desired_config_version
+        - applied_config_version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        enabled:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+        heartbeat_interval_seconds:
+          type: integer
+        last_seen_at:
+          type: [integer, 'null']
+        xray_healthy:
+          type: [boolean, 'null']
+        stats_healthy:
+          type: [boolean, 'null']
+        agent_version:
+          type: [string, 'null']
+        xray_version:
+          type: [string, 'null']
+        sys:
+          oneOf:
+            - $ref: '#/components/schemas/SysStats'
+            - type: 'null'
+        desired_config_version:
+          type: integer
+        applied_config_version:
+          type: integer
+        last_config_error:
+          type: [string, 'null']
+        last_config_at:
+          type: [integer, 'null']
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    SysStats:
+      type: object
+      required: [cpu, mem, load, uptime]
+      properties:
+        cpu:
+          type: number
+        mem:
+          type: number
+        load:
+          type: number
+        uptime:
+          type: integer
+    Endpoint:
+      type: object
+      required: [id, node_id, name, protocol, host, port, params, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        name:
+          type: string
+        protocol:
+          type: string
+          enum: [vless-reality]
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        params:
+          $ref: '#/components/schemas/VlessRealityParams'
+        enabled:
+          type: boolean
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    VlessRealityParams:
+      type: object
+      required: [sni, public_key, short_id, fingerprint, flow, network]
+      properties:
+        sni:
+          type: string
+        public_key:
+          type: string
+        short_id:
+          type: string
+        fingerprint:
+          type: string
+        flow:
+          type: string
+          enum: [xtls-rprx-vision]
+        network:
+          type: string
+          enum: [tcp]
+    ProxyGroup:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [select, url-test, fallback, load-balance]
+        proxies:
+          type: array
+          items:
+            type: string
+        url:
+          type: string
+        interval:
+          type: integer
+    Profile:
+      type: object
+      required:
+        - id
+        - name
+        - node_selection
+        - online_only
+        - clash_base
+        - proxy_groups
+        - rules
+        - revision
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        node_selection:
+          type: string
+          enum: [all, selected]
+        online_only:
+          type: boolean
+        clash_base:
+          type: object
+          additionalProperties: true
+        proxy_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyGroup'
+        rules:
+          type: array
+          items:
+            type: string
+        revision:
+          type: integer
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    ProfileDetail:
+      allOf:
+        - $ref: '#/components/schemas/Profile'
+        - type: object
+          required: [node_ids]
+          properties:
+            node_ids:
+              type: array
+              items:
+                type: string
+    Subscription:
+      type: object
+      required: [id, subscriber_id, profile_id, name, revoked_at, expires_at, created_at]
+      properties:
+        id:
+          type: string
+        subscriber_id:
+          type: string
+        profile_id:
+          type: string
+        name:
+          type: string
+        revoked_at:
+          type: [integer, 'null']
+        expires_at:
+          type: [integer, 'null']
+        created_at:
+          type: integer
+    SubscriberStatus:
+      type: string
+      enum: [active, limited, expired, disabled]
+    SubscriberUsage:
+      type: object
+      required: [cycle_start, uplink_bytes, downlink_bytes]
+      properties:
+        cycle_start:
+          type: integer
+        uplink_bytes:
+          type: integer
+        downlink_bytes:
+          type: integer
+    Subscriber:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - usage_cycle_start
+        - usage_cycle_end
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/SubscriberStatus'
+        traffic_limit_bytes:
+          type: [integer, 'null']
+        expires_at:
+          type: [integer, 'null']
+        usage_cycle_start:
+          type: integer
+        usage_cycle_end:
+          type: integer
+        usage:
+          oneOf:
+            - $ref: '#/components/schemas/SubscriberUsage'
+            - type: 'null'
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    SubscriberDetail:
+      allOf:
+        - $ref: '#/components/schemas/Subscriber'
+        - type: object
+          required: [node_ids]
+          properties:
+            node_ids:
+              type: array
+              items:
+                type: string
+    AdminRole:
+      type: string
+      enum: [owner, admin, viewer]
+    AdminUser:
+      type: object
+      required: [id, email, role, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/AdminRole'
+        enabled:
+          type: boolean
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    TrafficGroupBy:
+      type: string
+      enum: [node, subscriber, site]
+    TrafficItem:
+      type: object
+      required: [key, uplink_bytes, downlink_bytes]
+      properties:
+        key:
+          type: string
+        label:
+          type: [string, 'null']
+        uplink_bytes:
+          type: integer
+        downlink_bytes:
+          type: integer
+    TrafficSummary:
+      type: object
+      required: [from, to, group_by, items]
+      properties:
+        from:
+          type: integer
+        to:
+          type: integer
+        group_by:
+          $ref: '#/components/schemas/TrafficGroupBy'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrafficItem'
+    ConfigVersion:
+      type: object
+      required: [node_id, version, definition, definition_sha256, created_at]
+      properties:
+        node_id:
+          type: string
+        version:
+          type: integer
+        definition:
+          type: object
+          additionalProperties: true
+        definition_sha256:
+          type: string
+        created_by:
+          type: [string, 'null']
+        created_at:
+          type: integer
+        applied_at:
+          type: [integer, 'null']
+        last_error:
+          type: [string, 'null']
+    AgentTrafficNode:
+      type: object
+      required: [uplink_bytes, downlink_bytes]
+      properties:
+        uplink_bytes:
+          type: integer
+          minimum: 0
+        downlink_bytes:
+          type: integer
+          minimum: 0
+    AgentTrafficUser:
+      type: object
+      required: [xray_email, uplink_bytes, downlink_bytes]
+      properties:
+        xray_email:
+          type: string
+        uplink_bytes:
+          type: integer
+          minimum: 0
+        downlink_bytes:
+          type: integer
+          minimum: 0
+    AgentTraffic:
+      type: object
+      required: [report_id, period_start, period_end, has_counter_gap, node, users]
+      properties:
+        report_id:
+          type: string
+        period_start:
+          type: integer
+        period_end:
+          type: integer
+        has_counter_gap:
+          type: boolean
+        node:
+          $ref: '#/components/schemas/AgentTrafficNode'
+        users:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/AgentTrafficUser'
+    AgentReport:
+      type: object
+      required:
+        - sent_at
+        - agent_version
+        - xray_version
+        - xray_healthy
+        - stats_healthy
+        - applied_config_version
+        - users_ver
+      properties:
+        sent_at:
+          type: integer
+        agent_version:
+          type: string
+        xray_version:
+          type: string
+        xray_healthy:
+          type: boolean
+        stats_healthy:
+          type: boolean
+        applied_config_version:
+          type: integer
+        users_ver:
+          type: integer
+        sys:
+          $ref: '#/components/schemas/SysStats'
+        traffic:
+          $ref: '#/components/schemas/AgentTraffic'
+    AgentDirective:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+    AgentReportResponse:
+      type: object
+      required:
+        - ack_report_id
+        - server_time
+        - heartbeat_interval_seconds
+        - traffic_interval_seconds
+        - users_ver
+        - desired_config_version
+        - unknown_users
+        - directives
+      properties:
+        ack_report_id:
+          type: [string, 'null']
+        server_time:
+          type: integer
+        heartbeat_interval_seconds:
+          type: integer
+        traffic_interval_seconds:
+          type: integer
+        users_ver:
+          type: integer
+        desired_config_version:
+          type: integer
+        unknown_users:
+          type: integer
+        directives:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentDirective'
+    AgentUser:
+      type: object
+      required: [xray_email, vless_uuid]
+      properties:
+        xray_email:
+          type: string
+        vless_uuid:
+          type: string
+    AgentUsers:
+      type: object
+      required: [version, users]
+      properties:
+        version:
+          type: integer
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentUser'
+    AgentConfig:
+      type: object
+      required: [version, definition_sha256, definition]
+      properties:
+        version:
+          type: integer
+        definition_sha256:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
+    AgentConfigResult:
+      type: object
+      required: [version, status, applied_at]
+      properties:
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [applied, failed]
+        applied_at:
+          type: integer
+        error:
+          oneOf:
+            - type: object
+              required: [code, message]
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+            - type: 'null'
+    CreateNodeRequest:
+      type: object
+      required: [name, endpoint]
+      properties:
+        name:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 900
+        endpoint:
+          $ref: '#/components/schemas/CreateEndpointRequest'
+    UpdateNodeRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 900
+    CreateEndpointRequest:
+      type: object
+      required: [name, host, port, params]
+      properties:
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        params:
+          $ref: '#/components/schemas/VlessRealityParams'
+    UpdateEndpointRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        params:
+          $ref: '#/components/schemas/VlessRealityParams'
+        enabled:
+          type: boolean
+    CreateProfileRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        node_selection:
+          type: string
+          enum: [all, selected]
+          default: all
+        online_only:
+          type: boolean
+          default: true
+        clash_base:
+          type: object
+          additionalProperties: true
+        proxy_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyGroup'
+        rules:
+          type: array
+          items:
+            type: string
+        node_ids:
+          type: array
+          items:
+            type: string
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        node_selection:
+          type: string
+          enum: [all, selected]
+        online_only:
+          type: boolean
+        clash_base:
+          type: object
+          additionalProperties: true
+        proxy_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyGroup'
+        rules:
+          type: array
+          items:
+            type: string
+        node_ids:
+          type: array
+          items:
+            type: string
+    CreateSubscriptionRequest:
+      type: object
+      required: [subscriber_id, profile_id, name]
+      properties:
+        subscriber_id:
+          type: string
+        profile_id:
+          type: string
+        name:
+          type: string
+        expires_at:
+          type: [integer, 'null']
+    CreateSubscriberRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        traffic_limit_bytes:
+          type: [integer, 'null']
+          minimum: 0
+        expires_at:
+          type: [integer, 'null']
+    UpdateSubscriberRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/SubscriberStatus'
+        traffic_limit_bytes:
+          type: [integer, 'null']
+          minimum: 0
+        expires_at:
+          type: [integer, 'null']
+    ReplaceSubscriberNodesRequest:
+      type: object
+      required: [node_ids]
+      properties:
+        node_ids:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    CreateAdminRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/AdminRole'
+    UpdateAdminRequest:
+      type: object
+      minProperties: 1
+      properties:
+        role:
+          $ref: '#/components/schemas/AdminRole'
+        enabled:
+          type: boolean
+    PublishConfigRequest:
+      type: object
+      required: [definition]
+      properties:
+        definition:
+          type: object
+          additionalProperties: true

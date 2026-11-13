@@ -3,6 +3,16 @@
 	"name": "zako-panel",
 	"main": "apps/worker/src/index.ts",
 	"compatibility_date": "2026-11-10",
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["MyDurableObject"],
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["MyDurableObject"],
+		},
+	],
 	"assets": {
 		"directory": "apps/web/dist",
 		"not_found_handling": "single-page-application",
@@ -17,8 +27,8 @@
 	],
 	"vars": {
 		"ENVIRONMENT": "production",
-      	"ACCESS_AUD": "200b776f3343eef910e4ed075d5f23286850f29a2c454f6cd5d0b79673b43c68",
-      	"ACCESS_TEAM_DOMAIN": "icy-voice-152b.cloudflareaccess.com"
+		"ACCESS_AUD": "200b776f3343eef910e4ed075d5f23286850f29a2c454f6cd5d0b79673b43c68",
+		"ACCESS_TEAM_DOMAIN": "icy-voice-152b.cloudflareaccess.com",
 	},
 	"triggers": {
 		"crons": ["*/15 * * * *", "17 3 * * *"],

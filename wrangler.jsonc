@@ -12,11 +12,13 @@
 		{
 			"binding": "DB",
 			"database_name": "zako-panel",
-			"database_id": "00000000-0000-0000-0000-000000000000",
+			"database_id": "ebe284ec-1bde-47f7-8a69-782c311f7d32",
 		},
 	],
 	"vars": {
-		"ENVIRONMENT": "development",
+		"ENVIRONMENT": "production",
+      	"ACCESS_AUD": "200b776f3343eef910e4ed075d5f23286850f29a2c454f6cd5d0b79673b43c68",
+      	"ACCESS_TEAM_DOMAIN": "icy-voice-152b.cloudflareaccess.com"
 	},
 	"triggers": {
 		"crons": ["*/15 * * * *", "17 3 * * *"],

@@ -1,2 +1,5 @@
 ACCESS_TEAM_DOMAIN=
 ACCESS_AUD=
+# 本地开发：同时设置 ENVIRONMENT=development 与 DEV_ADMIN_EMAIL 才会启用免 Access 登录。
+ENVIRONMENT=development
+DEV_ADMIN_EMAIL=

@@ -9,6 +9,7 @@
 - `admin_users` 决定角色与启用状态；禁用后即使 Access 身份有效也不能调用管理 API。
 - 角色：`owner` 管理管理员与全部资源，`admin` 管理节点、订阅与配置，`viewer` 只读。
 - Access 路径策略排除 `/sub/*` 与 `/api/v1/agent/*`。
+- 本地开发没有 Access 代理：仅当同时设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL` 时，未携带 Access JWT 的管理请求按该邮箱鉴权；携带 JWT 的请求仍走 JWKS 校验。部署变量不得包含这两项。
 
 ## 2. Token 与敏感信息
 

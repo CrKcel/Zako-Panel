@@ -8,6 +8,8 @@ export default defineConfig({
 			miniflare: {
 				bindings: {
 					TEST_MIGRATIONS: await readD1Migrations('../../migrations'),
+					// 测试不依赖本地 .dev.vars 的开发登录配置。
+					ENVIRONMENT: 'production',
 				},
 			},
 		})),

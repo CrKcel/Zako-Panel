@@ -18,6 +18,7 @@
 ### 1.2 环境变量与 Access
 
 - 变量：`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ENVIRONMENT`。
+- `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL` 只用于本地开发，不写入部署变量。
 - `/admin/*` 与 `/api/v1/admin/*` 必须经过 Cloudflare Access。
 - `/sub/*` 与 `/api/v1/agent/*` 必须排除在 Access 之外，由订阅 token 与 Agent token 各自鉴权。
 - Access 身份仍需在 `admin_users` 中存在且启用。

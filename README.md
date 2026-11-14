@@ -54,6 +54,14 @@ npm run dev:web                 # Vite，http://127.0.0.1:5173/admin/
 
 Vite 将 `/api` 与 `/sub` 代理到 Wrangler。本地 Access 配置写入 `.dev.vars`，参考 `.dev.vars.example`。
 
+本地没有 Access 代理，管理 API 默认返回 `401 Missing Access token`。复制 `.dev.vars.example` 为 `.dev.vars`，设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL=<admin_users 中的邮箱>` 后，Worker 在缺少 Access JWT 时按该邮箱鉴权。该邮箱需已存在且启用，可在本地 D1 导入 `bootstrap` 生成的 SQL：
+
+```bash
+npx wrangler d1 execute zako-panel --local --file=bootstrap.sql
+```
+
+这两个变量只用于本地开发，部署配置保持 `ENVIRONMENT=production` 且不设置 `DEV_ADMIN_EMAIL`。
+
 ## 校验
 
 ```bash

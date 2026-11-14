@@ -1,8 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { MiddlewareHandler } from 'hono';
+import type { Env } from '../env';
 import { AppError } from '../lib/errors';
 import { findAdminByEmail } from '../repositories/admins';
-import type { AppEnv } from '../types';
+import type { AppContext, AppEnv } from '../types';
 
 const jwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -21,15 +22,41 @@ function jwksFor(issuer: string): ReturnType<typeof createRemoteJWKSet> {
 }
 
 /**
+ * Local development runs without an Access proxy, so no JWT reaches the
+ * Worker. Both bindings must be set explicitly; deployed environments keep
+ * ENVIRONMENT=production and therefore never take this path.
+ */
+function localAdminEmail(env: Env): string | null {
+	const email = env.DEV_ADMIN_EMAIL?.trim().toLowerCase();
+	if (env.ENVIRONMENT !== 'development' || !email) return null;
+	return email;
+}
+
+async function applyAdmin(c: AppContext, email: string): Promise<void> {
+	const admin = await findAdminByEmail(c.env.DB, email);
+	if (!admin || admin.enabled !== 1) {
+		throw new AppError('FORBIDDEN', 'Administrator is not enabled', 403);
+	}
+	c.set('admin', { id: admin.id, email: admin.email, role: admin.role });
+}
+
+/**
  * Verifies the Cloudflare Access JWT with the team JWKS and resolves the
  * administrator from D1. Access only gates the path; the D1 role and enabled
  * flag remain authoritative inside the worker.
  */
 export const accessAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	const token = c.req.header('Cf-Access-Jwt-Assertion');
-	if (!token) throw new AppError('UNAUTHORIZED', 'Missing Access token', 401);
 
-	const { ACCESS_TEAM_DOMAIN: teamDomain, ACCESS_AUD: audience, DB: db } = c.env;
+	if (!token) {
+		const email = localAdminEmail(c.env);
+		if (!email) throw new AppError('UNAUTHORIZED', 'Missing Access token', 401);
+		await applyAdmin(c, email);
+		await next();
+		return;
+	}
+
+	const { ACCESS_TEAM_DOMAIN: teamDomain, ACCESS_AUD: audience } = c.env;
 	if (!teamDomain || !audience) {
 		throw new AppError('INTERNAL_ERROR', 'Access is not configured', 500);
 	}
@@ -44,11 +71,6 @@ export const accessAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	}
 	if (!email) throw new AppError('UNAUTHORIZED', 'Access token has no email claim', 401);
 
-	const admin = await findAdminByEmail(db, email);
-	if (!admin || admin.enabled !== 1) {
-		throw new AppError('FORBIDDEN', 'Administrator is not enabled', 403);
-	}
-
-	c.set('admin', { id: admin.id, email: admin.email, role: admin.role });
+	await applyAdmin(c, email);
 	await next();
 };

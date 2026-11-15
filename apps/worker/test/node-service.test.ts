@@ -1,10 +1,30 @@
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../src/lib/errors';
 import { sha256Hex } from '../src/lib/hash';
 import { parseAgentToken } from '../src/lib/token';
-import { createNode, disableEndpoint, getNodeStatus, listEndpoints, listNodes, rotateAgentToken } from '../src/services/node-service';
-import { DEFAULT_PARAMS, nowSeconds, readMeta, seedEndpoint, seedMeta, seedNode, seedSubscriber } from './helpers';
+import {
+	createNode,
+	disableEndpoint,
+	getNodeStatus,
+	listEndpoints,
+	listNodeClients,
+	listNodes,
+	rotateAgentToken,
+} from '../src/services/node-service';
+import { getClashSubscription } from '../src/services/subscription-service';
+import {
+	DEFAULT_PARAMS,
+	nowSeconds,
+	readMeta,
+	seedEndpoint,
+	seedMeta,
+	seedNode,
+	seedProfile,
+	seedSubscriber,
+	seedSubscription,
+	testToken,
+} from './helpers';
 
 const createInput = {
 	name: 'Tokyo-01',
@@ -39,6 +59,62 @@ describe('node creation', () => {
 		expect(client?.vless_uuid).toMatch(/^[0-9a-f-]{36}$/);
 
 		expect(await readMeta('users_ver')).toBe('1');
+	});
+
+	it('distributes a new node to the default subscription after its first heartbeat', async () => {
+		const subscriberId = await seedSubscriber({ name: 'default' });
+		await seedMeta('default_subscriber_id', subscriberId);
+		const profileId = await seedProfile();
+		const token = testToken('bootstrap');
+		await seedSubscription({ token, subscriberId, profileId });
+
+		const created = await createNode(env.DB, createInput);
+		// A node with no heartbeat yet is offline and not distributable.
+		await expect(getClashSubscription(env.DB, token)).rejects.toMatchObject({ status: 503 });
+
+		const now = nowSeconds();
+		const response = await SELF.fetch('https://panel.test/api/v1/agent/report', {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${created.agent_token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				sent_at: now,
+				agent_version: '0.1.0',
+				xray_version: '25.10.1',
+				xray_healthy: true,
+				stats_healthy: true,
+				applied_config_version: 0,
+				users_ver: 0,
+			}),
+		});
+		expect(response.status).toBe(200);
+
+		const rendered = await getClashSubscription(env.DB, token);
+		expect(rendered.body).toContain('name: Tokyo-01');
+		expect(rendered.body).toContain('type: vless');
+
+		const client = await env.DB.prepare('SELECT vless_uuid FROM node_clients WHERE node_id = ?')
+			.bind(created.node.id)
+			.first<{ vless_uuid: string }>();
+		expect(rendered.body).toContain(`uuid: ${client?.vless_uuid}`);
+	});
+
+	it('exposes the credentials a node-local inbound must contain', async () => {
+		const subscriberId = await seedSubscriber({ name: 'default' });
+		await seedMeta('default_subscriber_id', subscriberId);
+		const created = await createNode(env.DB, createInput);
+
+		const clients = await listNodeClients(env.DB, created.node.id);
+		expect(clients).toHaveLength(1);
+		expect(clients[0]).toMatchObject({
+			node_id: created.node.id,
+			subscriber_id: subscriberId,
+			subscriber_name: 'default',
+			enabled: true,
+		});
+		expect(clients[0]?.xray_email).toMatch(/^u_[0-9A-HJKMNP-TV-Z]{26}$/);
+		expect(clients[0]?.vless_uuid).toMatch(/^[0-9a-f-]{36}$/);
+
+		await expect(listNodeClients(env.DB, '01J2Z6Q8Y3V9M4K7T1B5C0D2E9')).rejects.toMatchObject({ status: 404 });
 	});
 
 	it('skips the default client when no default subscriber exists', async () => {

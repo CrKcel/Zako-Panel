@@ -41,10 +41,12 @@
 | `GET/PATCH /api/v1/admin/nodes/{nodeId}` | P0 | 节点详情、心跳间隔与启用状态 |
 | `POST /api/v1/admin/nodes/{nodeId}/agent-token/rotate` | P0 | 轮换 Agent token，返回一次性明文 |
 | `GET /api/v1/admin/nodes/{nodeId}/status` | P0 | 心跳、健康、版本与最近配置错误 |
+| `GET /api/v1/admin/nodes/{nodeId}/clients` | P0 | 节点本地入站需要的 `xray_email` 与 UUID |
 | `GET/POST /api/v1/admin/nodes/{nodeId}/endpoints` | P0/P2 | endpoint 列表与新增；P0 只有一个 |
 | `PATCH/DELETE /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}` | P0/P2 | 修改或停用 endpoint |
 | `GET/POST /api/v1/admin/profiles` | P0 | 订阅档案列表与创建 |
 | `GET/PATCH/DELETE /api/v1/admin/profiles/{profileId}` | P0 | 节点选择、Clash 基础字段、代理组与规则 |
+| `GET /api/v1/admin/profiles/{profileId}/preview` | P0 | 渲染该档案当前会下发的 Clash 文档 |
 | `GET/POST /api/v1/admin/subscriptions` | P0 | 订阅列表与创建，创建时返回一次性 token |
 | `POST /api/v1/admin/subscriptions/{subscriptionId}/rotate` | P0 | 生成新 token 并撤销旧 token |
 | `POST /api/v1/admin/subscriptions/{subscriptionId}/revoke` | P0 | 撤销订阅 |
@@ -58,9 +60,33 @@
 | `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | P2 | 配置详情与 diff 数据 |
 | `POST /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback` | P2 | 从历史定义创建新版本 |
 
+标为 P1 与 P2 的管理接口已注册路由并通过入参校验，但服务层尚未实现，返回 `501 NOT_IMPLEMENTED`。P0 验收不依赖这些接口。
+
 流量汇总支持 `from`、`to`、`groupBy=node|subscriber|site`、`nodeId`、`subscriberId`；最大时间范围 31 天。`from`、`to` 为 Unix 秒，归一到小时边界。
 
 创建节点时，节点与首个 endpoint 在同一 D1 batch 写入，并为当前默认订阅用户创建 `node_clients`。P1 的 `PUT /subscribers/{subscriberId}/nodes` 为新增授权补齐凭据。
+
+`GET /api/v1/admin/nodes/{nodeId}/clients` 返回该节点的 `node_clients` 记录，用于在 P0 手工配置节点本地入站。`xray_email` 必须与该入站 client 的 `email` 一致，否则统计无法归属到订阅用户。
+
+### 2.1 档案预览
+
+`GET /api/v1/admin/profiles/{profileId}/preview` 返回该档案针对某个订阅用户会渲染出的 Clash 文档，用于在创建订阅前确认节点选择、代理组与规则。查询参数 `subscriberId` 省略时使用 `meta.default_subscriber_id`。
+
+```json
+{
+  "data": {
+    "document": "mixed-port: 7890\nproxies:\n  - name: Tokyo-01\n...",
+    "proxies": [{ "name": "Tokyo-01", "node_id": "01J..." }],
+    "skipped": [{ "node_id": "01J...", "node_name": "Osaka-01", "reason": "offline" }],
+    "subscriber": { "id": "01J...", "name": "默认用户", "blocked_reason": null }
+  }
+}
+```
+
+- `document` 与订阅响应走同一套渲染与筛选逻辑，代理 UUID 替换为占位值；预览不暴露凭据。
+- `skipped` 说明节点被排除的原因，取 `disabled`、`offline`、`unhealthy`、`not_selected`、`no_endpoint`。
+- `subscriber.blocked_reason` 取 `inactive`、`expired`、`over_quota` 或 `null`，与订阅接口返回 `403` 的条件一致。
+- 没有可分发节点时返回空 `proxies`，不返回 `503`；`503` 只属于真正下发订阅的路径。
 
 ## 3. Agent API
 

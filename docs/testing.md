@@ -13,6 +13,9 @@
 - 重复 `report_id`、同 ID 不同 payload、心跳先提交、跨小时拒绝、未知邮箱、版本钳制。
 - 流量汇总的时间归一、最大范围、node/subscriber/site 聚合。
 - 节点创建与默认订阅用户凭据、分页、名称冲突、档案校验、Cron 清理批次。
+- 档案预览与真实下发的结构一致性、跳过原因、用户阻断原因、空节点预览不为 `503`。
+- 新节点在首次心跳上报后即可进入默认订阅。
+- 节点凭据列表返回 P0 手工配置所需的 `xray_email` 与 UUID。
 
 ## 2. Go Agent
 
@@ -27,6 +30,7 @@
 ## 3. Web 与联调
 
 - `vue-tsc` 与 `vite build` 校验类型与页面构建。
+- CI 串行执行 `contracts:generate` 漂移检查、`typecheck`、`test`、`test:agent`、`format:check`、`build` 与 Worker 打包。
 - 节点创建、一次性 token、订阅链接复制、档案编辑、流量展示需要浏览器联调。
 - Debian 12/13 安装测试，真实 Xray 进程联调，确认 StatsService/HandlerService 不监听公网。
 - 24 小时容量测试：合成 100 节点/100 用户-节点组合/50 用户流量，核对请求数、D1 读写与 CPU。

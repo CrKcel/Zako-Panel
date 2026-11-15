@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/agent/go.mod
+          cache-dependency-path: apps/agent/go.sum
+
+      - run: npm ci
+
+      - name: Contracts are generated from openapi.yaml
+        run: |
+          npm run contracts:generate
+          git diff --exit-code -- packages/contracts/src/schema.d.ts
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run test:agent
+
+      - run: npm run format:check
+
+      # The Worker bundle is what actually ships; typecheck alone does not prove
+      # the static assets and the Worker entry build together.
+      - run: npm run build
+
+      - run: npm run build:worker

@@ -13,12 +13,14 @@ app.onError(errorHandler);
 app.get('/', (c) => c.json({ email: c.get('admin')?.email }));
 
 function request(init: RequestInit | undefined, overrides: Partial<Env>): Promise<Response> {
-	return app.request('https://panel.test/', init, {
-		DB: env.DB,
-		ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
-		ACCESS_AUD: 'aud',
-		...overrides,
-	});
+	return Promise.resolve(
+		app.request('https://panel.test/', init, {
+			DB: env.DB,
+			ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
+			ACCESS_AUD: 'aud',
+			...overrides,
+		}),
+	);
 }
 
 describe('admin access', () => {

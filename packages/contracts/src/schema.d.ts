@@ -110,6 +110,28 @@ export interface paths {
         patch: operations["updateEndpoint"];
         trace?: never;
     };
+    "/api/v1/admin/nodes/{nodeId}/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credentials the node must configure locally
+         * @description P0 configures node-local users by hand, so an operator needs the
+         *     xray_email and UUID that the statistics keys and the inbound client
+         *     entry must share. P1 replaces this manual step with user sync.
+         */
+        get: operations["listNodeClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/profiles": {
         parameters: {
             query?: never;
@@ -145,6 +167,23 @@ export interface paths {
         head?: never;
         /** Update a subscription profile */
         patch: operations["updateProfile"];
+        trace?: never;
+    };
+    "/api/v1/admin/profiles/{profileId}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render the Clash document a profile would distribute */
+        get: operations["previewProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/admin/subscriptions": {
@@ -564,6 +603,42 @@ export interface components {
         ProfileDetail: components["schemas"]["Profile"] & {
             node_ids: string[];
         };
+        NodeClient: {
+            id: string;
+            node_id: string;
+            subscriber_id: string;
+            subscriber_name: string;
+            /** @description Must match the inbound client email so statistics attribute traffic. */
+            xray_email: string;
+            /** @description Client UUID for the node-local inbound entry. */
+            vless_uuid: string;
+            enabled: boolean;
+        };
+        ClashPreview: {
+            /** @description Clash.Meta YAML this profile renders for the subscriber, with proxy UUIDs replaced by a placeholder. */
+            document: string;
+            /** @description Rendered proxies in subscription order. */
+            proxies: {
+                name: string;
+                node_id: string;
+            }[];
+            /** @description Granted nodes excluded from the document, with the deciding rule. */
+            skipped: {
+                node_id: string;
+                node_name: string;
+                reason: components["schemas"]["DistributionSkipReason"];
+            }[];
+            subscriber: {
+                id: string;
+                name: string;
+                /** @description Why a served subscription would return 403; null when it would not. */
+                blocked_reason: components["schemas"]["SubscriberBlockReason"] | null;
+            };
+        };
+        /** @enum {string} */
+        DistributionSkipReason: "disabled" | "offline" | "unhealthy" | "not_selected" | "no_endpoint";
+        /** @enum {string} */
+        SubscriberBlockReason: "inactive" | "expired" | "over_quota";
         Subscription: {
             id: string;
             subscriber_id: string;
@@ -1204,6 +1279,36 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listNodeClients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["NodeClient"][];
+                        };
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listProfiles: {
         parameters: {
             query?: {
@@ -1334,6 +1439,38 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["ProfileDetail"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    previewProfile: {
+        parameters: {
+            query?: {
+                /** @description Subscriber whose credentials are rendered. Defaults to the default subscriber. */
+                subscriberId?: string;
+            };
+            header?: never;
+            path: {
+                profileId: components["parameters"]["ProfileId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rendered Clash document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ClashPreview"];
                         meta: components["schemas"]["Meta"];
                     };
                 };

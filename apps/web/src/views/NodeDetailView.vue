@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import type { CreateEndpointRequest, Endpoint, Node, NodeStatusDetail, TrafficSummary, UpdateEndpointRequest } from '@zako/contracts';
+import type {
+	CreateEndpointRequest,
+	Endpoint,
+	Node,
+	NodeClient,
+	NodeStatusDetail,
+	TrafficSummary,
+	UpdateEndpointRequest,
+} from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
+import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatBytes, formatDuration, formatPercent, formatTimestamp, NODE_STATUS_LABEL, NODE_STATUS_TAG } from '../utils/format';
 
@@ -27,6 +36,7 @@ const nodeId = computed(() => String(route.params.nodeId ?? ''));
 const node = ref<Node | null>(null);
 const status = ref<NodeStatusDetail | null>(null);
 const endpoints = ref<Endpoint[]>([]);
+const clients = ref<NodeClient[]>([]);
 const traffic = ref<TrafficSummary | null>(null);
 const loading = ref(true);
 const trafficLoading = ref(true);
@@ -71,10 +81,15 @@ const sys = computed(() => node.value?.sys ?? null);
 async function load(): Promise<void> {
 	loading.value = true;
 	try {
-		const [detail, nodeStatus] = await Promise.all([nodesApi.get(nodeId.value), nodesApi.status(nodeId.value)]);
+		const [detail, nodeStatus, nodeClients] = await Promise.all([
+			nodesApi.get(nodeId.value),
+			nodesApi.status(nodeId.value),
+			nodesApi.listClients(nodeId.value),
+		]);
 		node.value = detail.node;
 		endpoints.value = detail.endpoints;
 		status.value = nodeStatus;
+		clients.value = nodeClients;
 	} catch (error) {
 		showError(error, '节点加载失败');
 	} finally {
@@ -274,6 +289,34 @@ onMounted(async () => {
 
 		<el-card shadow="never" class="section">
 			<template #header>
+				<span class="card-title">用户凭据</span>
+			</template>
+			<el-table :data="clients" empty-text="暂无数据">
+				<el-table-column prop="subscriber_name" label="订阅用户" min-width="140" />
+				<el-table-column label="Email" min-width="220">
+					<template #default="{ row }">
+						<span class="credential">{{ row.xray_email }}</span>
+						<el-button link type="primary" @click="copyText(row.xray_email)">复制</el-button>
+					</template>
+				</el-table-column>
+				<el-table-column label="UUID" min-width="280">
+					<template #default="{ row }">
+						<span class="credential">{{ row.vless_uuid }}</span>
+						<el-button link type="primary" @click="copyText(row.vless_uuid)">复制</el-button>
+					</template>
+				</el-table-column>
+				<el-table-column label="状态" width="90">
+					<template #default="{ row }">
+						<el-tag :type="row.enabled ? 'success' : 'info'" disable-transitions>
+							{{ row.enabled ? '启用' : '停用' }}
+						</el-tag>
+					</template>
+				</el-table-column>
+			</el-table>
+		</el-card>
+
+		<el-card shadow="never" class="section">
+			<template #header>
 				<div class="card-header">
 					<span class="card-title">端点</span>
 					<el-button type="primary" @click="openCreateEndpoint">新增端点</el-button>
@@ -408,6 +451,12 @@ onMounted(async () => {
 .metric-label {
 	font-size: 13px;
 	color: #6b7280;
+}
+
+.credential {
+	margin-right: 8px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px;
 }
 
 .metric-value {

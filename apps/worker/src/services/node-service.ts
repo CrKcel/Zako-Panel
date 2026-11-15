@@ -3,6 +3,7 @@ import type {
 	CreateNodeRequest,
 	Endpoint,
 	Node,
+	NodeClient,
 	NodeStatusDetail,
 	SysStats,
 	UpdateEndpointRequest,
@@ -31,7 +32,7 @@ import {
 	updateNode as updateNodeRow,
 	type NodeRow,
 } from '../repositories/nodes';
-import { findSubscriberById, insertNodeClientStatement } from '../repositories/subscribers';
+import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode } from '../repositories/subscribers';
 import type { Paginated } from '../types';
 
 export interface ListQuery {
@@ -293,6 +294,26 @@ export async function listEndpoints(db: D1Database, nodeId: string): Promise<End
 	if (!node) throw nodeNotFound();
 	const rows = await listEndpointRowsByNode(db, nodeId);
 	return rows.map(toEndpoint);
+}
+
+/**
+ * Exposes the credentials a node-local inbound must contain. P0 has no user
+ * sync, so without this the operator cannot make statistics keys and inbound
+ * client emails agree and every user bucket is attributed as unknown.
+ */
+export async function listNodeClients(db: D1Database, nodeId: string): Promise<NodeClient[]> {
+	const node = await findNodeById(db, nodeId);
+	if (!node) throw nodeNotFound();
+	const rows = await listNodeClientRowsByNode(db, nodeId);
+	return rows.map((row) => ({
+		id: row.id,
+		node_id: row.node_id,
+		subscriber_id: row.subscriber_id,
+		subscriber_name: row.subscriber_name,
+		xray_email: row.xray_email,
+		vless_uuid: row.vless_uuid,
+		enabled: row.enabled === 1,
+	}));
 }
 
 export async function createEndpoint(db: D1Database, nodeId: string, input: CreateEndpointRequest): Promise<Endpoint> {

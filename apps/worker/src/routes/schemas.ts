@@ -93,6 +93,10 @@ export const updateProfileSchema = z
 	})
 	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
 
+export const previewProfileQuerySchema = z.object({
+	subscriberId: idSchema.optional(),
+});
+
 export const createSubscriptionSchema = z.object({
 	subscriber_id: idSchema,
 	profile_id: idSchema,

@@ -9,7 +9,7 @@
 1. 整理 Monorepo、Wrangler Assets 路由、Worker/Vue 构建。
 2. 建立 D1 migrations、Hono 模块、统一错误格式、请求 ID 与 OpenAPI。
 3. 接入 Cloudflare Access，完成 owner 引导、节点/endpoint、档案、订阅与默认用户。
-4. 实现 VLESS REALITY 数据模型、Clash.Meta/URI 生成与规则分发，token 全哈希。
+4. 实现 VLESS REALITY 数据模型、Clash.Meta/URI 生成与规则分发，token 全哈希，并提供档案预览与节点凭据读取入口。
 5. 实现 Agent 心跳、StatsService 采样、BoltDB outbox、单端点上报与流量幂等入账。
 6. 实现总览、节点、订阅档案、订阅与流量页面。
 7. 建立容量与安全检查：订阅 CPU、D1 读写、重复上报、空节点。

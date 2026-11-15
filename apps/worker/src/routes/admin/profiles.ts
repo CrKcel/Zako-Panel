@@ -3,8 +3,9 @@ import { noContent, ok, okPage } from '../../lib/response';
 import { readJson, readQuery } from '../../lib/validation';
 import { requireRole } from '../../middleware/roles';
 import { createProfile, deleteProfile, getProfile, listProfiles, updateProfile } from '../../services/profile-service';
+import { previewProfile } from '../../services/subscription-service';
 import type { AppEnv } from '../../types';
-import { createProfileSchema, listQuerySchema, pathId, updateProfileSchema } from '../schemas';
+import { createProfileSchema, listQuerySchema, pathId, previewProfileQuerySchema, updateProfileSchema } from '../schemas';
 
 export const profileRoutes = new Hono<AppEnv>();
 
@@ -21,6 +22,12 @@ profileRoutes.post('/', requireRole('admin'), async (c) => {
 profileRoutes.get('/:profileId', requireRole('viewer'), async (c) => {
 	const profileId = pathId(c, 'profileId');
 	return ok(c, await getProfile(c.env.DB, profileId));
+});
+
+profileRoutes.get('/:profileId/preview', requireRole('viewer'), async (c) => {
+	const profileId = pathId(c, 'profileId');
+	const query = readQuery(c, previewProfileQuerySchema);
+	return ok(c, await previewProfile(c.env.DB, profileId, query.subscriberId));
 });
 
 profileRoutes.patch('/:profileId', requireRole('admin'), async (c) => {

@@ -47,6 +47,7 @@ Agent 构建为 `CGO_ENABLED=0` 的 Linux amd64/arm64 静态二进制，由 syst
 
 - `meta.users_ver` 是全局用户集合版本；新增、停用、删除授权、状态变化、凭据启停都会递增。
 - 创建节点时在同一 batch 内为默认订阅用户创建 `node_clients`；P1 的授权接口为新增用户/节点补齐凭据。没有凭据的用户不会进入订阅。
+- P0 没有用户同步，节点本地入站的 client 由管理员按 `GET /api/v1/admin/nodes/{nodeId}/clients` 的 `xray_email` 与 UUID 手工填写，步骤见 [deployment.md](deployment.md#21-p0-节点侧-xray-配置)。
 - Agent 心跳/上报响应携带 `users_ver`；发现变化时调用 `GET /api/v1/agent/users`。
 - 用户列表只包含该节点上 `node_clients.enabled=1` 且订阅用户 `status=active` 的凭据。
 - Agent 使用 `If-None-Match` 避免重复传输；响应版本写入本地状态。

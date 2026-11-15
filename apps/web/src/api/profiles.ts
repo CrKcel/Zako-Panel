@@ -1,4 +1,4 @@
-import type { CreateProfileRequest, Profile, ProfileDetail, UpdateProfileRequest } from '@zako/contracts';
+import type { ClashPreview, CreateProfileRequest, Profile, ProfileDetail, UpdateProfileRequest } from '@zako/contracts';
 import { apiPage, apiRequest, type Page } from './client';
 
 export interface ProfileListParams {
@@ -20,6 +20,11 @@ export const profilesApi = {
 		return apiRequest<ProfileDetail>(`/api/v1/admin/profiles/${profileId}`, {
 			method: 'PATCH',
 			body: input,
+		});
+	},
+	preview(profileId: string, subscriberId?: string): Promise<ClashPreview> {
+		return apiRequest<ClashPreview>(`/api/v1/admin/profiles/${profileId}/preview`, {
+			query: { subscriberId },
 		});
 	},
 	remove(profileId: string): Promise<void> {

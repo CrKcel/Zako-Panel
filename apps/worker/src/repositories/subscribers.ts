@@ -119,6 +119,29 @@ export async function findEnabledNodeClientsBySubscriber(db: D1Database, subscri
 	return (await enabledNodeClientsStatement(db, subscriberId).all<NodeClientRow>()).results;
 }
 
+/**
+ * Credentials for one node, joined with the subscriber name so the node-side
+ * setup does not need a second request per client.
+ */
+export async function listNodeClientRowsByNode(db: D1Database, nodeId: string): Promise<NodeClientWithSubscriberRow[]> {
+	return (
+		await db
+			.prepare(
+				`SELECT nc.id, nc.node_id, nc.subscriber_id, s.name AS subscriber_name,
+				        nc.xray_email, nc.vless_uuid, nc.enabled, nc.created_at, nc.updated_at
+				 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
+				 WHERE nc.node_id = ?
+				 ORDER BY nc.created_at ASC, nc.id ASC`,
+			)
+			.bind(nodeId)
+			.all<NodeClientWithSubscriberRow>()
+	).results;
+}
+
+export interface NodeClientWithSubscriberRow extends NodeClientRow {
+	subscriber_name: string;
+}
+
 export function insertNodeClientStatement(db: D1Database, client: NewNodeClientRow): D1PreparedStatement {
 	return db
 		.prepare(

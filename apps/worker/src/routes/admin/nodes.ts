@@ -9,6 +9,7 @@ import {
 	getNode,
 	getNodeStatus,
 	listEndpoints,
+	listNodeClients,
 	listNodes,
 	rotateAgentToken,
 	updateEndpoint,
@@ -48,6 +49,12 @@ nodeRoutes.post('/:nodeId/agent-token/rotate', requireRole('admin'), async (c) =
 nodeRoutes.get('/:nodeId/status', requireRole('viewer'), async (c) => {
 	const nodeId = pathId(c, 'nodeId');
 	return ok(c, await getNodeStatus(c.env.DB, nodeId));
+});
+
+nodeRoutes.get('/:nodeId/clients', requireRole('viewer'), async (c) => {
+	const nodeId = pathId(c, 'nodeId');
+	const items = await listNodeClients(c.env.DB, nodeId);
+	return c.json({ data: { items }, meta: { request_id: c.get('requestId') } });
 });
 
 nodeRoutes.get('/:nodeId/endpoints', requireRole('viewer'), async (c) => {

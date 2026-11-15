@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import type { CreateProfileRequest, Node, Profile, ProxyGroup, UpdateProfileRequest } from '@zako/contracts';
+import type {
+	ClashPreview,
+	CreateProfileRequest,
+	DistributionSkipReason,
+	Node,
+	Profile,
+	ProxyGroup,
+	UpdateProfileRequest,
+} from '@zako/contracts';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { onMounted, ref } from 'vue';
 import { nodesApi } from '../api/nodes';
@@ -18,6 +26,20 @@ interface ProfileForm {
 	rules: string;
 }
 
+const SKIP_REASON_LABEL: Record<DistributionSkipReason, string> = {
+	disabled: '节点停用',
+	offline: '心跳过期',
+	unhealthy: 'Xray 不健康',
+	not_selected: '未在档案选择中',
+	no_endpoint: '无可用端点',
+};
+
+const BLOCK_REASON_LABEL: Record<NonNullable<ClashPreview['subscriber']['blocked_reason']>, string> = {
+	inactive: '用户未启用',
+	expired: '用户已到期',
+	over_quota: '流量已超额',
+};
+
 const profiles = ref<Profile[]>([]);
 const nodes = ref<Node[]>([]);
 const loading = ref(true);
@@ -25,6 +47,10 @@ const saving = ref(false);
 const dialogVisible = ref(false);
 const editingId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
+const previewVisible = ref(false);
+const previewLoading = ref(false);
+const preview = ref<ClashPreview | null>(null);
+const previewName = ref('');
 
 function emptyForm(): ProfileForm {
 	return {
@@ -159,6 +185,21 @@ async function submit(): Promise<void> {
 	}
 }
 
+async function openPreview(profile: Profile): Promise<void> {
+	previewName.value = profile.name;
+	preview.value = null;
+	previewVisible.value = true;
+	previewLoading.value = true;
+	try {
+		preview.value = await profilesApi.preview(profile.id);
+	} catch (error) {
+		previewVisible.value = false;
+		showError(error, '预览失败');
+	} finally {
+		previewLoading.value = false;
+	}
+}
+
 async function remove(profile: Profile): Promise<void> {
 	const confirmed = await confirmAction(`删除订阅档案「${profile.name}」？`);
 	if (!confirmed) return;
@@ -205,8 +246,9 @@ onMounted(async () => {
 			<el-table-column label="更新时间" width="180">
 				<template #default="{ row }">{{ formatTimestamp(row.updated_at) }}</template>
 			</el-table-column>
-			<el-table-column label="操作" width="130" fixed="right">
+			<el-table-column label="操作" width="190" fixed="right">
 				<template #default="{ row }">
+					<el-button link type="primary" @click="openPreview(row as Profile)">预览</el-button>
 					<el-button link type="primary" @click="openEdit(row as Profile)">编辑</el-button>
 					<el-button link type="danger" @click="remove(row as Profile)">删除</el-button>
 				</template>
@@ -257,9 +299,48 @@ onMounted(async () => {
 			<el-button type="primary" :loading="saving" @click="submit">保存</el-button>
 		</template>
 	</el-dialog>
+
+	<el-dialog v-model="previewVisible" :title="`Clash 预览 · ${previewName}`" width="820px" destroy-on-close>
+		<div v-loading="previewLoading">
+			<template v-if="preview">
+				<el-alert
+					v-if="preview.subscriber.blocked_reason !== null"
+					:title="`订阅用户当前不可用：${BLOCK_REASON_LABEL[preview.subscriber.blocked_reason]}`"
+					type="warning"
+					:closable="false"
+					show-icon
+					class="preview-alert"
+				/>
+				<el-descriptions :column="3" border size="small">
+					<el-descriptions-item label="订阅用户">{{ preview.subscriber.name }}</el-descriptions-item>
+					<el-descriptions-item label="节点数">{{ preview.proxies.length }}</el-descriptions-item>
+					<el-descriptions-item label="跳过节点">{{ preview.skipped.length }}</el-descriptions-item>
+				</el-descriptions>
+				<el-input class="preview-document" type="textarea" :model-value="preview.document" :rows="16" readonly />
+				<el-table v-if="preview.skipped.length > 0" :data="preview.skipped" size="small" class="preview-skipped">
+					<el-table-column prop="node_name" label="节点" min-width="160" />
+					<el-table-column label="原因" min-width="160">
+						<template #default="{ row }">{{ SKIP_REASON_LABEL[row.reason as DistributionSkipReason] }}</template>
+					</el-table-column>
+				</el-table>
+			</template>
+		</div>
+	</el-dialog>
 </template>
 
 <style scoped>
+.preview-alert {
+	margin-bottom: 12px;
+}
+
+.preview-document {
+	margin: 12px 0;
+}
+
+.preview-skipped {
+	margin-top: 4px;
+}
+
 .toolbar {
 	display: flex;
 	justify-content: flex-end;

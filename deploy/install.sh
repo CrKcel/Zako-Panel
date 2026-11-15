@@ -20,6 +20,7 @@ readonly UNIT_PATH="/etc/systemd/system/zako-agent.service"
 readonly TOKEN_PATH="${CONFIG_DIR}/token"
 readonly CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 readonly REALITY_KEY="/etc/xray/reality.key"
+readonly XRAY_CONFIG="/etc/xray/config.json"
 readonly XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,8 +162,32 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		log "wrote REALITY private key to ${REALITY_KEY} (0600, ${SERVICE_USER})"
 		printf 'REALITY public key: %s\n' "${public_key}"
 	fi
+
+	# P0 has no remote config delivery, so the static inbound is materialised from
+	# the shipped template. Client credentials stay placeholders: the operator
+	# copies them from the panel's node credential list.
+	xray_template="${SCRIPT_DIR}/xray/config.example.json"
+	xray_renderer="${SCRIPT_DIR}/xray/render-config.py"
+	if [[ ! -f "${xray_template}" ]]; then
+		warn "xray config template not found at ${xray_template}; create ${XRAY_CONFIG} manually"
+	elif [[ -e "${XRAY_CONFIG}" ]]; then
+		log "preserving existing ${XRAY_CONFIG}"
+	elif [[ ! -s "${REALITY_KEY}" ]]; then
+		warn "REALITY key is empty; ${XRAY_CONFIG} was not generated"
+	elif ! command -v python3 >/dev/null 2>&1; then
+		warn "python3 is required to render ${XRAY_CONFIG}; create it manually from ${xray_template}"
+	elif ! short_id="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"; then
+		die "could not generate a REALITY short id"
+	else
+		python3 "${xray_renderer}" "${xray_template}" "${XRAY_CONFIG}" "$(head -n 1 "${REALITY_KEY}")" "${short_id}"
+		chown root:"${SERVICE_GROUP}" "${XRAY_CONFIG}"
+		chmod 0640 "${XRAY_CONFIG}"
+		log "wrote ${XRAY_CONFIG} with the REALITY private key (0640)"
+		printf 'REALITY short id: %s\n' "${short_id}"
+		printf 'Copy xray_email and UUID from the node credential list into %s\n' "${XRAY_CONFIG}"
+	fi
 else
-	warn "xray not found at ${XRAY_BIN}; skipped REALITY key generation"
+	warn "xray not found at ${XRAY_BIN}; skipped REALITY key and Xray config generation"
 fi
 
 cat <<EOF

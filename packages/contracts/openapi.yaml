@@ -345,6 +345,44 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/clients:
+    get:
+      operationId: listNodeClients
+      tags: [admin]
+      summary: List credentials the node must configure locally
+      description: |
+        P0 configures node-local users by hand, so an operator needs the
+        xray_email and UUID that the statistics keys and the inbound client
+        entry must share. P1 replaces this manual step with user sync.
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Node credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/NodeClient'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/profiles:
     get:
       operationId: listProfiles
@@ -493,6 +531,42 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/admin/profiles/{profileId}/preview:
+    get:
+      operationId: previewProfile
+      tags: [admin]
+      summary: Render the Clash document a profile would distribute
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/ProfileId'
+        - name: subscriberId
+          in: query
+          required: false
+          description: Subscriber whose credentials are rendered. Defaults to the default subscriber.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rendered Clash document
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ClashPreview'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/subscriptions:
     get:
       operationId: listSubscriptions
@@ -1655,6 +1729,76 @@ components:
               type: array
               items:
                 type: string
+    NodeClient:
+      type: object
+      required: [id, node_id, subscriber_id, subscriber_name, xray_email, vless_uuid, enabled]
+      properties:
+        id:
+          type: string
+        node_id:
+          type: string
+        subscriber_id:
+          type: string
+        subscriber_name:
+          type: string
+        xray_email:
+          type: string
+          description: Must match the inbound client email so statistics attribute traffic.
+        vless_uuid:
+          type: string
+          description: Client UUID for the node-local inbound entry.
+        enabled:
+          type: boolean
+    ClashPreview:
+      type: object
+      required: [document, proxies, skipped, subscriber]
+      properties:
+        document:
+          type: string
+          description: Clash.Meta YAML this profile renders for the subscriber, with proxy UUIDs replaced by a placeholder.
+        proxies:
+          type: array
+          description: Rendered proxies in subscription order.
+          items:
+            type: object
+            required: [name, node_id]
+            properties:
+              name:
+                type: string
+              node_id:
+                type: string
+        skipped:
+          type: array
+          description: Granted nodes excluded from the document, with the deciding rule.
+          items:
+            type: object
+            required: [node_id, node_name, reason]
+            properties:
+              node_id:
+                type: string
+              node_name:
+                type: string
+              reason:
+                $ref: '#/components/schemas/DistributionSkipReason'
+        subscriber:
+          type: object
+          required: [id, name, blocked_reason]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            blocked_reason:
+              description: Why a served subscription would return 403; null when it would not.
+              oneOf:
+                - $ref: '#/components/schemas/SubscriberBlockReason'
+                - type: 'null'
+    DistributionSkipReason:
+      type: string
+      enum: [disabled, offline, unhealthy, not_selected, no_endpoint]
+    SubscriberBlockReason:
+      type: string
+      enum: [inactive, expired, over_quota]
     Subscription:
       type: object
       required: [id, subscriber_id, profile_id, name, revoked_at, expires_at, created_at]

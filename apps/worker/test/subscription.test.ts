@@ -1,7 +1,13 @@
 import { env, SELF } from 'cloudflare:test';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import { createSubscription, getClashSubscription, revokeSubscription, rotateSubscription } from '../src/services/subscription-service';
+import {
+	createSubscription,
+	getClashSubscription,
+	previewProfile,
+	revokeSubscription,
+	rotateSubscription,
+} from '../src/services/subscription-service';
 import {
 	DEFAULT_PARAMS,
 	hourStart,
@@ -10,6 +16,7 @@ import {
 	seedEndpoint,
 	seedNode,
 	seedNodeClient,
+	seedMeta,
 	seedProfile,
 	seedSubscriber,
 	seedSubscriberUsage,
@@ -291,5 +298,112 @@ describe('subscription administration', () => {
 		expect(response.headers.get('subscription-userinfo')).toBe(
 			`upload=1500; download=2500; total=10000; expire=${hourStart(nowSeconds()) + 86_400}`,
 		);
+	});
+});
+
+describe('profile preview', () => {
+	it('renders the same structure a served subscription returns without the subscriber UUID', async () => {
+		const dist = await seedDistribution({ scope: 'preview' });
+		const preview = await previewProfile(env.DB, dist.profileId, dist.subscriberId);
+		const served = await getClashSubscription(env.DB, dist.token);
+
+		const previewDocument = parse(preview.document) as ClashDocument;
+		const servedDocument = parse(served.body) as ClashDocument;
+		expect(previewDocument.proxies).toEqual(
+			servedDocument.proxies.map((proxy) => ({ ...proxy, uuid: '00000000-0000-0000-0000-000000000000' })),
+		);
+		expect(previewDocument['proxy-groups']).toEqual(servedDocument['proxy-groups']);
+		expect(previewDocument.rules).toEqual(servedDocument.rules);
+		expect(preview.document).not.toContain(dist.nodeClient.uuid);
+
+		expect(preview.proxies).toHaveLength(1);
+		expect(preview.proxies[0]?.node_id).toBe(dist.nodeId);
+		expect(preview.skipped).toEqual([]);
+		expect(preview.subscriber.blocked_reason).toBeNull();
+	});
+
+	it('reports why a granted node is dropped from distribution', async () => {
+		const online = await seedNode({ name: 'Online' });
+		await seedEndpoint(online);
+		const offline = await seedNode({ name: 'Offline', lastSeenAt: 1 });
+		await seedEndpoint(offline);
+		const noEndpoint = await seedNode({ name: 'NoEndpoint' });
+		const disabled = await seedNode({ name: 'Disabled', enabled: false });
+		await seedEndpoint(disabled);
+		const unhealthy = await seedNode({ name: 'Unhealthy', xrayHealthy: false });
+		await seedEndpoint(unhealthy);
+		const notSelected = await seedNode({ name: 'NotSelected' });
+		await seedEndpoint(notSelected);
+
+		const subscriberId = await seedSubscriber();
+		for (const nodeId of [online, offline, noEndpoint, disabled, unhealthy, notSelected]) {
+			await seedNodeClient(nodeId, subscriberId);
+		}
+		const profileId = await seedProfile({ nodeSelection: 'selected', nodeIds: [online, offline, noEndpoint, disabled, unhealthy] });
+
+		const preview = await previewProfile(env.DB, profileId, subscriberId);
+		expect(preview.proxies.map((proxy) => proxy.node_id)).toEqual([online]);
+		expect(
+			[...preview.skipped].sort((a, b) => a.node_name.localeCompare(b.node_name)).map((entry) => [entry.node_name, entry.reason]),
+		).toEqual([
+			['Disabled', 'disabled'],
+			['NoEndpoint', 'no_endpoint'],
+			['NotSelected', 'not_selected'],
+			['Offline', 'offline'],
+			['Unhealthy', 'unhealthy'],
+		]);
+	});
+
+	it('reports the reason a served subscription would be refused', async () => {
+		const dist = await seedDistribution({ scope: 'blocked', subscriberStatus: 'disabled' });
+		const disabledPreview = await previewProfile(env.DB, dist.profileId, dist.subscriberId);
+		expect(disabledPreview.subscriber.blocked_reason).toBe('inactive');
+
+		const quota = await seedDistribution({ scope: 'blockedquota', trafficLimitBytes: 100 });
+		const usage = await env.DB.prepare('SELECT usage_cycle_start FROM subscribers WHERE id = ?')
+			.bind(quota.subscriberId)
+			.first<{ usage_cycle_start: number }>();
+		await seedSubscriberUsage(quota.subscriberId, usage?.usage_cycle_start ?? 0, 100, 0);
+		const quotaPreview = await previewProfile(env.DB, quota.profileId, quota.subscriberId);
+		expect(quotaPreview.subscriber.blocked_reason).toBe('over_quota');
+		await expect(getClashSubscription(env.DB, quota.token)).rejects.toMatchObject({ status: 403 });
+	});
+
+	it('renders an empty document instead of failing when nothing is distributable', async () => {
+		const dist = await seedDistribution({ scope: 'emptypreview', onlineOnly: true });
+		await env.DB.prepare('UPDATE nodes SET last_seen_at = 1 WHERE id = ?').bind(dist.nodeId).run();
+
+		const preview = await previewProfile(env.DB, dist.profileId, dist.subscriberId);
+		expect(preview.proxies).toEqual([]);
+		expect(parse(preview.document)).toMatchObject({ proxies: [], rules: ['MATCH,PROXY'] });
+		await expect(getClashSubscription(env.DB, dist.token)).rejects.toMatchObject({ status: 503 });
+	});
+
+	it('defaults to the default subscriber and rejects unknown profiles or subscribers', async () => {
+		const dist = await seedDistribution({ scope: 'previewdefault' });
+		await seedMeta('default_subscriber_id', dist.subscriberId);
+
+		const preview = await previewProfile(env.DB, dist.profileId);
+		expect(preview.subscriber.id).toBe(dist.subscriberId);
+
+		await expect(previewProfile(env.DB, '01J2Z6Q8Y3V9M4K7T1B5C0D2E9')).rejects.toMatchObject({ status: 404 });
+		await expect(previewProfile(env.DB, dist.profileId, '01J2Z6Q8Y3V9M4K7T1B5C0D2E8')).rejects.toMatchObject({
+			status: 404,
+		});
+	});
+});
+
+describe('profile preview endpoint', () => {
+	it('is mounted under the admin Access middleware', async () => {
+		const dist = await seedDistribution({ scope: 'previewauth' });
+		const preview = await SELF.fetch(`https://panel.test/api/v1/admin/profiles/${dist.profileId}/preview`);
+		expect(preview.status).toBe(401);
+		const body = (await preview.json()) as { error: { code: string } };
+		expect(body.error.code).toBe('UNAUTHORIZED');
+
+		// The sibling detail path answers the same way, so the 401 above comes from
+		// the middleware rather than from preview not being registered.
+		const detail = await SELF.fetch(`https://panel.test/api/v1/admin/profiles/${dist.profileId}`);
+		expect(detail.status).toBe(401);
 	});
 });

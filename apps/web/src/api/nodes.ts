@@ -3,6 +3,7 @@ import type {
 	CreateNodeRequest,
 	Endpoint,
 	Node,
+	NodeClient,
 	NodeStatusDetail,
 	UpdateEndpointRequest,
 	UpdateNodeRequest,
@@ -45,6 +46,9 @@ export const nodesApi = {
 	},
 	status(nodeId: string): Promise<NodeStatusDetail> {
 		return apiRequest<NodeStatusDetail>(`/api/v1/admin/nodes/${nodeId}/status`);
+	},
+	listClients(nodeId: string): Promise<NodeClient[]> {
+		return apiRequest<{ items: NodeClient[] }>(`/api/v1/admin/nodes/${nodeId}/clients`).then((data) => data.items);
 	},
 	listEndpoints(nodeId: string): Promise<Endpoint[]> {
 		return apiRequest<{ items: Endpoint[] }>(`/api/v1/admin/nodes/${nodeId}/endpoints`).then((data) => data.items);

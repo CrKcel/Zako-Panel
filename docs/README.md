@@ -14,6 +14,7 @@
 | [security.md](security.md) | 管理员认证、token、节点与输入约束 |
 | [operations.md](operations.md) | 免费额度预算、可观测性、故障行为 |
 | [deployment.md](deployment.md) | 面板部署、Access 配置、节点安装与初始化 |
+| [launch-checklist.md](launch-checklist.md) | P0 上线检查表：面板、Access、节点、订阅、流量、容量与安全 |
 | [testing.md](testing.md) | Worker、Agent、Web 与联调测试范围 |
 | [roadmap.md](roadmap.md) | P0–P2 交付顺序与验收标准 |
 

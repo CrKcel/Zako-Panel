@@ -92,3 +92,7 @@ systemctl restart xray
 模板中的 API inbound、stats 与 policy 与 [traffic.md](traffic.md) 的统计要求一致，不要删除。systemd 单元的写路径与命令限制见 [security.md](security.md)。P1 起用户集合由 Agent 同步，本节的手工步骤随之移除。
 
 默认档案（`bootstrap` 生成的档案）`online_only = 1`，而节点状态由心跳派生。因此新建节点在 Agent 首次上报前按离线处理，订阅返回 `503`；Agent 启动后的首次心跳（默认 5 分钟内）即恢复下发。需要提前验证配置时，可在档案中关闭在线过滤，或用档案预览查看渲染结果。
+
+## 3. 上线
+
+部署与节点安装完成后，逐项执行 [launch-checklist.md](launch-checklist.md)。容量验证用 `npm run capacity`，见 [operations.md](operations.md#6-容量风险与验证)。

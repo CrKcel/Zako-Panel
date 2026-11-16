@@ -24,6 +24,7 @@
 		"db:migrate:local": "wrangler d1 migrations apply zako-panel --local",
 		"db:migrate:remote": "wrangler d1 migrations apply zako-panel --remote",
 		"bootstrap": "node scripts/bootstrap.mjs",
+		"capacity": "node scripts/capacity.mjs",
 		"deploy": "npm run build && wrangler deploy",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."

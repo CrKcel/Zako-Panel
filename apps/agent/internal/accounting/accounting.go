@@ -321,7 +321,7 @@ func (a *Accountant) appendDelta(tx *bolt.Tx, at time.Time, userDeltas map[strin
 // CloseReports moves every open report to the outbox. The Worker acknowledges
 // reports individually, so closing is independent of sending.
 func (a *Accountant) CloseReports() (int, error) {
-	closed, err := a.store.ClosePendingReports()
+	closed, err := a.store.ClosePendingReports(a.now())
 	if err != nil {
 		return 0, fmt.Errorf("accounting: close reports: %w", err)
 	}

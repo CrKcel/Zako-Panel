@@ -68,6 +68,7 @@ Xray 配置必须包含 stats、policy、API inbound 与 routing：
 ```
 
 - 报表 `period_start`/`period_end` 必须落在同一小时桶；跨边界时按采样时间切分，无法精确归属的尾部计入下一小时并标记 `has_counter_gap`。
+- 关闭报表时 `period_end` 取关闭时刻与所属小时边界的较小值；Worker 只接受不超过 5 分钟未来偏移的 `period_end`，未结束的小时不能直接上报小时边界。
 - Agent 重启后从 BoltDB 恢复基线、outbox、`users_ver` 与配置版本。
 - 网络失败采用指数退避与 jitter；Worker 返回 `429` 时遵守 `Retry-After` 或加大退避。
 - Agent 使用心跳返回的 `server_time` 检测明显时钟偏移，节点仍应通过 timesyncd/NTP 校时。

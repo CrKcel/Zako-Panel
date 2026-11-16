@@ -26,6 +26,9 @@ readonly XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
+# shellcheck source=lib/reality-key.sh
+. "${SCRIPT_DIR}/lib/reality-key.sh"
+
 log() {
 	printf '[zako-agent] %s\n' "$*"
 }
@@ -151,8 +154,8 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		if ! keypair="$("${XRAY_BIN}" x25519)"; then
 			die "xray x25519 failed; REALITY key was not generated"
 		fi
-		private_key="$(printf '%s\n' "${keypair}" | sed -nE 's/^Private[[:space:]]*[Kk]ey[[:space:]]*:[[:space:]]*//p' | head -n 1)"
-		public_key="$(printf '%s\n' "${keypair}" | sed -nE 's/^(Public[[:space:]]*[Kk]ey|Password)[[:space:]]*:[[:space:]]*//p' | head -n 1)"
+		private_key="$(parse_reality_private "${keypair}")"
+		public_key="$(parse_reality_public "${keypair}")"
 		if [[ -z "${private_key}" || -z "${public_key}" ]]; then
 			die "could not parse xray x25519 output; REALITY key was not written"
 		fi

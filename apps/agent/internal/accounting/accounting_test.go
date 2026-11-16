@@ -324,6 +324,35 @@ func TestHourBoundarySplitsReports(t *testing.T) {
 	}
 }
 
+func TestCloseReportsCapsPeriodEndAtCloseTime(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// The Worker accepts a period_end at most five minutes in the future, so a
+	// report closed mid-hour must not carry the hour end.
+	closeAt := testHour.Add(20 * time.Minute)
+	accountant, err := New(store, WithClock(func() time.Time { return closeAt }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handle(t, accountant, makeSample(testHour, map[string][2]int64{"alice@example.com": {100, 200}}, nil, 50))
+	handle(t, accountant, makeSample(testHour.Add(10*time.Minute), map[string][2]int64{"alice@example.com": {150, 300}}, nil, 650))
+
+	if _, err := accountant.CloseReports(); err != nil {
+		t.Fatalf("CloseReports: %v", err)
+	}
+	outbox := readOutbox(t, store)
+	if len(outbox) != 1 {
+		t.Fatalf("outbox = %+v, want one report", outbox)
+	}
+	if outbox[0].PeriodEnd != closeAt.Unix() {
+		t.Errorf("period_end = %d, want close time %d", outbox[0].PeriodEnd, closeAt.Unix())
+	}
+}
+
 func TestFortyUserLimitSplitsReport(t *testing.T) {
 	accountant, store := newTestAccountant(t)
 

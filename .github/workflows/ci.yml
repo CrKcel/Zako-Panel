@@ -43,6 +43,9 @@ jobs:
 
       - run: npm run format:check
 
+      - name: Node installer parses xray x25519 output
+        run: bash deploy/tests/reality-key.sh
+
       # The Worker bundle is what actually ships; typecheck alone does not prove
       # the static assets and the Worker entry build together.
       - run: npm run build

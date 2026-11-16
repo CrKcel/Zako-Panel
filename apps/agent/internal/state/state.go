@@ -651,7 +651,12 @@ func (s *Store) DeleteOutbox(reportID string) error {
 // ClosePendingReports moves every open report to the outbox in one transaction.
 // Closed reports keep their report_id, so a crash between close and send cannot
 // change the idempotency key.
-func (s *Store) ClosePendingReports() (int, error) {
+//
+// period_end is clamped to closeAt: reports are normally closed before the hour
+// bucket ends, and the Worker rejects a period_end more than five minutes in the
+// future. A report that outlives its bucket keeps the bucket end because the
+// Worker requires period_start and period_end to stay inside one hour.
+func (s *Store) ClosePendingReports(closeAt time.Time) (int, error) {
 	closed := 0
 	err := s.Update(func(tx *bolt.Tx) error {
 		reports, err := PendingReports(tx)
@@ -665,6 +670,7 @@ func (s *Store) ClosePendingReports() (int, error) {
 				}
 				continue
 			}
+			report.PeriodEnd = closedPeriodEnd(report, closeAt)
 			if err := PutOutboxReport(tx, report); err != nil {
 				return err
 			}
@@ -719,4 +725,17 @@ func (s *Store) handle() (*bolt.DB, error) {
 		return nil, ErrClosed
 	}
 	return s.db, nil
+}
+
+// closedPeriodEnd caps a report at the close time without leaving its hour
+// bucket. The clamp keeps period_end greater than period_start.
+func closedPeriodEnd(report TrafficReport, closeAt time.Time) int64 {
+	end := closeAt.Unix()
+	if end > report.PeriodEnd {
+		end = report.PeriodEnd
+	}
+	if end <= report.PeriodStart {
+		end = report.PeriodStart + 1
+	}
+	return end
 }

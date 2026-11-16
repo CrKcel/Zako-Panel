@@ -92,7 +92,7 @@ func TestClosePendingReportsMovesToOutbox(t *testing.T) {
 		t.Fatalf("put pending: %v", err)
 	}
 
-	closed, err := store.ClosePendingReports()
+	closed, err := store.ClosePendingReports(time.Unix(pending.PeriodStart+1800, 0))
 	if err != nil {
 		t.Fatalf("ClosePendingReports: %v", err)
 	}
@@ -118,6 +118,39 @@ func TestClosePendingReportsMovesToOutbox(t *testing.T) {
 	}
 	if !found || stored.ReportID != pending.ReportID || len(stored.Users) != 1 {
 		t.Errorf("outbox report = %+v, want the closed report", stored)
+	}
+	if stored.PeriodEnd != pending.PeriodStart+1800 {
+		t.Errorf("closed period_end = %d, want the close time %d", stored.PeriodEnd, pending.PeriodStart+1800)
+	}
+}
+
+func TestClosePendingReportsKeepsBucketEndAfterHour(t *testing.T) {
+	store, _ := openTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	pending := TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
+		PeriodStart: 1_780_000_000 / 3600 * 3600,
+		PeriodEnd:   1_780_000_000/3600*3600 + 3600,
+		Users:       []ReportUser{{Email: "alice@example.com", UplinkBytes: 10, DownlinkBytes: 20}},
+	}
+	if err := store.Update(func(tx *bolt.Tx) error { return PutPendingReport(tx, pending) }); err != nil {
+		t.Fatalf("put pending: %v", err)
+	}
+
+	if _, err := store.ClosePendingReports(time.Unix(pending.PeriodEnd+30, 0)); err != nil {
+		t.Fatalf("ClosePendingReports: %v", err)
+	}
+
+	stored, found, err := store.EarliestOutbox()
+	if err != nil {
+		t.Fatalf("EarliestOutbox: %v", err)
+	}
+	if !found {
+		t.Fatal("outbox is empty")
+	}
+	if stored.PeriodEnd != pending.PeriodEnd {
+		t.Errorf("closed period_end = %d, want the bucket end %d", stored.PeriodEnd, pending.PeriodEnd)
 	}
 }
 

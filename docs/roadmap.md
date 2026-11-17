@@ -13,6 +13,7 @@
 5. 实现 Agent 心跳、StatsService 采样、BoltDB outbox、单端点上报与流量幂等入账。
 6. 实现总览、节点、订阅档案、订阅与流量页面。
 7. 建立容量与安全检查：订阅 CPU、D1 读写、重复上报、空节点。
+8. 建立 Agent 静态资产分发：Downloads Worker、滚动发布、网络安装与回滚。
 
 验收：
 
@@ -23,6 +24,8 @@
 - 重复上报不重复计数；Xray 重启不产生负流量；Agent 重装后新报表正常入账。
 - 静态页面与 SPA 路由不调用 Worker；管理 API 未通过 Access 时返回 401。
 - 无可用节点时返回 503，不下发空配置。
+- 节点通过面板域名一条命令安装当前 Agent；稳定 URL 更新后 `/dl/agent/version` 与二进制版本一致。
+- 下载缺失路径返回 404，静态请求不计 Worker 请求；回滚 Downloads Worker 后稳定 URL 恢复上一版本。
 
 ## 2. P1：多用户、授权与同步
 

@@ -1,6 +1,6 @@
 # 部署
 
-部署由面板（Cloudflare Worker + D1 + 静态资源）与节点（Debian + Xray + Go Agent）两部分组成。本地开发命令见 [README](../README.md)，Agent 运行模型见 [agent.md](agent.md)，安全策略见 [security.md](security.md)。
+部署由面板（Cloudflare Worker + D1 + 静态资源）、Downloads Worker（Agent 二进制静态资产）与节点（Debian + Xray + Go Agent）三部分组成。本地开发命令见 [README](../README.md)，Agent 运行模型见 [agent.md](agent.md)，分发与安装细节见 [agent-distribution.md](agent-distribution.md)，安全策略见 [security.md](security.md)。
 
 ## 1. 面板
 
@@ -20,7 +20,7 @@
 - 变量：`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ENVIRONMENT`。
 - `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL` 只用于本地开发，不写入部署变量。
 - `/admin/*` 与 `/api/v1/admin/*` 必须经过 Cloudflare Access。
-- `/sub/*` 与 `/api/v1/agent/*` 必须排除在 Access 之外，由订阅 token 与 Agent token 各自鉴权。
+- `/sub/*`、`/api/v1/agent/*` 与 `/dl/*` 必须排除在 Access 之外，由订阅 token、Agent token 与公开静态资产各自处理。
 - Access 身份仍需在 `admin_users` 中存在且启用。
 - 静态安全头由 `apps/web/public/_headers` 提供：CSP、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、受限 Permissions Policy；`/admin/assets/*` 使用 immutable 缓存。
 - `apps/web/public/_redirects` 将 `/admin/assets/*` 重写到 `/assets/*`（Vite 的 `base` 为 `/admin/`），并将 `/` 302 到 `/admin/`。
@@ -44,25 +44,48 @@ npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 
 脚本把订阅 token 只在终端输出一次，生成的 SQL 只包含 token 哈希与 ID。`bootstrap.sql` 已被忽略，不应提交。生产环境不提供“空表首个登录者自动成为 owner”的运行时逻辑。
 
-## 2. 节点安装
+## 2. Agent 下载 Worker
 
-节点需要 Debian 12/13、已安装的 Xray 与 root 权限。安装脚本支持 amd64 与 arm64。
+Agent 二进制由独立 assets-only Downloads Worker 在面板域名 `/dl/agent/*` 下分发。产物、缓存与回滚规则见 [agent-distribution.md](agent-distribution.md)。
+
+### 2.1 路由与部署
+
+1. 把 `wrangler.downloads.jsonc` 的 `routes.pattern` 与 `zone_name` 替换为实际面板域名与 zone，例如 `panel.example.com/dl/*` 与 `example.com`。
+2. 确认 `/dl/*` 未进入 Access（见 1.2）。
+3. 配置 GitHub repository variable `AGENT_DOWNLOAD_BASE_URL=https://<面板域名>/dl/agent`。
+4. 配置 GitHub secrets `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。token 需要 Workers Scripts:Edit、Workers Routes:Edit 与 Zone:Read。
+5. 推送 `agent-v*` tag 触发 `Release agent` 流水线；流水线构建、校验、生成静态资产并部署 Downloads Worker。已生成 `apps/downloads/dist` 时，也可以用 `npm run deploy:downloads` 手工部署。
+
+首次发布会创建 Worker 与 route。面板 Worker 不需要重新部署。
+
+### 2.2 发布验证
 
 ```bash
-cd apps/agent
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/zako-agent-linux-amd64 ./cmd/zako-agent
-cd ../..
-sudo deploy/install.sh apps/agent/bin/zako-agent-linux-amd64
+curl -fsS https://<面板域名>/dl/agent/version
+curl -fsSI https://<面板域名>/dl/agent/zako-agent-linux-amd64.tar.gz
+curl -s -o /dev/null -w '%{http_code}\n' https://<面板域名>/dl/agent/missing.tar.gz
 ```
 
-`install.sh` 完成以下操作：
+返回 HTML 200 表示 `/dl/*` 落到了面板 SPA，需要检查 route 或 Access 排除。
+
+## 3. 节点安装
+
+节点需要 Debian 12/13、已安装的 Xray、root 权限，以及 `curl` 或 `wget`。安装脚本支持 amd64 与 arm64。
+
+### 3.1 网络安装
+
+```bash
+curl -fsSL https://<面板域名>/dl/agent/install.sh | sudo bash -s
+```
+
+脚本下载当前稳定版本，校验 SHA-256，解压后执行 tarball 内的 `install.sh`。`install.sh` 完成以下操作：
 
 - 安装二进制到 `/usr/local/bin/zako-agent`，创建 `zako-agent` 系统用户与组。
 - 创建 `/etc/zako-agent` 与 `/var/lib/zako-agent`，权限 0700。
-- 把 `apps/agent/config.example.yaml` 安装为 `/etc/zako-agent/config.yaml`（已存在时保留），并创建空的 `/etc/zako-agent/token`。
-- 安装并 enable `zako-agent.service`，不启动服务。
+- 把 `config.example.yaml` 安装为 `/etc/zako-agent/config.yaml`（已存在时保留），并创建空的 `/etc/zako-agent/token`。
+- 安装并 enable `zako-agent.service`，不启动服务；服务已运行时提示重启。
 - 若本机存在 Xray，执行 `xray x25519` 生成 REALITY 密钥对：私钥写入 `/etc/xray/reality.key`（0600，属 `zako-agent`），公钥打印到终端。
-- 同一分支内用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与随机 short id（0640，属组 `zako-agent`）；该步骤需要 `python3`，缺失时脚本给出警告并跳过。
+- 用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与随机 short id（0640，属组 `zako-agent`）；该步骤需要 `python3`，缺失时脚本给出警告并跳过。
 
 启动前：
 
@@ -75,7 +98,22 @@ sudo systemctl start zako-agent
 journalctl -u zako-agent -f
 ```
 
-### 2.1 P0 节点侧 Xray 配置
+升级执行同一命令，然后 `systemctl restart zako-agent`。回滚见 [agent-distribution.md](agent-distribution.md#6-回滚)。
+
+### 3.2 本地构建安装
+
+在仓库内开发和离线安装：
+
+```bash
+cd apps/agent
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/zako-agent-linux-amd64 ./cmd/zako-agent
+cd ../..
+sudo deploy/install.sh apps/agent/bin/zako-agent-linux-amd64
+```
+
+`install.sh` 也会在脚本目录查找 `zako-agent`，因此可以从解压后的发布包直接执行。
+
+### 3.3 P0 节点侧 Xray 配置
 
 P0 不远程下发配置，节点使用安装脚本生成的静态配置：
 
@@ -93,6 +131,6 @@ systemctl restart xray
 
 默认档案（`bootstrap` 生成的档案）`online_only = 1`，而节点状态由心跳派生。因此新建节点在 Agent 首次上报前按离线处理，订阅返回 `503`；Agent 启动后的首次心跳（默认 5 分钟内）即恢复下发。需要提前验证配置时，可在档案中关闭在线过滤，或用档案预览查看渲染结果。
 
-## 3. 上线
+## 4. 上线
 
 部署与节点安装完成后，逐项执行 [launch-checklist.md](launch-checklist.md)。容量验证用 `npm run capacity`，见 [operations.md](operations.md#6-容量风险与验证)。

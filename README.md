@@ -7,6 +7,7 @@
 - 节点、endpoint 与订阅档案管理，P0 支持 VLESS + REALITY
 - Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
 - Agent 心跳、Xray 统计采样、流量上报与按小时幂等入账
+- Agent 静态资产滚动分发，节点通过面板域名一条命令安装
 - 派生节点状态、站点/节点流量汇总与保留期清理
 
 阶段划分与设计边界见 [docs/architecture.md](docs/architecture.md)，交付顺序见 [docs/roadmap.md](docs/roadmap.md)。
@@ -24,9 +25,10 @@
 apps/worker/        Cloudflare Worker：路由、服务、D1 仓储、中间件
 apps/web/           Vue 3 管理界面，挂载在 /admin/
 apps/agent/         Debian 节点 Agent（Go）
+apps/downloads/     Agent 下载 Worker 的静态资产与响应头
 packages/contracts/ OpenAPI 契约、生成类型与跨语言 fixtures
 migrations/         D1 迁移
-deploy/             systemd unit 与安装脚本
+deploy/             systemd unit、安装脚本与发布打包
 scripts/            一次性初始化脚本
 docs/               项目文档
 ```
@@ -68,14 +70,21 @@ npx wrangler d1 execute zako-panel --local --file=bootstrap.sql
 npm run typecheck
 npm test
 npm run test:agent
+npm run test:downloads
 npm run format:check
 ```
 
-`npm run test:all` 先执行 Worker 测试再执行 Agent 测试；`npm run build` 校验类型并构建 Web 静态资源。
+`npm run test:all` 依次执行 Worker、Agent 与 downloads 测试；`npm run build` 校验类型并构建 Web 静态资源。
 
 ## 部署
 
-面板与节点的完整步骤见 [docs/deployment.md](docs/deployment.md)。节点 Agent 的模块、配置与运行模型见 [docs/agent.md](docs/agent.md)。
+面板与节点的完整步骤见 [docs/deployment.md](docs/deployment.md)。Agent 二进制通过独立 Downloads Worker 滚动发布，节点安装命令为：
+
+```bash
+curl -fsSL https://<面板域名>/dl/agent/install.sh | sudo bash -s
+```
+
+发布、缓存与回滚规则见 [docs/agent-distribution.md](docs/agent-distribution.md)，Agent 模块与运行模型见 [docs/agent.md](docs/agent.md)。
 
 ## 文档
 

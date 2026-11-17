@@ -17,6 +17,14 @@
 | D1 存储 | 5 GB/账户，单库 500 MB |
 | Cron Triggers | 5/账户 |
 
+### 1.1 Agent 下载资产
+
+- Agent 二进制由独立 assets-only Downloads Worker 提供，静态资产请求免费且不计 Worker 请求与 CPU。
+- 当前构建的 amd64 二进制约 18.45 MiB，arm64 约 17.28 MiB；tarball 压缩后约 10 MB。单文件低于 25 MiB，单个 Worker 版本的文件数远低于 20,000。
+- 滚动发布只保留当前版本；`apps/downloads/dist` 约 21 MB，发布时整体上传。
+- 稳定 URL 使用 `Cache-Control: public, max-age=0, must-revalidate` 与 ETag；不使用 immutable。
+- 回滚使用 Downloads Worker 的 Cloudflare 版本回滚，或重跑上一个 `agent-v*` tag。细节见 [agent-distribution.md](agent-distribution.md)。
+
 ## 2. 请求预算
 
 默认 300 秒上报一次，心跳与流量共用请求：
@@ -80,7 +88,7 @@ Agent 请求/天 = 节点数 × (86400 / 300) = 节点数 × 288
 
 - Worker 日志记录 `request_id`、路由模板、状态码、错误码、耗时与 D1 `rows_read/rows_written`；不记录 token、订阅 URL、UUID 或请求体。
 - Agent 结构化日志记录 `report_id`、节点 ID、配置版本、用户版本与重试次数；不记录 secret。
-- 使用 Cloudflare 用量面板、D1 meta 与 GraphQL Analytics 观察额度；不把每次指标写回 D1。
+- 使用 Cloudflare 用量面板、D1 meta 与 GraphQL Analytics 观察额度；不把每次指标写回 D1。Agent 下载的请求与缓存状态在 Cloudflare 资产与访问日志中查看。
 - 告警：Worker 请求/CPU 接近上限、D1 读写接近上限、节点离线、配置连续失败、Cron 失败。
 
 ## 8. 故障行为
@@ -95,6 +103,10 @@ Agent 请求/天 = 节点数 × (86400 / 300) = 节点数 × 288
 | 配置校验失败 | 不替换当前配置，上报结构化错误；旧配置继续服务 |
 | 重启失败 | 恢复最近已知可用配置并再次启动，保留错误详情 |
 | Agent 状态丢失 | 重新拉取用户集合与配置；未 ACK 流量可能丢失，按 gap 记录 |
+| `/dl/*` route 缺失或优先级错误 | 请求落到面板 SPA 返回 HTML；修正 Downloads Worker route |
+| Downloads Worker 部署失败 | 线上保持上一个 Worker 版本，稳定 URL 不变 |
+| 新 Agent 版本异常 | 回滚 Downloads Worker 或重跑上一 tag；已安装节点不自动变化 |
+| 安装时跨版本读取 | 校验失败，安装脚本重新下载 `SHA256SUMS` 与 tarball 一次 |
 
 ## 9. 参考资料
 
@@ -102,6 +114,8 @@ Agent 请求/天 = 节点数 × (86400 / 300) = 节点数 × 288
 
 - [Cloudflare Workers Static Assets：路由](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/)
 - [Cloudflare Workers Static Assets：计费与限制](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/)
+- [Cloudflare Workers Static Assets：响应头](https://developers.cloudflare.com/workers/static-assets/headers/)
+- [Cloudflare Workers：路由](https://developers.cloudflare.com/workers/configuration/routing/routes/)
 - [Cloudflare Workers：限制](https://developers.cloudflare.com/workers/platform/limits/)
 - [Cloudflare D1：价格与行计量](https://developers.cloudflare.com/d1/platform/pricing/)
 - [Cloudflare D1：batch 与事务语义](https://developers.cloudflare.com/d1/worker-api/d1-database/)

@@ -1,0 +1,20 @@
+/dl/agent/*
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+
+/dl/agent/install.sh
+  Content-Type: text/x-shellscript; charset=utf-8
+
+/dl/agent/version
+  Content-Type: text/plain; charset=utf-8
+
+/dl/agent/SHA256SUMS
+  Content-Type: text/plain; charset=utf-8
+
+/dl/agent/zako-agent-linux-amd64.tar.gz
+  Content-Type: application/gzip
+  Content-Disposition: attachment
+
+/dl/agent/zako-agent-linux-arm64.tar.gz
+  Content-Type: application/gzip
+  Content-Disposition: attachment

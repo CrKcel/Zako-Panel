@@ -48,10 +48,12 @@ Usage: install.sh [path-to-zako-agent-binary]
 
 Installs and enables zako-agent on Debian 12/13. The binary may be passed as the
 first argument or via ZAKO_AGENT_BINARY. If omitted, the installer looks for
+zako-agent next to this script, then for
 apps/agent/bin/zako-agent-linux-<arch> in this repository.
 
-The service is enabled but not started. Write the node token issued by the panel
-to /etc/zako-agent/token and review /etc/zako-agent/config.yaml first.
+The service is enabled and is not started by this script. Write the node token
+issued by the panel to /etc/zako-agent/token and review
+/etc/zako-agent/config.yaml first.
 EOF
 }
 
@@ -88,12 +90,32 @@ command -v systemctl >/dev/null 2>&1 || die "systemctl is required"
 
 BINARY_SRC="${ZAKO_AGENT_BINARY:-${1:-}}"
 if [[ -z "${BINARY_SRC}" ]]; then
-	BINARY_SRC="${REPO_ROOT}/apps/agent/bin/zako-agent-linux-${ARCH}"
+	for candidate in \
+		"${SCRIPT_DIR}/zako-agent" \
+		"${SCRIPT_DIR}/zako-agent-linux-${ARCH}" \
+		"${REPO_ROOT}/apps/agent/bin/zako-agent-linux-${ARCH}"; do
+		if [[ -f "${candidate}" ]]; then
+			BINARY_SRC="${candidate}"
+			break
+		fi
+	done
 fi
-if [[ ! -f "${BINARY_SRC}" ]]; then
-	die "agent binary not found at ${BINARY_SRC}; build it with: cd apps/agent && CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -trimpath -o bin/zako-agent-linux-${ARCH} ./cmd/zako-agent"
+if [[ -z "${BINARY_SRC}" || ! -f "${BINARY_SRC}" ]]; then
+	die "agent binary not found; run from an extracted release archive or build it with: cd apps/agent && CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -trimpath -o bin/zako-agent-linux-${ARCH} ./cmd/zako-agent"
 fi
-install -m 0755 -o root -g root "${BINARY_SRC}" "${BIN_PATH}"
+
+# Replace the binary through a same-directory temporary file so an upgrade cannot
+# write into the inode of an agent that is still running.
+TMP_BIN="${BIN_PATH}.new.$$"
+cleanup_binary() {
+	if [[ -e "${TMP_BIN}" ]]; then
+		rm -f "${TMP_BIN}"
+	fi
+}
+trap cleanup_binary EXIT
+install -m 0755 -o root -g root "${BINARY_SRC}" "${TMP_BIN}"
+mv -f "${TMP_BIN}" "${BIN_PATH}"
+trap - EXIT
 log "installed ${BIN_PATH} from ${BINARY_SRC} (${ARCH})"
 
 if ! getent group "${SERVICE_GROUP}" >/dev/null 2>&1; then
@@ -193,13 +215,19 @@ else
 	warn "xray not found at ${XRAY_BIN}; skipped REALITY key and Xray config generation"
 fi
 
+if systemctl is-active --quiet zako-agent.service; then
+	start_hint="zako-agent.service is running; restart it to use the new binary: systemctl restart zako-agent"
+else
+	start_hint="Start with: systemctl start zako-agent"
+fi
+
 cat <<EOF
 
-zako-agent is installed and enabled, not started.
+zako-agent is installed and enabled.
 Next steps:
   1. Write the node token issued by the panel to ${TOKEN_PATH}.
      Keep the file owned by ${SERVICE_USER} and mode 0600.
   2. Review ${CONFIG_PATH}; control_plane_url, node_id and Xray paths are required.
-  3. Start with: systemctl start zako-agent
+  3. ${start_hint}
   4. Follow logs with: journalctl -u zako-agent -f
 EOF

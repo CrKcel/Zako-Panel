@@ -20,6 +20,9 @@ apps/agent/zako-agent
 *.db-shm
 *.db-wal
 
+# Agent download assets
+apps/downloads/dist/
+
 # Test output
 coverage/
 .vitest/

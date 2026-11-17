@@ -41,6 +41,8 @@ jobs:
 
       - run: npm run test:agent
 
+      - run: npm run test:downloads
+
       - run: npm run format:check
 
       - name: Node installer parses xray x25519 output

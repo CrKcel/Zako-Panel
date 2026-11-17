@@ -1,6 +1,6 @@
 # 节点 Agent
 
-Agent 以单一 Go 二进制运行在 Debian 节点上，由 systemd 管理，通过出站 HTTPS 与 Worker 通信，通过 loopback gRPC 读取 Xray 统计并热更新用户。安装步骤见 [deployment.md](deployment.md)，采样与上报规则见 [traffic.md](traffic.md)，远程配置见 [config-delivery.md](config-delivery.md)。
+Agent 以单一 Go 二进制运行在 Debian 节点上，由 systemd 管理，通过出站 HTTPS 与 Worker 通信，通过 loopback gRPC 读取 Xray 统计并热更新用户。安装步骤见 [deployment.md](deployment.md)，二进制构建与下载分发见 [agent-distribution.md](agent-distribution.md)，采样与上报规则见 [traffic.md](traffic.md)，远程配置见 [config-delivery.md](config-delivery.md)。
 
 当前交付为 P0：StatsService 采样、增量入账、outbox 与心跳/流量上报。用户集合同步与热更新属于 P1，远程配置属于 P2，均未实现。
 
@@ -47,7 +47,7 @@ Agent 构建为 `CGO_ENABLED=0` 的 Linux amd64/arm64 静态二进制，由 syst
 
 - `meta.users_ver` 是全局用户集合版本；新增、停用、删除授权、状态变化、凭据启停都会递增。
 - 创建节点时在同一 batch 内为默认订阅用户创建 `node_clients`；P1 的授权接口为新增用户/节点补齐凭据。没有凭据的用户不会进入订阅。
-- P0 没有用户同步，节点本地入站的 client 由管理员按 `GET /api/v1/admin/nodes/{nodeId}/clients` 的 `xray_email` 与 UUID 手工填写，步骤见 [deployment.md](deployment.md#21-p0-节点侧-xray-配置)。
+- P0 没有用户同步，节点本地入站的 client 由管理员按 `GET /api/v1/admin/nodes/{nodeId}/clients` 的 `xray_email` 与 UUID 手工填写，步骤见 [deployment.md](deployment.md#33-p0-节点侧-xray-配置)。
 - Agent 心跳/上报响应携带 `users_ver`；发现变化时调用 `GET /api/v1/agent/users`。
 - 用户列表只包含该节点上 `node_clients.enabled=1` 且订阅用户 `status=active` 的凭据。
 - Agent 使用 `If-None-Match` 避免重复传输；响应版本写入本地状态。
@@ -69,3 +69,10 @@ Agent 构建为 `CGO_ENABLED=0` 的 Linux amd64/arm64 静态二进制，由 syst
 ## 5. 远程配置
 
 配置定义、版本递增、发布流程、应用状态机与回滚规则见 [config-delivery.md](config-delivery.md)。
+
+## 6. 构建与分发
+
+- 发布流水线由 `agent-v*` tag 触发，使用 Go 1.24 与 `CGO_ENABLED=0` 交叉编译 `linux/amd64` 与 `linux/arm64`，版本通过 `-ldflags "-X main.version=<version>"` 注入。
+- 产物以稳定 URL 由独立 Downloads Worker 提供；版本号用于诊断，tag 用于回滚，不进入下载 URL。
+- 节点安装与升级命令见 [agent-distribution.md](agent-distribution.md#5-安装与升级)，回滚见 [agent-distribution.md](agent-distribution.md#6-回滚)。
+- 心跳中的 `agent_version` 来自同一构建注入值，用于面板展示与升级核对。

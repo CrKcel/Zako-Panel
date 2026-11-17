@@ -10,6 +10,7 @@
 | [traffic.md](traffic.md) | Xray 统计配置、Agent 采样、幂等入账、额度与周期 |
 | [subscription.md](subscription.md) | 节点状态与分发条件、订阅查询、Clash 与 URI 生成、响应头 |
 | [agent.md](agent.md) | Agent 模块、配置文件、进程模型、用户同步与热更新 |
+| [agent-distribution.md](agent-distribution.md) | Agent 静态资产分发、滚动发布、Downloads Worker、安装与回滚 |
 | [config-delivery.md](config-delivery.md) | 配置定义与版本、发布流程、应用状态机与回滚 |
 | [security.md](security.md) | 管理员认证、token、节点与输入约束 |
 | [operations.md](operations.md) | 免费额度预算、可观测性、故障行为 |

@@ -1,6 +1,6 @@
 # 安全设计
 
-安全边界依赖 Cloudflare Access、D1 中的角色记录和节点本地的密钥管理。Access 策略与节点密钥的部署步骤见 [deployment.md](deployment.md)，可观测性相关的脱敏要求见 [operations.md](operations.md)。
+安全边界依赖 Cloudflare Access、D1 中的角色记录和节点本地的密钥管理。Access 策略与节点密钥的部署步骤见 [deployment.md](deployment.md)，Agent 下载分发见 [agent-distribution.md](agent-distribution.md)，可观测性相关的脱敏要求见 [operations.md](operations.md)。
 
 ## 1. 管理员
 
@@ -8,7 +8,7 @@
 - Worker 使用 Access JWKS 验证 JWT 签名、issuer、audience、过期与生效时间；不信任可伪造的 email header。
 - `admin_users` 决定角色与启用状态；禁用后即使 Access 身份有效也不能调用管理 API。
 - 角色：`owner` 管理管理员与全部资源，`admin` 管理节点、订阅与配置，`viewer` 只读。
-- Access 路径策略排除 `/sub/*` 与 `/api/v1/agent/*`。
+- Access 路径策略排除 `/sub/*`、`/api/v1/agent/*` 与 `/dl/*`。
 - 本地开发没有 Access 代理：仅当同时设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL` 时，未携带 Access JWT 的管理请求按该邮箱鉴权；携带 JWT 的请求仍走 JWKS 校验。部署变量不得包含这两项。
 
 ## 2. Token 与敏感信息
@@ -27,6 +27,16 @@
 - 防火墙只开放必要的 Xray 端口与受限 SSH；StatsService、HandlerService 仅 loopback。
 - SQL 全部参数绑定；YAML 正规序列化；URI 正确百分号编码。
 - 限制订阅节点数、规则大小、Agent 请求体与报表条目数；超限返回 `413`。
-- WAF 对 `/sub/*` 与 `/api/v1/agent/*` 配置限流；失败请求不写高基数 D1 日志。
+- WAF 对 `/sub/*`、`/api/v1/agent/*` 与 `/dl/*` 配置限流；失败请求不写高基数 D1 日志。
 - Agent 通过 systemd 限制写路径，仅允许写 `/var/lib/zako-agent` 与 `/etc/xray`；Xray 校验与重启使用固定命令。
 - 配置错误不能破坏最近已知可用版本；P2 不提供任意命令执行。
+
+## 4. Agent 分发
+
+- `/dl/*` 公开只读，不经过 Access。Agent 二进制不包含 token、私钥或面板地址；节点接入控制面仍依赖本地 Agent token 与配置。
+- Downloads Worker 为 assets-only，没有 Worker 脚本与 D1 binding；静态资产由 Cloudflare 直接返回。
+- 发布产物只包含二进制、示例配置、systemd unit、安装脚本与 Xray 模板。打包测试检查 `token`、`state.db`、`reality.key` 与 `.dev.vars` 不在归档中。
+- 稳定下载 URL 使用 `Cache-Control: public, max-age=0, must-revalidate` 与 ETag；不使用 immutable。
+- `/dl/*` 配置 WAF 限流；下载日志不包含凭据。
+- 发布 tag 不可移动；回滚使用 Downloads Worker 的 Cloudflare 版本回滚，或重跑上一个 tag。
+- 网络安装脚本以 root 执行，首次安装前应下载并检查脚本；校验依赖 HTTPS 与同源的 `SHA256SUMS`。

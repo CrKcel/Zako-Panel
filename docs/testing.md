@@ -1,6 +1,6 @@
 # 测试策略
 
-测试按 Worker、Go Agent、Web 与联调分层。运行命令见 [README](../README.md)，阶段验收标准见 [roadmap.md](roadmap.md)。
+测试按 Worker、Go Agent、Agent 分发、Web 与联调分层。运行命令见 [README](../README.md)，阶段验收标准见 [roadmap.md](roadmap.md)。
 
 ## 1. Worker
 
@@ -30,7 +30,20 @@
 ## 3. Web 与联调
 
 - `vue-tsc` 与 `vite build` 校验类型与页面构建。
-- CI 串行执行 `contracts:generate` 漂移检查、`typecheck`、`test`、`test:agent`、`format:check`、`build` 与 Worker 打包。
+- CI 串行执行 `contracts:generate` 漂移检查、`typecheck`、`test`、`test:agent`、`test:downloads`、`format:check`、`build` 与 Worker 打包。
 - 节点创建、一次性 token、订阅链接复制、档案编辑、流量展示需要浏览器联调。
 - Debian 12/13 安装测试，真实 Xray 进程联调，确认 StatsService/HandlerService 不监听公网。
 - `npm run capacity` 在隔离的本地 D1 上合成 100 节点/100 用户-节点组合/50 用户/500 条规则，压测订阅与管理端点并校验响应形状；D1 行数与 CPU 以部署后面板数据为准。
+
+## 4. Agent 分发
+
+- `deploy/tests/package-release.sh` 校验 tarball 顶层目录、安装资产、`VERSION`、可执行位与敏感文件排除。
+- `deploy/tests/stage-downloads.sh` 校验稳定文件集合、`SHA256SUMS`、`version`、tarball 内部 `VERSION` 一致性、`_headers` 与输出中的敏感文件；篡改版本后 staging 必须失败。
+- `npm run test:downloads` 执行以上两个测试；CI 在 Worker 与 Agent 测试之后运行。
+- 人工验收：
+  - `/dl/agent/version` 返回纯文本，不是 SPA HTML。
+  - tarball 返回 `application/gzip`、`must-revalidate`、`ETag` 与下载头；缺失路径返回 404。
+  - Debian 12/13 amd64 与 arm64 节点执行安装命令，版本与 `/dl/agent/version` 一致。
+  - 连续发布两个 tag，稳定 URL 内容更新；回滚 Downloads Worker 或重跑上一 tag 后恢复。
+  - 篡改 tarball 后安装脚本退出，不执行 root 级安装。
+  - 面板 Worker 部署不改变 `/dl/*` 内容。

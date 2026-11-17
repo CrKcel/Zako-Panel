@@ -1,0 +1,139 @@
+name: Release agent
+
+on:
+  push:
+    tags:
+      - 'agent-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-agent-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      AGENT_DOWNLOAD_BASE_URL: ${{ vars.AGENT_DOWNLOAD_BASE_URL }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/agent/go.mod
+          cache-dependency-path: apps/agent/go.sum
+
+      - run: npm ci
+
+      - name: Test agent
+        working-directory: apps/agent
+        run: go test ./...
+
+      - name: Test release scripts
+        run: npm run test:downloads
+
+      - name: Resolve version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#agent-v}"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::tag must look like agent-v1.2.3"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate download base URL
+        run: |
+          base="${AGENT_DOWNLOAD_BASE_URL%/}"
+          while [[ "${base}" == */ ]]; do
+            base="${base%/}"
+          done
+          if [[ ! "${base}" =~ ^https://[A-Za-z0-9._~:/@!$+,=%-]+$ ]]; then
+            echo "::error::AGENT_DOWNLOAD_BASE_URL must be an https URL without query parameters"
+            exit 1
+          fi
+          echo "AGENT_DOWNLOAD_BASE_URL=${base}" >> "$GITHUB_ENV"
+
+      - name: Build linux binaries
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          mkdir -p dist/bin
+          for arch in amd64 arm64; do
+            (
+              cd apps/agent
+              CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" \
+                go build -trimpath -buildvcs=false \
+                -ldflags "-X main.version=${version}" \
+                -o "${GITHUB_WORKSPACE}/dist/bin/zako-agent-linux-${arch}" \
+                ./cmd/zako-agent
+            )
+          done
+
+      - name: Package archives
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          mkdir -p dist/agent-artifacts
+          for arch in amd64 arm64; do
+            deploy/package-release.sh "${version}" "${arch}" "dist/bin/zako-agent-linux-${arch}" dist/agent-artifacts
+          done
+
+      - name: Render network installer
+        run: |
+          base="${AGENT_DOWNLOAD_BASE_URL%/}"
+          mkdir -p dist/agent-stage
+          sed "s|__AGENT_BASE_URL__|${base}|g" deploy/netinstall.sh > dist/agent-stage/install.sh
+          chmod 0755 dist/agent-stage/install.sh
+          bash -n dist/agent-stage/install.sh
+          if grep -q '__AGENT_BASE_URL__' dist/agent-stage/install.sh; then
+            echo "::error::network installer still contains the base URL placeholder"
+            exit 1
+          fi
+
+      - name: Stage downloads assets
+        run: |
+          deploy/stage-downloads.sh \
+            --version "${{ steps.version.outputs.version }}" \
+            --installer dist/agent-stage/install.sh \
+            --artifacts dist/agent-artifacts \
+            --out apps/downloads/dist
+
+      - name: Verify amd64 archive and version
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          checkdir="$(mktemp -d)"
+          tar -xzf apps/downloads/dist/dl/agent/zako-agent-linux-amd64.tar.gz -C "${checkdir}"
+          "${checkdir}/zako-agent/zako-agent" --version | grep -F "${version}"
+
+      - name: Deploy downloads worker
+        run: npx wrangler deploy --config wrangler.downloads.jsonc
+
+      - name: Smoke test downloads
+        run: |
+          base="${AGENT_DOWNLOAD_BASE_URL%/}"
+          version="${{ steps.version.outputs.version }}"
+          for attempt in 1 2 3 4 5; do
+            if [ "$(curl -fsS "${base}/version" 2>/dev/null || true)" = "${version}" ]; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "::error::downloads route did not serve version ${version}"
+              exit 1
+            fi
+            sleep 3
+          done
+          curl -fsSI "${base}/zako-agent-linux-amd64.tar.gz" | grep -qi 'must-revalidate'
+          curl -fsSI "${base}/install.sh" | grep -qi '^content-type: text/x-shellscript'
+          code="$(curl -s -o /dev/null -w '%{http_code}' "${base}/missing.tar.gz")"
+          if [ "${code}" != "404" ]; then
+            echo "::error::missing download returned ${code}, expected 404"
+            exit 1
+          fi

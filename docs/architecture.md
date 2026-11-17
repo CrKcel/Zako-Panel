@@ -24,10 +24,11 @@ Zako Panel 由控制面（Cloudflare Worker + D1）、管理界面（Vue SPA）�
 - 免费额度优先，但鉴权、流量幂等和配置安全不降级。
 - 额度与到期采用软限制：停止下发新订阅、从节点用户集合移除，不承诺终止已建立的代理连接。
 - 首版不引入 Durable Object、Queues、KV、R2 或第三方控制面。
+- Agent 二进制通过独立 assets-only Downloads Worker 的静态资产分发，稳定 URL 滚动发布；面板 Worker 不处理 `/dl/*`。
 
 ### 1.3 非目标
 
-首版不实现多租户计费、自动支付、外部订阅转换、WebSocket 长连接、实时硬限速、面板内置 Xray 二进制分发、任意远程命令执行、分钟级原始流量留存。
+首版不实现多租户计费、自动支付、外部订阅转换、WebSocket 长连接、实时硬限速、面板内置 Xray 二进制分发、Agent 历史版本分发、任意远程命令执行、分钟级原始流量留存。
 
 ### 1.4 规模目标
 
@@ -55,6 +56,7 @@ Zako Panel 由控制面（Cloudflare Worker + D1）、管理界面（Vue SPA）�
 | UI 组件 | Element Plus + ECharts | 管理表格、表单与流量图表 |
 | 管理认证 | Cloudflare Access JWT + D1 RBAC | 避免在 10ms CPU 内执行密码哈希 |
 | Agent 认证 | 每节点独立高熵 Bearer token | 可单独撤销，数据库只存哈希 |
+| Agent 分发 | 独立 assets-only Downloads Worker + 稳定 URL 滚动发布 | 静态请求不计 Worker 请求，面板 SPA 与发布解耦 |
 | 节点模型 | `nodes` + `endpoints` | P0 单入站，P2 多协议不改表 |
 | Agent 上报 | 单端点合并心跳与流量 | 减少重复请求，离线时一次请求补状态 |
 | 流量幂等 | `report_id` + payload hash + D1 batch | ACK 丢失、Agent 重装均不重复入账 |
@@ -64,7 +66,7 @@ Zako Panel 由控制面（Cloudflare Worker + D1）、管理界面（Vue SPA）�
 | 状态检测 | 心跳时间派生，不写 `online` 字段 | 无逐节点 Cron，无冗余状态写入 |
 | 免费额度 | 静态资源走 Assets，控制面只做轻量 CRUD | 请求、CPU 与 D1 写入均可预算 |
 
-首版不设置 `run_worker_first=true`，只对 `/api/*` 与 `/sub/*` 开启 Worker 优先路由。
+首版不设置 `run_worker_first=true`，只对 `/api/*` 与 `/sub/*` 开启 Worker 优先路由。`/dl/*` 由独立 Downloads Worker 的路由处理，不进入面板 Worker。
 
 ## 3. 总体架构
 
@@ -73,6 +75,7 @@ flowchart LR
     Browser[管理浏览器] -->|静态页面| Assets[Workers Static Assets]
     Browser -->|管理 API| Worker[Cloudflare Worker]
     Client[订阅客户端] -->|Clash YAML / URI| Worker
+    NodeAdmin[节点管理员] -->|curl /dl/agent/*| Downloads[Downloads Worker]
     Worker --> D1[(Cloudflare D1)]
     Agent[Debian Go Agent] -->|心跳 / 流量 / 配置结果 HTTPS| Worker
     Agent -->|用户列表 / 配置定义| Worker
@@ -88,6 +91,7 @@ flowchart LR
 - Vue 是静态 SPA，不承担订阅令牌或 Agent token 的服务端保护职责。
 - D1 是控制面事实来源；Agent 本地状态（计数基线、outbox、用户集合、当前配置）是节点侧事实来源。
 - 节点私钥只保存在节点本地；Worker 只保存 REALITY 公钥与配置定义。
+- Downloads Worker 只保存 Agent 发布产物，不连接 D1，不执行面板业务逻辑。
 
 ## 4. 模块边界
 
@@ -121,6 +125,13 @@ flowchart LR
 - 状态轮询 30–60 秒，页面隐藏时暂停；流量页不高频轮询。
 - 订阅与 Agent token 只在创建或轮换时显示一次，不写入 `localStorage`。
 - 管理 API 使用同源请求与 Access Cookie，不在前端保存长期凭据。
+
+### 4.3 Downloads Worker
+
+- `wrangler.downloads.jsonc` 定义 `zako-agent-downloads`，没有 `main`，只配置 `assets` 与 `/dl/*` route。
+- 资产由 `deploy/stage-downloads.sh` 生成到 `apps/downloads/dist`，发布时整体部署；稳定 URL 滚动更新。
+- `_headers` 设置 `must-revalidate`、内容类型与下载头；`not_found_handling` 为 `none`。
+- 静态请求由 Cloudflare 直接返回，不计 Worker 请求与 CPU；版本与回滚细节见 [agent-distribution.md](agent-distribution.md)。
 
 ## 5. 扩展方式
 

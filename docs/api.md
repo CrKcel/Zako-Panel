@@ -1,6 +1,8 @@
 # API 契约
 
-所有接口以 `packages/contracts/openapi.yaml` 为准，TypeScript 类型由该文件生成；Go 端结构体手写，并用 `packages/contracts/fixtures` 做契约测试。管理接口鉴权见 [security.md](security.md)，流量与订阅的业务规则见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
+管理 API 与订阅 API 以 `packages/contracts/openapi.yaml` 为准，TypeScript 类型由该文件生成；Go 端结构体手写，并用 `packages/contracts/fixtures` 做契约测试。管理接口鉴权见 [security.md](security.md)，流量与订阅的业务规则见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
+
+Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 OpenAPI 契约内，路径与缓存规则见 [agent-distribution.md](agent-distribution.md)。
 
 ## 1. 通用约定
 

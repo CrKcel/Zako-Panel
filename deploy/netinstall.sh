@@ -73,7 +73,7 @@ BASE_URL="${BASE_URL%/}"
 while [[ "${BASE_URL}" == */ ]]; do
 	BASE_URL="${BASE_URL%/}"
 done
-if [[ "${BASE_URL}" == *"__AGENT_BASE_URL__"* ]]; then
+if [[ -z "${BASE_URL}" || "${BASE_URL}" == "__AGENT_BASE_"*"URL__" ]]; then
 	die "this installer was not published with a download base URL; pass --base-url"
 fi
 if [[ ! "${BASE_URL}" =~ ^https://[A-Za-z0-9._~:/@!$+,=%-]+$ ]]; then

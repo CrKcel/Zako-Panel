@@ -29,8 +29,8 @@ const (
 	handlerServiceName = "xray.app.proxyman.command.HandlerService"
 	alterInboundMethod = "/" + handlerServiceName + "/AlterInbound"
 
-	addUserOperationType    = "xray.proxyman.command.AddUserOperation"
-	removeUserOperationType = "xray.proxyman.command.RemoveUserOperation"
+	addUserOperationType    = "xray.app.proxyman.command.AddUserOperation"
+	removeUserOperationType = "xray.app.proxyman.command.RemoveUserOperation"
 	vlessAccountType        = "xray.proxy.vless.Account"
 )
 

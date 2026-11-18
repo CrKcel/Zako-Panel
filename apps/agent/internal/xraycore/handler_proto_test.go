@@ -45,11 +45,11 @@ func encodeTestAddUser(t *testing.T, tag string, user User) []byte {
 func TestAlterInboundAddUserEncodesXrayWireFormat(t *testing.T) {
 	encoded := encodeTestAddUser(t, testInboundTag, User{Email: testEmail, UUID: testUUID})
 	// AlterInboundRequest{tag="vless-reality", operation=TypedMessage{
-	// type="xray.proxyman.command.AddUserOperation",
+	// type="xray.app.proxyman.command.AddUserOperation",
 	// value=AddUserOperation{user=User{email="u_1", account=TypedMessage{
 	// type="xray.proxy.vless.Account",
 	// value=Account{id=<uuid>, flow="xtls-rprx-vision"}}}}}}
-	const golden = "0a0d766c6573732d7265616c6974791287010a26787261792e70726f78796d616e2e" +
+	const golden = "0a0d766c6573732d7265616c697479128b010a2a787261792e6170702e70726f78796d616e2e" +
 		"636f6d6d616e642e416464557365724f7065726174696f6e125d0a5b1203755f311a" +
 		"540a18787261792e70726f78792e766c6573732e4163636f756e7412380a2431313131" +
 		"313131312d313131312d313131312d313131312d3131313131313131313131311210" +
@@ -71,7 +71,7 @@ func TestAlterInboundRemoveUserEncodesXrayWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encodeAlterInboundRequest: %v", err)
 	}
-	const golden = "0a0d766c6573732d7265616c69747912320a29787261792e70726f78796d616e2e" +
+	const golden = "0a0d766c6573732d7265616c69747912360a2d787261792e6170702e70726f78796d616e2e" +
 		"636f6d6d616e642e52656d6f7665557365724f7065726174696f6e12050a03755f31"
 	if got := hex.EncodeToString(encoded); got != golden {
 		t.Fatalf("remove user request = %s, want %s", got, golden)

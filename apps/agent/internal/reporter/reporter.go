@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	enrollPath       = "/api/v1/agent/enroll"
 	reportPath       = "/api/v1/agent/report"
 	usersPath        = "/api/v1/agent/users"
 	configPath       = "/api/v1/agent/config"
@@ -193,6 +194,61 @@ func New(baseURL, token string, client *http.Client) (*Reporter, error) {
 		return nil, errors.New("reporter: base url must include a host")
 	}
 	return &Reporter{baseURL: parsed, token: token, client: client}, nil
+}
+
+// EnrollRequest registers a new node using a one-time enrollment token.
+type EnrollRequest struct {
+	Name             string `json:"name"`
+	Host             string `json:"host"`
+	Port             int    `json:"port,omitempty"`
+	SNI              string `json:"sni,omitempty"`
+	RealityPublicKey string `json:"reality_public_key"`
+	RealityShortID   string `json:"reality_short_id"`
+	AgentVersion     string `json:"agent_version,omitempty"`
+	XrayVersion      string `json:"xray_version,omitempty"`
+}
+
+// EnrollEndpoint describes the initial VLESS + REALITY endpoint created by enrollment.
+type EnrollEndpoint struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	SNI         string `json:"sni"`
+	ShortID     string `json:"short_id"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+// EnrollResponse carries the permanent node credentials and endpoint settings.
+type EnrollResponse struct {
+	NodeID                   string         `json:"node_id"`
+	AgentToken               string         `json:"agent_token"`
+	HeartbeatIntervalSeconds int            `json:"heartbeat_interval_seconds"`
+	Endpoint                 EnrollEndpoint `json:"endpoint"`
+}
+
+// Enroll registers a new node with a one-time enrollment token and returns the
+// permanent agent token and assigned node configuration.
+func (r *Reporter) Enroll(ctx context.Context, req *EnrollRequest) (*EnrollResponse, error) {
+	if req == nil {
+		return nil, errors.New("reporter: enroll request is required")
+	}
+	result, err := r.do(ctx, http.MethodPost, enrollPath, req, nil)
+	if err != nil {
+		return nil, fmt.Errorf("enroll node: %w", err)
+	}
+	if err := result.httpError(); err != nil {
+		return nil, fmt.Errorf("enroll node: %w", err)
+	}
+
+	var body envelope[EnrollResponse]
+	if err := json.Unmarshal(result.body, &body); err != nil {
+		return nil, fmt.Errorf("enroll node: decode response: %w", err)
+	}
+	if body.Data == nil {
+		return nil, errors.New("enroll node: response missing data")
+	}
+	return body.Data, nil
 }
 
 // Submit posts one report and returns the decoded response data. It returns an

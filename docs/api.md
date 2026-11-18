@@ -50,6 +50,9 @@ Agent 安装包与二进制下载端点由独立 Downloads Worker 托管，不�
 | `GET /api/v1/admin/nodes/{nodeId}` | 获取指定节点详情与状态 | viewer |
 | `PATCH /api/v1/admin/nodes/{nodeId}` | 更新节点名称、状态或心跳周期 | admin |
 | `POST /api/v1/admin/nodes/{nodeId}/agent-token/rotate` | 轮换 Agent 认证 Token，返回一次性明文 | admin |
+| `GET /api/v1/admin/node-enrollment-tokens` | 获取一次性节点注册 Token 列表 | viewer |
+| `POST /api/v1/admin/node-enrollment-tokens` | 创建一次性节点注册 Token（默认 24 小时有效） | admin |
+| `DELETE /api/v1/admin/node-enrollment-tokens/{tokenId}` | 作废未使用的一次性注册 Token | admin |
 | `GET /api/v1/admin/nodes/{nodeId}/status` | 查询节点派生状态、健康状态与版本指标 | viewer |
 | `GET /api/v1/admin/nodes/{nodeId}/clients` | 查询节点同步凭据列表（用于对齐验证） | viewer |
 | `GET /api/v1/admin/nodes/{nodeId}/endpoints` | 获取节点 endpoint 列表 | viewer |
@@ -96,7 +99,16 @@ Agent 安装包与二进制下载端点由独立 Downloads Worker 托管，不�
 
 ## 3. Agent 通信 API
 
-节点端 Agent 发起的所有请求均携带 `Authorization: Bearer <node_id>.<secret>` 标头。
+节点端 Agent 常规请求携带 `Authorization: Bearer <node_id>.<secret>` 标头；首次自动化初始化注册请求携带一次性注册 Token（`Authorization: Bearer <token_id>.<secret>`）。
+
+### 3.0 节点自动注册
+
+`POST /api/v1/agent/enroll`
+
+节点端通过 `zako-agent init` 使用面板生成的一次性注册 Token 完成鉴权并自动创建节点与首个 `vless-reality` endpoint：
+
+- 请求包含节点名称（`name`）、公网地址（`host`）、本地生成的 REALITY 公钥（`reality_public_key`）与 `reality_short_id`，以及可选端口与 SNI 覆盖项。
+- 控制面校验一次性 Token 的有效性与哈希，原子标记为已使用后创建节点与默认订阅者凭据，返回 `node_id`、永久 `agent_token` 及最终生效的 endpoint 参数。
 
 ### 3.1 状态与流量上报
 

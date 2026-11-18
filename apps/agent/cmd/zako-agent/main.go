@@ -24,6 +24,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/collector"
 	"github.com/zako-panel/zako-agent/internal/config"
 	"github.com/zako-panel/zako-agent/internal/configsync"
+	"github.com/zako-panel/zako-agent/internal/initcmd"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/syncer"
@@ -45,6 +46,10 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		return initcmd.Run(context.Background(), os.Args[2:], version, os.Stdout)
+	}
+
 	configPath := flag.String("config", "/etc/zako-agent/config.yaml", "path to the agent configuration file")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()

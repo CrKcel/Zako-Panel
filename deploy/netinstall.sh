@@ -26,16 +26,28 @@ die() {
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [--base-url <https://panel.example.com/dl/agent>]
+Usage: install.sh [--base-url <https://panel.example.com/dl/agent>] [--panel <https://panel.example.com> --token <enrollment_token>] [options]
 
 Downloads the current zako-agent release from the panel, verifies its SHA-256
-checksum and runs the bundled installer. Run as root. The service is enabled; the
-installer does not start it.
+checksum and runs the bundled installer. Run as root.
 
-The download base is embedded at release time; --base-url overrides it.
+When --panel and --token are provided, the installer automatically installs Xray
+if missing, enrolls the node with the panel, writes configuration files, and
+starts xray and zako-agent services.
+
+Options:
+  --base-url <url>     Override the agent download base URL
+  --panel <url>        Control plane HTTPS URL for automatic node enrollment
+  --token <token>      One-time enrollment token issued by the panel
+  --name <name>        Node name (defaults to hostname)
+  --host <host>        Public IP or domain (auto-detected if omitted)
+  --port <port>        Override VLESS port
+  --sni <sni>          Override REALITY SNI
+  --xray-mirror <url>  Override Xray-core download base URL
 EOF
 }
 
+PASSTHROUGH_ARGS=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--base-url)
@@ -47,7 +59,8 @@ while [[ $# -gt 0 ]]; do
 			exit 0
 			;;
 		*)
-			die "unknown argument: $1"
+			PASSTHROUGH_ARGS+=("$1")
+			shift
 			;;
 	esac
 done
@@ -161,4 +174,4 @@ STAGE="$(cat "${tmp}/STAGE_DIR")"
 trap 'rm -rf "${tmp}"' EXIT
 
 log "installing zako-agent ${VERSION} (linux/${ARCH}) from ${BASE_URL}"
-"${STAGE}/install.sh" "${STAGE}/zako-agent"
+"${STAGE}/install.sh" "${STAGE}/zako-agent" "${PASSTHROUGH_ARGS[@]}"

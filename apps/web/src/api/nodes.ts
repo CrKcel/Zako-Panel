@@ -1,10 +1,12 @@
 import type {
 	ConfigVersion,
 	CreateEndpointRequest,
+	CreateNodeEnrollmentTokenRequest,
 	CreateNodeRequest,
 	Endpoint,
 	Node,
 	NodeClient,
+	NodeEnrollmentToken,
 	UpdateEndpointRequest,
 	UpdateNodeRequest,
 } from '@zako/contracts';
@@ -26,9 +28,30 @@ export interface NodeDetail {
 	endpoints: Endpoint[];
 }
 
+export interface CreateEnrollmentTokenResult {
+	enrollment_token: NodeEnrollmentToken;
+	token: string;
+}
+
 export const nodesApi = {
 	list(params: NodeListParams = {}): Promise<Page<Node>> {
 		return apiPage<Node>('/api/v1/admin/nodes', { query: { limit: LIST_LIMIT, ...params } });
+	},
+	listEnrollmentTokens(params: NodeListParams = {}): Promise<Page<NodeEnrollmentToken>> {
+		return apiPage<NodeEnrollmentToken>('/api/v1/admin/node-enrollment-tokens', {
+			query: { limit: LIST_LIMIT, ...params },
+		});
+	},
+	createEnrollmentToken(input: CreateNodeEnrollmentTokenRequest): Promise<CreateEnrollmentTokenResult> {
+		return apiRequest<CreateEnrollmentTokenResult>('/api/v1/admin/node-enrollment-tokens', {
+			method: 'POST',
+			body: input,
+		});
+	},
+	revokeEnrollmentToken(tokenId: string): Promise<void> {
+		return apiRequest<void>(`/api/v1/admin/node-enrollment-tokens/${tokenId}`, {
+			method: 'DELETE',
+		});
 	},
 	create(input: CreateNodeRequest): Promise<CreateNodeResult> {
 		return apiRequest<CreateNodeResult>('/api/v1/admin/nodes', { method: 'POST', body: input });

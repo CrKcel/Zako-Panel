@@ -1158,6 +1158,135 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/admin/node-enrollment-tokens:
+    get:
+      operationId: listNodeEnrollmentTokens
+      tags: [admin]
+      summary: List one-time node enrollment tokens
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Enrollment token page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/NodeEnrollmentToken'
+                  meta:
+                    $ref: '#/components/schemas/ListMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createNodeEnrollmentToken
+      tags: [admin]
+      summary: Create a one-time node enrollment token
+      security:
+        - AccessJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeEnrollmentTokenRequest'
+      responses:
+        '201':
+          description: Enrollment token created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [enrollment_token, token]
+                    properties:
+                      enrollment_token:
+                        $ref: '#/components/schemas/NodeEnrollmentToken'
+                      token:
+                        type: string
+                        description: Plaintext one-time enrollment token returned once.
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/admin/node-enrollment-tokens/{tokenId}:
+    delete:
+      operationId: revokeNodeEnrollmentToken
+      tags: [admin]
+      summary: Revoke an unused node enrollment token
+      security:
+        - AccessJwt: []
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Enrollment token revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/agent/enroll:
+    post:
+      operationId: enrollAgent
+      tags: [agent]
+      summary: Enroll a new node using a one-time enrollment token
+      security:
+        - AgentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentEnrollRequest'
+      responses:
+        '201':
+          description: Node created and enrolled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentEnrollResponse'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/agent/report:
     post:
       operationId: submitAgentReport
@@ -2297,3 +2426,126 @@ components:
         definition:
           type: object
           additionalProperties: true
+    NodeEnrollmentToken:
+      type: object
+      required:
+        [
+          id,
+          name_prefix,
+          default_sni,
+          default_port,
+          default_fingerprint,
+          heartbeat_interval_seconds,
+          created_by,
+          expires_at,
+          used_at,
+          used_node_id,
+          revoked_at,
+          status,
+          created_at,
+        ]
+      properties:
+        id:
+          type: string
+        name_prefix:
+          type: [string, 'null']
+        default_sni:
+          type: string
+        default_port:
+          type: integer
+        default_fingerprint:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+        created_by:
+          type: string
+        expires_at:
+          type: integer
+        used_at:
+          type: [integer, 'null']
+        used_node_id:
+          type: [string, 'null']
+        revoked_at:
+          type: [integer, 'null']
+        status:
+          type: string
+          enum: [active, used, expired, revoked]
+        created_at:
+          type: integer
+    CreateNodeEnrollmentTokenRequest:
+      type: object
+      properties:
+        name_prefix:
+          type: [string, 'null']
+        default_sni:
+          type: string
+          default: www.microsoft.com
+        default_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 443
+        default_fingerprint:
+          type: string
+          enum: [chrome, firefox, safari, ios, android, edge, '360', qq, random]
+          default: chrome
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 900
+          default: 300
+        ttl_seconds:
+          type: integer
+          minimum: 300
+          maximum: 604800
+          default: 86400
+    AgentEnrollRequest:
+      type: object
+      required: [name, host, reality_public_key, reality_short_id]
+      properties:
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        sni:
+          type: string
+        reality_public_key:
+          type: string
+        reality_short_id:
+          type: string
+        agent_version:
+          type: string
+        xray_version:
+          type: string
+    AgentEnrollResponse:
+      type: object
+      required: [node_id, agent_token, heartbeat_interval_seconds, endpoint]
+      properties:
+        node_id:
+          type: string
+        agent_token:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+        endpoint:
+          type: object
+          required: [id, name, host, port, sni, short_id, fingerprint]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            host:
+              type: string
+            port:
+              type: integer
+            sni:
+              type: string
+            short_id:
+              type: string
+            fingerprint:
+              type: string

@@ -62,38 +62,40 @@ Agent 安装包采用独立轻量化的 Downloads Worker 托管在 `/dl/agent/*`
 
 ## 3. 节点安装与配置维护
 
-节点运行环境支持 Debian 12 与 Debian 13，需预先安装 Xray-core、`curl`、`tar` 与 CA 证书。
+节点运行环境支持 Debian 12 与 Debian 13，基础依赖仅需 `curl`（或 `wget`）、`tar` 与 CA 证书。若节点尚未安装 Xray-core，安装脚本会自动从 GitHub Releases（`XTLS/Xray-core`，可通过 `--xray-mirror` 覆盖源）下载对应架构二进制并校验 `.dgst` SHA-256 哈希，同时安装 `xray.service`。
 
-### 3.1 一键网络安装
+### 3.1 面板一键部署（推荐）
 
-在节点执行以下命令完成安装：
+1. 在管理面板「节点列表」点击 **「一键部署节点」**，按需填写名称前缀、默认 SNI、端口与 Fingerprint，生成一次性注册 Token（默认 24 小时有效、单次使用后立即失效）。
+2. 复制面板生成的一键部署命令在节点执行：
+
+```bash
+curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
+  --panel https://332711.xyz \
+  --token <ONE_TIME_ENROLLMENT_TOKEN>
+```
+
+可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--port <端口>`、`--sni <SNI>`、`--xray-mirror <镜像地址>`。
+
+安装脚本会自动完成以下流程：
+- 安装缺失的 Xray-core 至 `/usr/local/bin/xray` 与 `xray.service`。
+- 安装 `/usr/local/bin/zako-agent`、低权限系统用户 `zako-agent`、systemd 单元及 polkit 规则。
+- 生成 REALITY 私钥保存至 `/etc/xray/reality.key`（权限 `0600`）与随机 `short_id`。
+- 调用 `zako-agent init` 携带一次性 Token 向控制面 `POST /api/v1/agent/enroll` 注册节点，自动创建节点与 Endpoint 记录并获取永久 `agent_token`。
+- 写入 `/etc/zako-agent/token`（`0600`）与 `/etc/zako-agent/config.yaml`（`0640`），渲染 `/etc/xray/config.json`。
+- 启动 `xray.service` 与 `zako-agent.service`，节点自动上线。
+
+### 3.2 手动安装与升级
+
+若不传入 `--panel` 与 `--token`，仍可执行纯安装模式：
 
 ```bash
 curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 ```
 
-安装脚本自动完成以下配置：
-- 安装可执行文件至 `/usr/local/bin/zako-agent`，创建低权限系统用户与用户组 `zako-agent`。
-- 创建目录 `/etc/zako-agent` 与 `/var/lib/zako-agent`（权限 `0700`）。
-- 部署 systemd 单元 `zako-agent.service` 与 polkit 权限规则 `/etc/polkit-1/rules.d/50-zako-agent-xray.rules`。
-- 设置 `/etc/xray` 目录属组为 `zako-agent` 且权限为 `0770`，以满足配置原子替换要求。
-- 自动生成 REALITY 私钥保存至 `/etc/xray/reality.key`（权限 `0600`），并在终端输出公钥。
-- 自动渲染 `/etc/xray/config.json` 写入私钥与随机 short-id。
+该模式同样会自动安装缺失的 Xray、生成 REALITY 密钥与模板配置，并在终端输出公钥与 `short_id`，随后按需手动创建节点、写入 `/etc/zako-agent/token` 与 `/etc/zako-agent/config.yaml` 并启动 `zako-agent`。
 
-### 3.2 节点初始化与服务启动
-
-1. 在控制面板创建节点，获取一次性 Agent Bearer Token。
-2. 将 Token 写入节点 `/etc/zako-agent/token`，属主设为 `zako-agent`，权限设为 `0600`。
-3. 编辑 `/etc/zako-agent/config.yaml`，填入 `control_plane_url` 与 `node_id`。
-4. 将安装时输出的 REALITY 公钥与 short-id 录入控制面板对应节点的 endpoint 配置中。
-5. 启动服务并观察日志：
-
-```bash
-sudo systemctl start zako-agent
-journalctl -u zako-agent -f
-```
-
-节点升级直接重新执行一键安装命令，随后执行 `sudo systemctl restart zako-agent`。
+节点升级直接重新执行不带 `--token` 的安装命令，随后执行 `sudo systemctl restart zako-agent`。
 
 ## 4. 上线验证清单
 

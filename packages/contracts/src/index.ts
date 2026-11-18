@@ -43,8 +43,12 @@ export type AgentUser = Schemas['AgentUser'];
 export type AgentUsers = Schemas['AgentUsers'];
 export type AgentConfig = Schemas['AgentConfig'];
 export type AgentConfigResult = Schemas['AgentConfigResult'];
+export type AgentEnrollRequest = Schemas['AgentEnrollRequest'];
+export type AgentEnrollResponse = Schemas['AgentEnrollResponse'];
 
 export type CreateNodeRequest = Schemas['CreateNodeRequest'];
+export type NodeEnrollmentToken = Schemas['NodeEnrollmentToken'];
+export type CreateNodeEnrollmentTokenRequest = Schemas['CreateNodeEnrollmentTokenRequest'];
 export type UpdateNodeRequest = Schemas['UpdateNodeRequest'];
 export type CreateEndpointRequest = Schemas['CreateEndpointRequest'];
 export type UpdateEndpointRequest = Schemas['UpdateEndpointRequest'];

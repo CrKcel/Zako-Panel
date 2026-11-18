@@ -396,6 +396,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/node-enrollment-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List one-time node enrollment tokens */
+        get: operations["listNodeEnrollmentTokens"];
+        put?: never;
+        /** Create a one-time node enrollment token */
+        post: operations["createNodeEnrollmentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/node-enrollment-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an unused node enrollment token */
+        delete: operations["revokeNodeEnrollmentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enroll a new node using a one-time enrollment token */
+        post: operations["enrollAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agent/report": {
         parameters: {
             query?: never;
@@ -870,6 +922,62 @@ export interface components {
         PublishConfigRequest: {
             definition: {
                 [key: string]: unknown;
+            };
+        };
+        NodeEnrollmentToken: {
+            id: string;
+            name_prefix: string | null;
+            default_sni: string;
+            default_port: number;
+            default_fingerprint: string;
+            heartbeat_interval_seconds: number;
+            created_by: string;
+            expires_at: number;
+            used_at: number | null;
+            used_node_id: string | null;
+            revoked_at: number | null;
+            /** @enum {string} */
+            status: "active" | "used" | "expired" | "revoked";
+            created_at: number;
+        };
+        CreateNodeEnrollmentTokenRequest: {
+            name_prefix?: string | null;
+            /** @default www.microsoft.com */
+            default_sni: string;
+            /** @default 443 */
+            default_port: number;
+            /**
+             * @default chrome
+             * @enum {string}
+             */
+            default_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random";
+            /** @default 300 */
+            heartbeat_interval_seconds: number;
+            /** @default 86400 */
+            ttl_seconds: number;
+        };
+        AgentEnrollRequest: {
+            name: string;
+            host: string;
+            port?: number;
+            sni?: string;
+            reality_public_key: string;
+            reality_short_id: string;
+            agent_version?: string;
+            xray_version?: string;
+        };
+        AgentEnrollResponse: {
+            node_id: string;
+            agent_token: string;
+            heartbeat_interval_seconds: number;
+            endpoint: {
+                id: string;
+                name: string;
+                host: string;
+                port: number;
+                sni: string;
+                short_id: string;
+                fingerprint: string;
             };
         };
     };
@@ -2017,6 +2125,125 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listNodeEnrollmentTokens: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment token page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["NodeEnrollmentToken"][];
+                        };
+                        meta: components["schemas"]["ListMeta"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createNodeEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNodeEnrollmentTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Enrollment token created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            enrollment_token: components["schemas"]["NodeEnrollmentToken"];
+                            /** @description Plaintext one-time enrollment token returned once. */
+                            token: string;
+                        };
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    revokeNodeEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment token revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    enrollAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description Node created and enrolled */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentEnrollResponse"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

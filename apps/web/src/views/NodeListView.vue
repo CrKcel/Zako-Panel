@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { CreateNodeRequest, Node } from '@zako/contracts';
+import type { CreateNodeEnrollmentTokenRequest, CreateNodeRequest, Node, NodeEnrollmentToken } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import EndpointFormFields from '../components/EndpointFormFields.vue';
@@ -42,6 +42,31 @@ const createFormRef = ref<FormInstance>();
 const editFormRef = ref<FormInstance>();
 const agentToken = ref('');
 const tokenVisible = ref(false);
+
+const enrollCreateVisible = ref(false);
+const enrollResultVisible = ref(false);
+const enrollListVisible = ref(false);
+const enrollToken = ref('');
+const enrollTokens = ref<NodeEnrollmentToken[]>([]);
+const enrollTokensLoading = ref(false);
+const enrollForm = ref<{
+	name_prefix: string;
+	default_sni: string;
+	default_port: number;
+	default_fingerprint: NonNullable<CreateNodeEnrollmentTokenRequest['default_fingerprint']>;
+	heartbeat_interval_seconds: number;
+}>({
+	name_prefix: '',
+	default_sni: 'www.microsoft.com',
+	default_port: 443,
+	default_fingerprint: 'chrome',
+	heartbeat_interval_seconds: 300,
+});
+
+const panelOrigin = computed(() => (typeof window !== 'undefined' ? window.location.origin : 'https://panel.example.com'));
+const enrollCommand = computed(
+	() => `curl -fsSL ${panelOrigin.value}/dl/agent/install.sh | sudo bash -s -- --panel ${panelOrigin.value} --token ${enrollToken.value}`,
+);
 
 const {
 	data: nodes,
@@ -157,13 +182,89 @@ async function rotateAgentToken(node: Node): Promise<void> {
 	if (!(await confirmAction(`轮换「${node.name}」的 Agent token？`))) return;
 	await rotateAction.runFor(node.id, node);
 }
+
+function openEnrollCreate(): void {
+	enrollForm.value = {
+		name_prefix: '',
+		default_sni: 'www.microsoft.com',
+		default_port: 443,
+		default_fingerprint: 'chrome',
+		heartbeat_interval_seconds: 300,
+	};
+	enrollCreateVisible.value = true;
+}
+
+const createEnrollAction = useAsyncAction(
+	async () => {
+		const payload: CreateNodeEnrollmentTokenRequest = {
+			default_sni: enrollForm.value.default_sni.trim() || 'www.microsoft.com',
+			default_port: enrollForm.value.default_port,
+			default_fingerprint: enrollForm.value.default_fingerprint,
+			heartbeat_interval_seconds: enrollForm.value.heartbeat_interval_seconds,
+			ttl_seconds: 86_400,
+			...(enrollForm.value.name_prefix.trim() ? { name_prefix: enrollForm.value.name_prefix.trim() } : {}),
+		};
+		const result = await nodesApi.createEnrollmentToken(payload);
+		enrollCreateVisible.value = false;
+		enrollToken.value = result.token;
+		enrollResultVisible.value = true;
+		showSuccess('一次性部署命令已生成（24 小时内有效）');
+	},
+	{ onError: (error) => showError(error, '生成部署 Token 失败') },
+);
+
+async function loadEnrollmentTokens(): Promise<void> {
+	enrollTokensLoading.value = true;
+	try {
+		const page = await nodesApi.listEnrollmentTokens();
+		enrollTokens.value = page.items;
+	} catch (error) {
+		showError(error, '部署 Token 加载失败');
+	} finally {
+		enrollTokensLoading.value = false;
+	}
+}
+
+async function openEnrollList(): Promise<void> {
+	enrollListVisible.value = true;
+	await loadEnrollmentTokens();
+}
+
+const revokeEnrollAction = useAsyncAction(
+	async (token: NodeEnrollmentToken) => {
+		await nodesApi.revokeEnrollmentToken(token.id);
+		showSuccess('部署 Token 已作废');
+		await loadEnrollmentTokens();
+	},
+	{ onError: (error) => showError(error, '作废 Token 失败') },
+);
+
+async function revokeEnrollToken(token: NodeEnrollmentToken): Promise<void> {
+	if (!(await confirmAction('确定作废该一次性部署 Token？'))) return;
+	await revokeEnrollAction.runFor(token.id, token);
+}
+
+function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string; type: 'success' | 'info' | 'warning' | 'danger' } {
+	switch (status) {
+		case 'active':
+			return { label: '可用', type: 'success' };
+		case 'used':
+			return { label: '已使用', type: 'info' };
+		case 'expired':
+			return { label: '已过期', type: 'warning' };
+		case 'revoked':
+			return { label: '已作废', type: 'danger' };
+	}
+}
 </script>
 
 <template>
 	<el-card shadow="never">
 		<PageToolbar>
 			<el-button :loading="loading" @click="refresh">刷新</el-button>
-			<el-button type="primary" @click="openCreate">创建节点</el-button>
+			<el-button @click="openEnrollList">部署 Token</el-button>
+			<el-button type="primary" @click="openEnrollCreate">一键部署节点</el-button>
+			<el-button @click="openCreate">手动创建节点</el-button>
 		</PageToolbar>
 		<el-table v-loading="loading" :data="nodes" empty-text="暂无数据">
 			<el-table-column label="名称" min-width="180">
@@ -266,6 +367,79 @@ async function rotateAgentToken(node: Node): Promise<void> {
 				<el-button @click="copyText(agentToken)">复制</el-button>
 			</template>
 		</el-input>
+	</el-dialog>
+
+	<el-dialog v-model="enrollCreateVisible" title="一键部署节点" width="540px" :close-on-click-modal="false" destroy-on-close>
+		<el-form :model="enrollForm" label-width="120px">
+			<el-form-item label="名称前缀">
+				<el-input v-model="enrollForm.name_prefix" placeholder="可选，如 edge（留空则使用服务器主机名）" />
+			</el-form-item>
+			<el-form-item label="默认 SNI">
+				<el-input v-model="enrollForm.default_sni" placeholder="www.microsoft.com" />
+			</el-form-item>
+			<el-form-item label="默认端口">
+				<el-input-number v-model="enrollForm.default_port" :min="1" :max="65535" />
+			</el-form-item>
+			<el-form-item label="Fingerprint">
+				<el-select v-model="enrollForm.default_fingerprint">
+					<el-option v-for="fp in ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random']" :key="fp" :label="fp" :value="fp" />
+				</el-select>
+			</el-form-item>
+			<el-form-item label="心跳间隔 (s)">
+				<el-input-number v-model="enrollForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
+			</el-form-item>
+		</el-form>
+		<template #footer>
+			<el-button @click="enrollCreateVisible = false">取消</el-button>
+			<el-button type="primary" :loading="createEnrollAction.isRunning('create')" @click="createEnrollAction.runFor('create')"
+				>生成部署命令</el-button
+			>
+		</template>
+	</el-dialog>
+
+	<el-dialog v-model="enrollResultVisible" title="节点一键部署命令" width="680px" :close-on-click-modal="false" destroy-on-close>
+		<el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+			该一次性 Token 仅展示一次，默认 24 小时有效且使用一次后立即失效。执行后将自动安装缺失的 Xray、生成 REALITY 密钥并注册上线。
+		</el-alert>
+		<el-input :model-value="enrollCommand" type="textarea" :rows="3" readonly />
+		<div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px">
+			<el-button type="primary" @click="copyText(enrollCommand)">复制命令</el-button>
+		</div>
+	</el-dialog>
+
+	<el-dialog v-model="enrollListVisible" title="一次性部署 Token" width="760px" destroy-on-close>
+		<el-table v-loading="enrollTokensLoading" :data="enrollTokens" empty-text="暂无部署 Token">
+			<el-table-column label="状态" width="90">
+				<template #default="{ row }">
+					<el-tag :type="enrollStatusTag(row.status).type" disable-transitions>
+						{{ enrollStatusTag(row.status).label }}
+					</el-tag>
+				</template>
+			</el-table-column>
+			<el-table-column label="名称前缀" width="110">
+				<template #default="{ row }">{{ row.name_prefix ?? '—' }}</template>
+			</el-table-column>
+			<el-table-column label="默认 SNI / 端口" min-width="180">
+				<template #default="{ row }">{{ row.default_sni }}:{{ row.default_port }}</template>
+			</el-table-column>
+			<el-table-column label="过期时间" width="170">
+				<template #default="{ row }">{{ formatTimestamp(row.expires_at) }}</template>
+			</el-table-column>
+			<el-table-column label="操作" width="90" fixed="right">
+				<template #default="{ row }">
+					<el-button
+						v-if="row.status === 'active'"
+						link
+						type="danger"
+						:loading="revokeEnrollAction.isRunning(row.id)"
+						@click="revokeEnrollToken(row as NodeEnrollmentToken)"
+					>
+						作废
+					</el-button>
+					<span v-else>—</span>
+				</template>
+			</el-table-column>
+		</el-table>
 	</el-dialog>
 </template>
 

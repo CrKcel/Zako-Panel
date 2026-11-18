@@ -202,3 +202,23 @@ export const agentConfigResultSchema = z.object({
 export const subscriptionEncodingSchema = z.object({
 	encoding: z.enum(['base64', 'plain']).default('base64'),
 });
+
+export const createEnrollmentTokenSchema = z.object({
+	name_prefix: z.string().trim().min(1).max(32).nullable().optional(),
+	default_sni: z.string().trim().min(1).max(255).optional(),
+	default_port: z.number().int().min(1).max(65535).optional(),
+	default_fingerprint: z.enum(['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random']).optional(),
+	heartbeat_interval_seconds: z.number().int().min(60).max(900).optional(),
+	ttl_seconds: z.number().int().min(300).max(604_800).optional(),
+});
+
+export const agentEnrollSchema = z.object({
+	name: z.string().trim().min(1).max(64),
+	host: z.string().trim().min(1).max(255),
+	port: z.number().int().min(1).max(65535).optional(),
+	sni: z.string().trim().min(1).max(255).optional(),
+	reality_public_key: z.string().trim().min(1).max(255),
+	reality_short_id: z.string().trim().max(32),
+	agent_version: z.string().max(64).optional(),
+	xray_version: z.string().max(64).optional(),
+});

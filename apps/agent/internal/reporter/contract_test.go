@@ -156,3 +156,24 @@ func TestConfigFixture(t *testing.T) {
 		t.Errorf("definition missing inbounds key")
 	}
 }
+
+func TestEnrollFixtures(t *testing.T) {
+	var req EnrollRequest
+	if err := json.Unmarshal(readFixture(t, "agent-enroll.json"), &req); err != nil {
+		t.Fatalf("unmarshal enroll request: %v", err)
+	}
+	if req.Name != "edge-tokyo-01" || req.Host != "203.0.113.10" || req.Port != 443 || req.SNI != "www.microsoft.com" {
+		t.Errorf("unexpected enroll request: %+v", req)
+	}
+
+	var resp EnrollResponse
+	if err := json.Unmarshal(readFixture(t, "agent-enroll-response.json"), &resp); err != nil {
+		t.Fatalf("unmarshal enroll response: %v", err)
+	}
+	if resp.NodeID != "01J2Z6Q8Y3V9M4K7T1B5C0D2E6" || resp.HeartbeatIntervalSeconds != 300 {
+		t.Errorf("unexpected enroll response: %+v", resp)
+	}
+	if resp.Endpoint.Port != 443 || resp.Endpoint.SNI != "www.microsoft.com" {
+		t.Errorf("unexpected enroll endpoint: %+v", resp.Endpoint)
+	}
+}

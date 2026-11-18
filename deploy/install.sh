@@ -30,6 +30,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=lib/reality-key.sh
 . "${SCRIPT_DIR}/lib/reality-key.sh"
+# shellcheck source=lib/install-xray.sh
+. "${SCRIPT_DIR}/lib/install-xray.sh"
 
 log() {
 	printf '[zako-agent] %s\n' "$*"
@@ -60,22 +62,81 @@ ensure_xray_dir() {
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [path-to-zako-agent-binary]
+Usage: install.sh [path-to-zako-agent-binary] [options]
 
-Installs and enables zako-agent on Debian 12/13. The binary may be passed as the
-first argument or via ZAKO_AGENT_BINARY. If omitted, the installer looks for
-zako-agent next to this script, then for
-apps/agent/bin/zako-agent-linux-<arch> in this repository.
+Installs and enables zako-agent on Debian 12/13, and automatically installs
+Xray-core if missing.
 
-The service is enabled and is not started by this script. Write the node token
-issued by the panel to /etc/zako-agent/token and review
-/etc/zako-agent/config.yaml first.
+Options:
+  --panel <url>        Control plane HTTPS URL for automatic node enrollment
+  --token <token>      One-time enrollment token issued by the panel
+  --name <name>        Node name (defaults to hostname)
+  --host <host>        Public IP or domain (auto-detected if omitted)
+  --port <port>        Override VLESS port
+  --sni <sni>          Override REALITY SNI
+  --xray-mirror <url>  Override Xray-core download base URL
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-	usage
-	exit 0
+BINARY_ARG=""
+PANEL_URL=""
+ENROLL_TOKEN=""
+NODE_NAME=""
+NODE_HOST=""
+NODE_PORT=""
+NODE_SNI=""
+XRAY_MIRROR="${XRAY_MIRROR:-}"
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-h | --help)
+			usage
+			exit 0
+			;;
+		--panel)
+			PANEL_URL="${2:-}"
+			shift 2
+			;;
+		--token)
+			ENROLL_TOKEN="${2:-}"
+			shift 2
+			;;
+		--name)
+			NODE_NAME="${2:-}"
+			shift 2
+			;;
+		--host)
+			NODE_HOST="${2:-}"
+			shift 2
+			;;
+		--port)
+			NODE_PORT="${2:-}"
+			shift 2
+			;;
+		--sni)
+			NODE_SNI="${2:-}"
+			shift 2
+			;;
+		--xray-mirror)
+			XRAY_MIRROR="${2:-}"
+			shift 2
+			;;
+		-*)
+			die "unknown option: $1"
+			;;
+		*)
+			if [[ -z "${BINARY_ARG}" ]]; then
+				BINARY_ARG="$1"
+			else
+				die "unexpected argument: $1"
+			fi
+			shift
+			;;
+	esac
+done
+
+if [[ -n "${PANEL_URL}" && -z "${ENROLL_TOKEN}" ]] || [[ -z "${PANEL_URL}" && -n "${ENROLL_TOKEN}" ]]; then
+	die "--panel and --token must be provided together"
 fi
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -104,7 +165,7 @@ esac
 
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required"
 
-BINARY_SRC="${ZAKO_AGENT_BINARY:-${1:-}}"
+BINARY_SRC="${ZAKO_AGENT_BINARY:-${BINARY_ARG:-}}"
 if [[ -z "${BINARY_SRC}" ]]; then
 	for candidate in \
 		"${SCRIPT_DIR}/zako-agent" \
@@ -200,6 +261,24 @@ systemctl daemon-reload
 systemctl enable zako-agent.service
 log "installed and enabled zako-agent.service (not started)"
 
+ensure_xray_installed "${XRAY_BIN}" "${ARCH}" "${XRAY_MIRROR:-${XRAY_DEFAULT_MIRROR}}" "${XRAY_CONFIG}"
+
+detect_public_ip() {
+	local ip=""
+	for url in "https://api.ipify.org" "https://ifconfig.me/ip"; do
+		if command -v curl >/dev/null 2>&1; then
+			ip="$(curl --proto '=https' --tlsv1.2 -fsS --max-time 8 "${url}" 2>/dev/null | tr -d '[:space:]' || true)"
+		elif command -v wget >/dev/null 2>&1; then
+			ip="$(wget --https-only -qO- --timeout=8 "${url}" 2>/dev/null | tr -d '[:space:]' || true)"
+		fi
+		if [[ -n "${ip}" ]]; then
+			printf '%s\n' "${ip}"
+			return 0
+		fi
+	done
+	return 1
+}
+
 if [[ -x "${XRAY_BIN}" ]]; then
 	ensure_xray_dir
 	if [[ -e "${REALITY_KEY}" ]]; then
@@ -217,14 +296,81 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		chown "${SERVICE_USER}:${SERVICE_GROUP}" "${REALITY_KEY}"
 		chmod 0600 "${REALITY_KEY}"
 		log "wrote REALITY private key to ${REALITY_KEY} (0600, ${SERVICE_USER})"
-		printf 'REALITY public key: %s\n' "${public_key}"
+		if [[ -z "${PANEL_URL}" ]]; then
+			printf 'REALITY public key: %s\n' "${public_key}"
+		fi
+	fi
+
+	xray_template="${SCRIPT_DIR}/xray/config.example.json"
+	xray_renderer="${SCRIPT_DIR}/xray/render-config.py"
+
+	if [[ -n "${PANEL_URL}" && -n "${ENROLL_TOKEN}" ]]; then
+		if [[ -z "${NODE_HOST}" ]]; then
+			NODE_HOST="$(detect_public_ip)" || die "could not auto-detect public IP; pass --host <ip_or_domain>"
+			log "detected public host: ${NODE_HOST}"
+		fi
+		xray_ver="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 | awk '{print $2}' || true)"
+		init_args=(
+			init
+			--panel "${PANEL_URL}"
+			--token "${ENROLL_TOKEN}"
+			--host "${NODE_HOST}"
+			--config "${CONFIG_PATH}"
+			--token-file "${TOKEN_PATH}"
+			--reality-key "${REALITY_KEY}"
+			--xray-config "${XRAY_CONFIG}"
+			--xray-bin "${XRAY_BIN}"
+		)
+		if [[ -n "${NODE_NAME}" ]]; then
+			init_args+=(--name "${NODE_NAME}")
+		fi
+		if [[ -n "${NODE_PORT}" ]]; then
+			init_args+=(--port "${NODE_PORT}")
+		fi
+		if [[ -n "${NODE_SNI}" ]]; then
+			init_args+=(--sni "${NODE_SNI}")
+		fi
+		if [[ -n "${xray_ver}" ]]; then
+			init_args+=(--xray-version "${xray_ver}")
+		fi
+
+		log "enrolling node with ${PANEL_URL}"
+		init_json="$("${BIN_PATH}" "${init_args[@]}")" || die "node enrollment failed"
+		chown "${SERVICE_USER}:${SERVICE_GROUP}" "${TOKEN_PATH}"
+		chmod 0600 "${TOKEN_PATH}"
+		chown root:"${SERVICE_GROUP}" "${CONFIG_PATH}"
+		chmod 0640 "${CONFIG_PATH}"
+
+		enrolled_node_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["node_id"])' "${init_json}")"
+		enrolled_sni="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["sni"])' "${init_json}")"
+		enrolled_port="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["port"])' "${init_json}")"
+		enrolled_short_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["short_id"])' "${init_json}")"
+
+		if [[ -f "${xray_template}" && -f "${xray_renderer}" ]] && command -v python3 >/dev/null 2>&1; then
+			python3 "${xray_renderer}" "${xray_template}" "${XRAY_CONFIG}" "$(head -n 1 "${REALITY_KEY}")" "${enrolled_short_id}" "${enrolled_sni}" "${enrolled_port}"
+			chown root:"${SERVICE_GROUP}" "${XRAY_CONFIG}"
+			chmod 0640 "${XRAY_CONFIG}"
+			log "wrote ${XRAY_CONFIG} (SNI=${enrolled_sni}, port=${enrolled_port})"
+		else
+			warn "could not render ${XRAY_CONFIG}; check python3 and ${xray_template}"
+		fi
+
+		systemctl restart xray.service
+		systemctl restart zako-agent.service
+		cat <<EOF
+
+Node enrolled and started!
+  node_id: ${enrolled_node_id}
+  host:    ${NODE_HOST}:${enrolled_port}
+  sni:     ${enrolled_sni}
+  logs:    journalctl -u zako-agent -f
+EOF
+		exit 0
 	fi
 
 	# The static inbound is materialised from the shipped template. Clients start as
 	# placeholders and are replaced by the first user sync, which renders the same
 	# file from the node's user set.
-	xray_template="${SCRIPT_DIR}/xray/config.example.json"
-	xray_renderer="${SCRIPT_DIR}/xray/render-config.py"
 	if [[ ! -f "${xray_template}" ]]; then
 		warn "xray config template not found at ${xray_template}; create ${XRAY_CONFIG} manually"
 	elif [[ -e "${XRAY_CONFIG}" ]]; then

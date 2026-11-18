@@ -43,6 +43,106 @@ export interface CreateNodeResult {
 	agent_token: string;
 }
 
+export interface NodeProvisionParams {
+	nodeId: string;
+	endpointId: string;
+	name: string;
+	heartbeatInterval: number;
+	endpoint: CreateEndpointRequest;
+	now: number;
+}
+
+/**
+ * Prepares the D1 batch statements and permanent agent token for creating a new
+ * node, its initial endpoint, and a default-subscriber grant when present.
+ */
+export async function prepareNodeProvision(
+	db: D1Database,
+	params: NodeProvisionParams,
+): Promise<{
+	statements: D1PreparedStatement[];
+	agentToken: string;
+	nodeRow: NodeRow;
+	endpointRow: EndpointRow;
+}> {
+	const secret = generateToken();
+	const tokenHash = await sha256Hex(secret);
+	const defaultSubscriberId = await getMetaValue(db, META_KEYS.defaultSubscriberId);
+	const defaultSubscriber = defaultSubscriberId ? await findSubscriberById(db, defaultSubscriberId) : null;
+
+	const nodeRow: NodeRow = {
+		id: params.nodeId,
+		name: params.name,
+		enabled: 1,
+		heartbeat_interval_seconds: params.heartbeatInterval,
+		last_seen_at: null,
+		xray_healthy: null,
+		stats_healthy: null,
+		agent_version: null,
+		xray_version: null,
+		sys_json: null,
+		desired_config_version: 0,
+		applied_config_version: 0,
+		last_config_error: null,
+		last_config_at: null,
+		created_at: params.now,
+		updated_at: params.now,
+	};
+
+	const statements = [
+		insertNodeStatement(db, {
+			id: params.nodeId,
+			name: params.name,
+			agent_token_hash: tokenHash,
+			heartbeat_interval_seconds: params.heartbeatInterval,
+			now: params.now,
+		}),
+		insertEndpointStatement(db, {
+			id: params.endpointId,
+			node_id: params.nodeId,
+			name: params.endpoint.name,
+			protocol: DEFAULT_PROTOCOL,
+			host: params.endpoint.host,
+			port: params.endpoint.port,
+			params_json: JSON.stringify(params.endpoint.params),
+			now: params.now,
+		}),
+		bumpUsersVersionStatement(db),
+	];
+	if (defaultSubscriber) {
+		statements.push(
+			insertNodeClientStatement(db, {
+				id: newId(),
+				node_id: params.nodeId,
+				subscriber_id: defaultSubscriber.id,
+				xray_email: newXrayEmail(),
+				vless_uuid: crypto.randomUUID(),
+				now: params.now,
+			}),
+		);
+	}
+
+	const endpointRow: EndpointRow = {
+		id: params.endpointId,
+		node_id: params.nodeId,
+		name: params.endpoint.name,
+		protocol: DEFAULT_PROTOCOL,
+		host: params.endpoint.host,
+		port: params.endpoint.port,
+		params_json: JSON.stringify(params.endpoint.params),
+		enabled: 1,
+		created_at: params.now,
+		updated_at: params.now,
+	};
+
+	return {
+		statements,
+		agentToken: `${params.nodeId}.${secret}`,
+		nodeRow,
+		endpointRow,
+	};
+}
+
 function parseSysStats(sysJson: string | null): SysStats | null {
 	if (!sysJson) return null;
 	let parsed: unknown;
@@ -138,64 +238,15 @@ export async function createNode(db: D1Database, input: CreateNodeRequest): Prom
 	const now = nowSeconds();
 	const nodeId = newId();
 	const endpointId = newId();
-	const secret = generateToken();
-	const tokenHash = await sha256Hex(secret);
 	const heartbeatInterval = input.heartbeat_interval_seconds ?? 300;
-
-	const defaultSubscriberId = await getMetaValue(db, META_KEYS.defaultSubscriberId);
-	const defaultSubscriber = defaultSubscriberId ? await findSubscriberById(db, defaultSubscriberId) : null;
-
-	const nodeRow: NodeRow = {
-		id: nodeId,
+	const { statements, agentToken, nodeRow, endpointRow } = await prepareNodeProvision(db, {
+		nodeId,
+		endpointId,
 		name: input.name,
-		enabled: 1,
-		heartbeat_interval_seconds: heartbeatInterval,
-		last_seen_at: null,
-		xray_healthy: null,
-		stats_healthy: null,
-		agent_version: null,
-		xray_version: null,
-		sys_json: null,
-		desired_config_version: 0,
-		applied_config_version: 0,
-		last_config_error: null,
-		last_config_at: null,
-		created_at: now,
-		updated_at: now,
-	};
-
-	const statements = [
-		insertNodeStatement(db, {
-			id: nodeId,
-			name: input.name,
-			agent_token_hash: tokenHash,
-			heartbeat_interval_seconds: heartbeatInterval,
-			now,
-		}),
-		insertEndpointStatement(db, {
-			id: endpointId,
-			node_id: nodeId,
-			name: input.endpoint.name,
-			protocol: DEFAULT_PROTOCOL,
-			host: input.endpoint.host,
-			port: input.endpoint.port,
-			params_json: JSON.stringify(input.endpoint.params),
-			now,
-		}),
-		bumpUsersVersionStatement(db),
-	];
-	if (defaultSubscriber) {
-		statements.push(
-			insertNodeClientStatement(db, {
-				id: newId(),
-				node_id: nodeId,
-				subscriber_id: defaultSubscriber.id,
-				xray_email: newXrayEmail(),
-				vless_uuid: crypto.randomUUID(),
-				now,
-			}),
-		);
-	}
+		heartbeatInterval,
+		endpoint: input.endpoint,
+		now,
+	});
 
 	try {
 		await db.batch(statements);
@@ -206,23 +257,10 @@ export async function createNode(db: D1Database, input: CreateNodeRequest): Prom
 		throw error;
 	}
 
-	const endpointRow: EndpointRow = {
-		id: endpointId,
-		node_id: nodeId,
-		name: input.endpoint.name,
-		protocol: DEFAULT_PROTOCOL,
-		host: input.endpoint.host,
-		port: input.endpoint.port,
-		params_json: JSON.stringify(input.endpoint.params),
-		enabled: 1,
-		created_at: now,
-		updated_at: now,
-	};
-
 	return {
 		node: toNode(nodeRow, now),
 		endpoint: toEndpoint(endpointRow),
-		agent_token: `${nodeId}.${secret}`,
+		agent_token: agentToken,
 	};
 }
 

@@ -14,15 +14,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zako-panel/zako-agent/internal/xray"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 // Sample is one read of all counters at a single instant. Counters are cumulative
 // for the lifetime of the Xray process.
 type Sample struct {
 	At                time.Time
-	Users             []xray.UserCounters
-	Inbounds          map[string]xray.ByteCounters
+	Users             []xraycore.UserCounters
+	Inbounds          map[string]xraycore.ByteCounters
 	XrayUptimeSeconds int64
 }
 
@@ -34,14 +34,14 @@ type Handler func(ctx context.Context, sample Sample) error
 // handler delays the next sample rather than overlapping writes.
 type Collector struct {
 	interval time.Duration
-	stats    xray.StatsReader
+	stats    xraycore.StatsReader
 	handle   Handler
 	logger   *slog.Logger
 	healthy  atomic.Bool
 }
 
 // New validates the sampling cadence and dependencies.
-func New(interval time.Duration, stats xray.StatsReader, handle Handler, logger *slog.Logger) (*Collector, error) {
+func New(interval time.Duration, stats xraycore.StatsReader, handle Handler, logger *slog.Logger) (*Collector, error) {
 	if interval <= 0 {
 		return nil, fmt.Errorf("collector: sample interval must be positive, got %s", interval)
 	}

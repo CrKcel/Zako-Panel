@@ -27,7 +27,9 @@ import (
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/syncer"
 	"github.com/zako-panel/zako-agent/internal/sysinfo"
-	"github.com/zako-panel/zako-agent/internal/xray"
+	"github.com/zako-panel/zako-agent/internal/xrayapply"
+	"github.com/zako-panel/zako-agent/internal/xrayconfig"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -89,7 +91,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	stats, err := xray.NewStatsClient(cfg.XrayAPIAddress)
+	stats, err := xraycore.NewStatsClient(cfg.XrayAPIAddress)
 	if err != nil {
 		return err
 	}
@@ -99,7 +101,7 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	handler, err := xray.NewHandlerClient(cfg.XrayAPIAddress, cfg.XrayInboundTag)
+	handler, err := xraycore.NewHandlerClient(cfg.XrayAPIAddress, cfg.XrayInboundTag)
 	if err != nil {
 		return err
 	}
@@ -133,12 +135,12 @@ func run(logger *slog.Logger) error {
 	// The restart fallback needs a validated document, a restart and a health
 	// check. The agent runs unprivileged; the shipped polkit rule lets its service
 	// user restart xray.service only.
-	applier, err := xray.NewConfigApplier(xray.ConfigApplierOptions{
+	applier, err := xrayapply.NewConfigApplier(xrayapply.ConfigApplierOptions{
 		ConfigPath: cfg.XrayConfigPath,
 		BinaryPath: cfg.XrayBinaryPath,
-		Restarter:  xray.SystemctlRestarter{Runner: xray.ExecRunner{}},
-		Runner:     xray.ExecRunner{},
-		Health:     xray.StatsHealth{Stats: stats},
+		Restarter:  xrayapply.SystemctlRestarter{Runner: xrayapply.ExecRunner{}},
+		Runner:     xrayapply.ExecRunner{},
+		Health:     xrayapply.StatsHealth{Stats: stats},
 		Logger:     logger.With("component", "config-applier"),
 	})
 	if err != nil {
@@ -149,7 +151,7 @@ func run(logger *slog.Logger) error {
 		Users:     handler,
 		Store:     store,
 		UsersPath: cfg.UsersPath,
-		Config: xray.ConfigFile{
+		Config: xrayconfig.ConfigFile{
 			Path:                  cfg.XrayConfigPath,
 			RealityPrivateKeyPath: cfg.RealityPrivateKeyPath,
 		},

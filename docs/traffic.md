@@ -157,9 +157,9 @@ ON CONFLICT(subscriber_id) DO UPDATE SET
 ## 4. 额度与周期
 
 - `subscribers.usage_cycle_start` / `usage_cycle_end` 定义当前周期，取 UTC 自然月：每月 1 日 00:00 UTC 开始，下月 1 日 00:00 UTC 结束。
-- `*/15` Cron 每轮先用一条 SQL 选出周期已结束或物化状态与到期/当前周期用量不一致的候选订阅用户，单轮上限 500 行；只读取这些候选行的 `subscriber_usage`。仅在 `usage_cycle_end <= now` 时推进周期，单行最多推进 240 次以覆盖长期未运行的记录，超过上限时直接切换到当前月周期。
+- `*/15` Cron 每轮先用一条 SQL 选出候选订阅用户，单轮上限 500 行；只读取这些候选行的 `subscriber_usage`。候选条件是周期已结束，或存储的状态值可能已经过期：`active` 但到期/超额、`expired` 但到期时间已放宽、`limited` 但额度已放宽。该查询只判断“存储值是否可能失效”，不判断下一个状态值；优先级仍由 `lib/subscriber-status.ts` 的单一定义决定。仅在 `usage_cycle_end <= now` 时推进周期，单行最多推进 240 次以覆盖长期未运行的记录，超过上限时直接切换到当前月周期。
 - 推进周期时把 `subscriber_usage` 重置为 `(cycle_start, 0, 0)`，并在同一 batch 内更新 `usage_cycle_start` / `usage_cycle_end`。
-- 周期内状态按以下优先级派生并物化到 `subscribers.status`：`disabled`（管理员停用，粘性）优先，其次 `expired`（`expires_at <= now`），其次 `limited`（有限额且周期用量 `>= limit`），否则 `active`。
+- 周期内状态按以下优先级派生并物化到 `subscribers.status`：`disabled`（管理员停用，粘性）优先，其次 `expired`（`expires_at <= now`），其次 `limited`（有限额且周期用量 `>= limit`），否则 `active`。订阅请求的放行判定与 Cron 物化状态都投影同一份定义（`lib/subscriber-status.ts`），因此 403 原因与展示状态不会分叉。
 - 有状态变化时本轮递增一次 `meta.users_ver`，触发 Agent 拉取用户列表；所有状态都与现有值一致时不写 `users_ver`。
 - 管理员修改额度、到期或状态时，在同一 D1 batch 中写入订阅用户，状态发生变化才递增 `users_ver`；`PUT /subscribers/{subscriberId}/nodes` 在授权集合实际变化时递增 `users_ver`。
 - 订阅请求实时按 `expires_at`、当前周期用量与 `disabled` 判定，不依赖 Cron 的物化结果；`limited` 与 `expired` 的物化值只影响管理界面展示与 Agent 用户集合。

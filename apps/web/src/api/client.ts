@@ -1,5 +1,8 @@
 import type { ListMeta } from '@zako/contracts';
 
+/** Admin lists are small; one capped page is fetched instead of paginating. */
+export const LIST_LIMIT = 200;
+
 export interface Page<T> {
 	items: T[];
 	next_cursor: string | null;

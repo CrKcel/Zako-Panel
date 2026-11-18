@@ -1,11 +1,14 @@
-// Package xray defines the agent's boundary to Xray-core.
+// Package xraycore defines the agent's gRPC boundary to Xray-core.
 //
 // StatsClient reads StatsService and HandlerClient mutates the running VLESS
 // inbound through HandlerService, both over loopback gRPC. Message encoding is
 // hand written in proto.go and handler_proto.go, so the agent does not vendor
-// xray-core or depend on protoc. The package also renders and applies the Xray
-// config document.
-package xray
+// xray-core or depend on protoc.
+//
+// The package is the bottom layer of the agent's Xray support: the credential
+// and counter types here are shared with the config renderer and the callers,
+// and nothing in this package imports another xray* package.
+package xraycore
 
 import (
 	"context"

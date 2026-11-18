@@ -3,7 +3,7 @@ import { noContent, ok, okPage } from '../../lib/response';
 import { readJson, readQuery } from '../../lib/validation';
 import { requireRole } from '../../middleware/roles';
 import { createProfile, deleteProfile, getProfile, listProfiles, updateProfile } from '../../services/profile-service';
-import { previewProfile } from '../../services/subscription-service';
+import { previewProfile } from '../../services/distribution';
 import type { AppEnv } from '../../types';
 import { createProfileSchema, listQuerySchema, pathId, previewProfileQuerySchema, updateProfileSchema } from '../schemas';
 

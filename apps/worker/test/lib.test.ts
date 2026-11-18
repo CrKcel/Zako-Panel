@@ -1,8 +1,9 @@
-import type { AgentTraffic } from '@zako/contracts';
+import type { AgentTraffic, SubscriberBlockReason, SubscriberStatus } from '@zako/contracts';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../src/lib/canonical-json';
 import { AppError } from '../src/lib/errors';
 import { deriveNodeStatus, isHeartbeatFresh } from '../src/lib/node-status';
+import { deriveSubscriberStatus, evaluateEntitlement, subscriberBlockReason, type EntitlementInput } from '../src/lib/subscriber-status';
 import { parseAgentToken } from '../src/lib/token';
 import { assertReportWindow, assertUniqueXrayEmails, trafficPayloadHash } from '../src/lib/traffic';
 
@@ -76,5 +77,70 @@ describe('canonical traffic payloads', () => {
 				{ xray_email: 'u_1', uplink_bytes: 2, downlink_bytes: 2 },
 			]),
 		).toThrow(AppError);
+	});
+});
+
+const NOW = 1_800_000_000;
+const CYCLE_START = NOW - 86_400;
+
+function entitlement(overrides: Partial<EntitlementInput>): EntitlementInput {
+	return {
+		status: 'active',
+		expires_at: null,
+		traffic_limit_bytes: null,
+		usage_cycle_start: CYCLE_START,
+		usage: null,
+		...overrides,
+	};
+}
+
+describe('subscriber entitlement', () => {
+	it('projects the subscription gate from the same priority as the materialised status', () => {
+		const cases: { input: EntitlementInput; status: SubscriberStatus; reason: SubscriberBlockReason | null }[] = [
+			{ input: entitlement({}), status: 'active', reason: null },
+			{ input: entitlement({ expires_at: NOW }), status: 'expired', reason: 'expired' },
+			{
+				input: entitlement({
+					traffic_limit_bytes: 100,
+					usage: { cycle_start: CYCLE_START, uplink_bytes: 60, downlink_bytes: 40 },
+				}),
+				status: 'limited',
+				reason: 'over_quota',
+			},
+			{ input: entitlement({ status: 'disabled', expires_at: NOW - 10 }), status: 'disabled', reason: 'inactive' },
+			// Expiry outranks the quota, so the refusal stays the same reason the cron materialises.
+			{
+				input: entitlement({
+					expires_at: NOW - 1,
+					traffic_limit_bytes: 1,
+					usage: { cycle_start: CYCLE_START, uplink_bytes: 5, downlink_bytes: 0 },
+				}),
+				status: 'expired',
+				reason: 'expired',
+			},
+			// Usage from a previous cycle does not keep a subscriber limited.
+			{
+				input: entitlement({
+					traffic_limit_bytes: 100,
+					usage: { cycle_start: CYCLE_START - 86_400, uplink_bytes: 100, downlink_bytes: 0 },
+				}),
+				status: 'active',
+				reason: null,
+			},
+		];
+		for (const { input, status, reason } of cases) {
+			expect(deriveSubscriberStatus(input, NOW)).toBe(status);
+			expect(subscriberBlockReason(input, NOW)).toBe(reason);
+		}
+	});
+
+	it('refuses a subscription exactly when the materialised status is not active', () => {
+		const statuses: SubscriberStatus[] = ['active', 'limited', 'expired', 'disabled'];
+		for (const status of statuses) {
+			for (const expiresAt of [null, NOW - 1, NOW + 86_400]) {
+				const result = evaluateEntitlement(entitlement({ status, expires_at: expiresAt }), NOW);
+				expect(result.blocked_reason === null).toBe(result.status === 'active');
+			}
+		}
 	});
 });

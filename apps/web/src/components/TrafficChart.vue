@@ -4,13 +4,14 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type EChartsType } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { TrafficSeries } from '../domain/traffic';
 import { formatBytes } from '../utils/format';
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 const props = defineProps<{
 	categories: string[];
-	series: { name: string; values: number[] }[];
+	series: TrafficSeries[];
 }>();
 
 const chartEl = ref<HTMLDivElement | null>(null);

@@ -15,7 +15,6 @@ import (
 
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/sysinfo"
-	bolt "go.etcd.io/bbolt"
 )
 
 type fakeClock struct {
@@ -169,7 +168,7 @@ func seedOutbox(t *testing.T, store *state.Store, reportID string) state.Traffic
 			{Email: "alice@example.com", UplinkBytes: 1, DownlinkBytes: 2},
 		},
 	}
-	if err := store.Update(func(tx *bolt.Tx) error {
+	if err := store.Update(func(tx *state.Tx) error {
 		return state.PutOutboxReport(tx, report)
 	}); err != nil {
 		t.Fatalf("seed outbox: %v", err)
@@ -538,7 +537,7 @@ func TestClosingSendsReportImmediately(t *testing.T) {
 	fixture := newLoopFixture(t, client)
 	fixture.reports.closed = 1
 	fixture.reports.onClose = func() {
-		if err := fixture.store.Update(func(tx *bolt.Tx) error {
+		if err := fixture.store.Update(func(tx *state.Tx) error {
 			return state.PutOutboxReport(tx, state.TrafficReport{
 				ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
 				PeriodStart: 1_780_000_000,

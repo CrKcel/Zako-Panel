@@ -30,7 +30,9 @@ import (
 	"github.com/zako-panel/zako-agent/internal/atomicfile"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
-	"github.com/zako-panel/zako-agent/internal/xray"
+	"github.com/zako-panel/zako-agent/internal/xrayapply"
+	"github.com/zako-panel/zako-agent/internal/xrayconfig"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 const (
@@ -67,15 +69,15 @@ type Fetcher interface {
 	FetchUsers(ctx context.Context, etag string) (*reporter.UsersResponse, bool, error)
 }
 
-// ConfigStore owns the node's Xray config document. *xray.ConfigFile implements
-// it; tests substitute an in-memory document.
+// ConfigStore owns the node's Xray config document. *xrayconfig.ConfigFile
+// implements it; tests substitute an in-memory document.
 type ConfigStore interface {
 	// Exists reports whether a static config is present.
 	Exists() (bool, error)
 	// Static returns the current document, which doubles as the render template.
 	Static() ([]byte, error)
 	// Render merges users and the local REALITY key into static.
-	Render(static []byte, users []xray.User) ([]byte, error)
+	Render(static []byte, users []xraycore.User) ([]byte, error)
 	// Write replaces the document atomically.
 	Write(config []byte) error
 }
@@ -90,17 +92,17 @@ type ConfigApplier interface {
 // The agent wires the production implementations; these assertions keep a changed
 // method set from compiling silently into a node that never syncs.
 var (
-	_ Fetcher          = (*reporter.Reporter)(nil)
-	_ ConfigStore      = xray.ConfigFile{}
-	_ ConfigApplier    = (*xray.ConfigApplier)(nil)
-	_ xray.UserManager = (*xray.HandlerClient)(nil)
+	_ Fetcher              = (*reporter.Reporter)(nil)
+	_ ConfigStore          = xrayconfig.ConfigFile{}
+	_ ConfigApplier        = (*xrayapply.ConfigApplier)(nil)
+	_ xraycore.UserManager = (*xraycore.HandlerClient)(nil)
 )
 
 // Options assembles a Syncer. Every capability that touches the host is injected
 // so the whole pipeline runs against fakes in tests.
 type Options struct {
 	Fetcher   Fetcher
-	Users     xray.UserManager
+	Users     xraycore.UserManager
 	Store     *state.Store
 	UsersPath string
 	Config    ConfigStore
@@ -111,7 +113,7 @@ type Options struct {
 // Syncer applies versioned user sets.
 type Syncer struct {
 	fetcher   Fetcher
-	users     xray.UserManager
+	users     xraycore.UserManager
 	store     *state.Store
 	usersPath string
 	config    ConfigStore
@@ -288,10 +290,10 @@ func (s *Syncer) hotUpdate(ctx context.Context, diff userDiff) error {
 		}
 	}
 	for _, user := range diff.added {
-		if err := s.users.AddUser(ctx, xray.User{
+		if err := s.users.AddUser(ctx, xraycore.User{
 			Email: user.XrayEmail,
 			UUID:  user.VlessUUID,
-			Flow:  xray.FlowVision,
+			Flow:  xraycore.FlowVision,
 		}); err != nil {
 			return fmt.Errorf("add user %q: %w", user.XrayEmail, err)
 		}
@@ -431,13 +433,13 @@ func sortedEmails(users map[string]string) []string {
 	return emails
 }
 
-func toXrayUsers(users []reporter.User) []xray.User {
-	converted := make([]xray.User, 0, len(users))
+func toXrayUsers(users []reporter.User) []xraycore.User {
+	converted := make([]xraycore.User, 0, len(users))
 	for _, user := range users {
-		converted = append(converted, xray.User{
+		converted = append(converted, xraycore.User{
 			Email: user.XrayEmail,
 			UUID:  user.VlessUUID,
-			Flow:  xray.FlowVision,
+			Flow:  xraycore.FlowVision,
 		})
 	}
 	return converted

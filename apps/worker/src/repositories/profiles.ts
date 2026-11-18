@@ -12,11 +12,6 @@ export interface ProfileRow {
 	updated_at: number;
 }
 
-export interface ProfileNodeRow {
-	profile_id: string;
-	node_id: string;
-}
-
 export interface NewProfileRow {
 	id: string;
 	name: string;

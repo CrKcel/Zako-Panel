@@ -9,12 +9,13 @@ import type {
 	UpdateEndpointRequest,
 	UpdateNodeRequest,
 } from '@zako/contracts';
+import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { sha256Hex } from '../lib/hash';
 import { newId, newXrayEmail } from '../lib/ids';
 import { deriveNodeStatus, nowSeconds } from '../lib/node-status';
 import { generateToken } from '../lib/token';
-import { vlessRealityParamsSchema } from '../protocols/vless-reality';
+import { DEFAULT_PROTOCOL, requireProtocolAdapter } from '../protocols';
 import {
 	disableEndpoint as disableEndpointRow,
 	type EndpointRow,
@@ -23,7 +24,7 @@ import {
 	listEndpointRowsByNode,
 	updateEndpoint as updateEndpointRow,
 } from '../repositories/endpoints';
-import { getMetaValue, incrementMetaStatement, META_KEYS } from '../repositories/meta';
+import { getMetaValue, META_KEYS } from '../repositories/meta';
 import {
 	findNodeById,
 	insertNodeStatement,
@@ -33,12 +34,8 @@ import {
 	type NodeRow,
 } from '../repositories/nodes';
 import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode } from '../repositories/subscribers';
-import type { Paginated } from '../types';
-
-export interface ListQuery {
-	limit: number;
-	cursor?: string;
-}
+import type { ListQuery, Paginated } from '../types';
+import { bumpUsersVersionStatement } from './users-version';
 
 export interface CreateNodeResult {
 	node: Node;
@@ -103,7 +100,8 @@ function toNode(row: NodeRow, now: number): Node {
 }
 
 function toEndpoint(row: EndpointRow): Endpoint {
-	const params = vlessRealityParamsSchema.safeParse(JSON.parse(row.params_json) as unknown);
+	const adapter = requireProtocolAdapter(row.protocol);
+	const params = adapter.paramsSchema.safeParse(JSON.parse(row.params_json) as unknown);
 	if (!params.success) {
 		throw new AppError('INTERNAL_ERROR', 'Stored endpoint parameters are invalid', 500);
 	}
@@ -111,10 +109,11 @@ function toEndpoint(row: EndpointRow): Endpoint {
 		id: row.id,
 		node_id: row.node_id,
 		name: row.name,
-		protocol: 'vless-reality',
+		// The protocol registry is the single source of truth for endpoint shapes.
+		protocol: DEFAULT_PROTOCOL,
 		host: row.host,
 		port: row.port,
-		params: params.data,
+		params: params.data as Endpoint['params'],
 		enabled: row.enabled === 1,
 		created_at: row.created_at,
 		updated_at: row.updated_at,
@@ -123,10 +122,6 @@ function toEndpoint(row: EndpointRow): Endpoint {
 
 function nodeNotFound(): AppError {
 	return new AppError('NODE_NOT_FOUND', 'Node not found', 404);
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-	return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 }
 
 export async function listNodes(db: D1Database, query: ListQuery): Promise<Paginated<Node>> {
@@ -181,13 +176,13 @@ export async function createNode(db: D1Database, input: CreateNodeRequest): Prom
 			id: endpointId,
 			node_id: nodeId,
 			name: input.endpoint.name,
-			protocol: 'vless-reality',
+			protocol: DEFAULT_PROTOCOL,
 			host: input.endpoint.host,
 			port: input.endpoint.port,
 			params_json: JSON.stringify(input.endpoint.params),
 			now,
 		}),
-		incrementMetaStatement(db, META_KEYS.usersVersion),
+		bumpUsersVersionStatement(db),
 	];
 	if (defaultSubscriber) {
 		statements.push(
@@ -215,7 +210,7 @@ export async function createNode(db: D1Database, input: CreateNodeRequest): Prom
 		id: endpointId,
 		node_id: nodeId,
 		name: input.endpoint.name,
-		protocol: 'vless-reality',
+		protocol: DEFAULT_PROTOCOL,
 		host: input.endpoint.host,
 		port: input.endpoint.port,
 		params_json: JSON.stringify(input.endpoint.params),
@@ -326,7 +321,7 @@ export async function createEndpoint(db: D1Database, nodeId: string, input: Crea
 			id: endpointId,
 			node_id: nodeId,
 			name: input.name,
-			protocol: 'vless-reality',
+			protocol: DEFAULT_PROTOCOL,
 			host: input.host,
 			port: input.port,
 			params_json: JSON.stringify(input.params),

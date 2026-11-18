@@ -4,9 +4,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
-
-	bolt "go.etcd.io/bbolt"
 )
 
 func openTestStore(t *testing.T) (*Store, string) {
@@ -21,7 +18,7 @@ func openTestStore(t *testing.T) (*Store, string) {
 
 func putOutbox(t *testing.T, store *Store, report TrafficReport) {
 	t.Helper()
-	if err := store.Update(func(tx *bolt.Tx) error {
+	if err := store.Update(func(tx *Tx) error {
 		return PutOutboxReport(tx, report)
 	}); err != nil {
 		t.Fatalf("put outbox report %s: %v", report.ReportID, err)
@@ -68,92 +65,6 @@ func TestOutboxOrderingAndDelete(t *testing.T) {
 	}
 }
 
-func TestClosePendingReportsMovesToOutbox(t *testing.T) {
-	store, _ := openTestStore(t)
-	t.Cleanup(func() { _ = store.Close() })
-
-	pending := TrafficReport{
-		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
-		PeriodStart: 1_780_000_000 / 3600 * 3600,
-		PeriodEnd:   1_780_000_000/3600*3600 + 3600,
-		Users:       []ReportUser{{Email: "alice@example.com", UplinkBytes: 10, DownlinkBytes: 20}},
-	}
-	empty := TrafficReport{
-		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E7",
-		PeriodStart: pending.PeriodStart,
-		PeriodEnd:   pending.PeriodEnd,
-	}
-	if err := store.Update(func(tx *bolt.Tx) error {
-		if err := PutPendingReport(tx, pending); err != nil {
-			return err
-		}
-		return PutPendingReport(tx, empty)
-	}); err != nil {
-		t.Fatalf("put pending: %v", err)
-	}
-
-	closed, err := store.ClosePendingReports(time.Unix(pending.PeriodStart+1800, 0))
-	if err != nil {
-		t.Fatalf("ClosePendingReports: %v", err)
-	}
-	if closed != 1 {
-		t.Errorf("closed = %d, want 1 (empty reports are discarded)", closed)
-	}
-
-	var remaining []TrafficReport
-	if err := store.View(func(tx *bolt.Tx) error {
-		var err error
-		remaining, err = PendingReports(tx)
-		return err
-	}); err != nil {
-		t.Fatalf("PendingReports: %v", err)
-	}
-	if len(remaining) != 0 {
-		t.Errorf("pending reports = %+v, want none", remaining)
-	}
-
-	stored, found, err := store.EarliestOutbox()
-	if err != nil {
-		t.Fatalf("EarliestOutbox: %v", err)
-	}
-	if !found || stored.ReportID != pending.ReportID || len(stored.Users) != 1 {
-		t.Errorf("outbox report = %+v, want the closed report", stored)
-	}
-	if stored.PeriodEnd != pending.PeriodStart+1800 {
-		t.Errorf("closed period_end = %d, want the close time %d", stored.PeriodEnd, pending.PeriodStart+1800)
-	}
-}
-
-func TestClosePendingReportsKeepsBucketEndAfterHour(t *testing.T) {
-	store, _ := openTestStore(t)
-	t.Cleanup(func() { _ = store.Close() })
-
-	pending := TrafficReport{
-		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
-		PeriodStart: 1_780_000_000 / 3600 * 3600,
-		PeriodEnd:   1_780_000_000/3600*3600 + 3600,
-		Users:       []ReportUser{{Email: "alice@example.com", UplinkBytes: 10, DownlinkBytes: 20}},
-	}
-	if err := store.Update(func(tx *bolt.Tx) error { return PutPendingReport(tx, pending) }); err != nil {
-		t.Fatalf("put pending: %v", err)
-	}
-
-	if _, err := store.ClosePendingReports(time.Unix(pending.PeriodEnd+30, 0)); err != nil {
-		t.Fatalf("ClosePendingReports: %v", err)
-	}
-
-	stored, found, err := store.EarliestOutbox()
-	if err != nil {
-		t.Fatalf("EarliestOutbox: %v", err)
-	}
-	if !found {
-		t.Fatal("outbox is empty")
-	}
-	if stored.PeriodEnd != pending.PeriodEnd {
-		t.Errorf("closed period_end = %d, want the bucket end %d", stored.PeriodEnd, pending.PeriodEnd)
-	}
-}
-
 func TestBaselinesReplaceRemovesStaleCounters(t *testing.T) {
 	store, _ := openTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
@@ -170,12 +81,12 @@ func TestBaselinesReplaceRemovesStaleCounters(t *testing.T) {
 			"api":   {UplinkBytes: 3, DownlinkBytes: 4},
 		},
 	}
-	if err := store.Update(func(tx *bolt.Tx) error { return ReplaceBaselines(tx, initial) }); err != nil {
+	if err := store.Update(func(tx *Tx) error { return ReplaceBaselines(tx, initial) }); err != nil {
 		t.Fatalf("ReplaceBaselines: %v", err)
 	}
 
 	var read Baselines
-	if err := store.View(func(tx *bolt.Tx) error {
+	if err := store.View(func(tx *Tx) error {
 		var err error
 		read, err = ReadBaselines(tx)
 		return err
@@ -204,10 +115,10 @@ func TestBaselinesReplaceRemovesStaleCounters(t *testing.T) {
 			"proxy": {UplinkBytes: 5, DownlinkBytes: 6},
 		},
 	}
-	if err := store.Update(func(tx *bolt.Tx) error { return ReplaceBaselines(tx, next) }); err != nil {
+	if err := store.Update(func(tx *Tx) error { return ReplaceBaselines(tx, next) }); err != nil {
 		t.Fatalf("second ReplaceBaselines: %v", err)
 	}
-	if err := store.View(func(tx *bolt.Tx) error {
+	if err := store.View(func(tx *Tx) error {
 		var err error
 		read, err = ReadBaselines(tx)
 		return err
@@ -222,36 +133,6 @@ func TestBaselinesReplaceRemovesStaleCounters(t *testing.T) {
 	}
 	if read.UptimeSeconds != 200 {
 		t.Errorf("uptime = %d, want 200", read.UptimeSeconds)
-	}
-}
-
-func TestDiscardExpiredOutbox(t *testing.T) {
-	store, _ := openTestStore(t)
-	t.Cleanup(func() { _ = store.Close() })
-
-	now := time.Unix(1_780_000_000, 0).UTC()
-	old := TrafficReport{ReportID: "01J2Z6Q8Y3V9M4K7T1B5C0D2E6", PeriodStart: 1, PeriodEnd: now.Add(-8 * 24 * time.Hour).Unix()}
-	fresh := TrafficReport{ReportID: "01J2Z6Q8Y3V9M4K7T1B5C0D2E7", PeriodStart: 2, PeriodEnd: now.Add(-1 * 24 * time.Hour).Unix()}
-	putOutbox(t, store, old)
-	putOutbox(t, store, fresh)
-
-	dropped, err := store.DiscardExpiredOutbox(now, 7*24*time.Hour)
-	if err != nil {
-		t.Fatalf("DiscardExpiredOutbox: %v", err)
-	}
-	if len(dropped) != 1 || dropped[0].ReportID != old.ReportID {
-		t.Errorf("dropped = %+v, want only the 8 day old report", dropped)
-	}
-	remaining, found, err := store.EarliestOutbox()
-	if err != nil {
-		t.Fatalf("EarliestOutbox: %v", err)
-	}
-	if !found || remaining.ReportID != fresh.ReportID {
-		t.Errorf("remaining = %+v, want the fresh report", remaining)
-	}
-
-	if _, err := store.DiscardExpiredOutbox(now, 0); err == nil {
-		t.Error("DiscardExpiredOutbox accepted a non-positive max age")
 	}
 }
 
@@ -274,7 +155,7 @@ func TestStoreSurvivesReopen(t *testing.T) {
 		PeriodEnd:   1_780_003_600,
 		Users:       []ReportUser{{Email: "alice@example.com", UplinkBytes: 5, DownlinkBytes: 6}},
 	}
-	if err := store.Update(func(tx *bolt.Tx) error {
+	if err := store.Update(func(tx *Tx) error {
 		if err := ReplaceBaselines(tx, baselines); err != nil {
 			return err
 		}
@@ -300,7 +181,7 @@ func TestStoreSurvivesReopen(t *testing.T) {
 
 	var read Baselines
 	var reports []TrafficReport
-	if err := reopened.View(func(tx *bolt.Tx) error {
+	if err := reopened.View(func(tx *Tx) error {
 		var err error
 		if read, err = ReadBaselines(tx); err != nil {
 			return err

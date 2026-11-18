@@ -5,10 +5,11 @@
 // Bucket names and key layouts are part of the on-disk format, so they must not
 // change without a migration.
 //
-// The package exposes read/write primitives that operate on a caller-supplied
-// Bolt transaction. Delta accounting needs the pending report, the baselines and
-// the Xray uptime to move together; one Store.Update call is the only transaction
-// that guarantees that.
+// The package exposes read/write primitives that operate on an opaque Tx handle.
+// Delta accounting needs the pending report, the baselines and the Xray uptime to
+// move together; one Store.Update call is the only transaction that guarantees
+// that. The Bolt types stay inside this package so callers never depend on the
+// storage engine.
 package state
 
 import (
@@ -82,6 +83,26 @@ type Store struct {
 	db *bolt.DB
 }
 
+// Tx is an opaque transaction handle passed to the storage primitives. It hides
+// the underlying engine so accounting and the loops do not import bbolt.
+type Tx struct {
+	tx *bolt.Tx
+}
+
+// bucket returns one of the on-disk buckets. A missing bucket means the database
+// was not opened by this package, so it is reported as a corrupt store rather than
+// silently recreated inside a read transaction.
+func (t *Tx) bucket(name []byte) (*bolt.Bucket, error) {
+	if t == nil || t.tx == nil {
+		return nil, errors.New("state: transaction is required")
+	}
+	bucket := t.tx.Bucket(name)
+	if bucket == nil {
+		return nil, fmt.Errorf("state: bucket %q is missing", name)
+	}
+	return bucket, nil
+}
+
 // Open creates the database at path with mode 0600 and initializes all buckets.
 // Bolt refuses to create missing parent directories; the installer owns them.
 func Open(path string) (*Store, error) {
@@ -129,7 +150,7 @@ func (s *Store) Close() error {
 }
 
 // View runs fn in a read-only transaction.
-func (s *Store) View(fn func(tx *bolt.Tx) error) error {
+func (s *Store) View(fn func(tx *Tx) error) error {
 	if fn == nil {
 		return errors.New("state: view function is required")
 	}
@@ -137,13 +158,15 @@ func (s *Store) View(fn func(tx *bolt.Tx) error) error {
 	if err != nil {
 		return err
 	}
-	return db.View(fn)
+	return db.View(func(tx *bolt.Tx) error {
+		return fn(&Tx{tx: tx})
+	})
 }
 
 // Update runs fn in a single read-write transaction. Every multi-key update must
 // use one Update call: a partially applied sample would double count or lose
 // traffic.
-func (s *Store) Update(fn func(tx *bolt.Tx) error) error {
+func (s *Store) Update(fn func(tx *Tx) error) error {
 	if fn == nil {
 		return errors.New("state: update function is required")
 	}
@@ -151,14 +174,16 @@ func (s *Store) Update(fn func(tx *bolt.Tx) error) error {
 	if err != nil {
 		return err
 	}
-	return db.Update(fn)
+	return db.Update(func(tx *bolt.Tx) error {
+		return fn(&Tx{tx: tx})
+	})
 }
 
 // MetaInt64 returns the stored value and whether the key exists. Missing keys
 // return zero with found=false so callers can distinguish "never recorded" from
 // a legitimate zero version.
 func (s *Store) MetaInt64(key MetadataKey) (value int64, found bool, err error) {
-	err = s.View(func(tx *bolt.Tx) error {
+	err = s.View(func(tx *Tx) error {
 		value, found, err = metaInt64(tx, key)
 		return err
 	})
@@ -168,13 +193,13 @@ func (s *Store) MetaInt64(key MetadataKey) (value int64, found bool, err error) 
 	return value, found, nil
 }
 
-func metaInt64(tx *bolt.Tx, key MetadataKey) (int64, bool, error) {
+func metaInt64(tx *Tx, key MetadataKey) (int64, bool, error) {
 	if key == "" {
 		return 0, false, errors.New("state: metadata key is required")
 	}
-	bucket := tx.Bucket(bucketMeta)
-	if bucket == nil {
-		return 0, false, fmt.Errorf("state: bucket %q is missing", bucketMeta)
+	bucket, err := tx.bucket(bucketMeta)
+	if err != nil {
+		return 0, false, err
 	}
 	raw := bucket.Get([]byte(key))
 	if raw == nil {
@@ -188,7 +213,7 @@ func metaInt64(tx *bolt.Tx, key MetadataKey) (int64, bool, error) {
 
 // SetMetaInt64 stores value atomically in its own transaction.
 func (s *Store) SetMetaInt64(key MetadataKey, value int64) error {
-	err := s.Update(func(tx *bolt.Tx) error {
+	err := s.Update(func(tx *Tx) error {
 		return setMetaInt64(tx, key, value)
 	})
 	if err != nil {
@@ -197,13 +222,13 @@ func (s *Store) SetMetaInt64(key MetadataKey, value int64) error {
 	return nil
 }
 
-func setMetaInt64(tx *bolt.Tx, key MetadataKey, value int64) error {
+func setMetaInt64(tx *Tx, key MetadataKey, value int64) error {
 	if key == "" {
 		return errors.New("state: metadata key is required")
 	}
-	bucket := tx.Bucket(bucketMeta)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketMeta)
+	bucket, err := tx.bucket(bucketMeta)
+	if err != nil {
+		return err
 	}
 	var encoded [8]byte
 	binary.BigEndian.PutUint64(encoded[:], uint64(value))
@@ -252,10 +277,10 @@ func (b Baselines) clone() Baselines {
 
 // ReadBaselines returns every stored counter baseline. It must be called inside a
 // transaction so the caller can write the derived state atomically.
-func ReadBaselines(tx *bolt.Tx) (Baselines, error) {
-	bucket := tx.Bucket(bucketBaseline)
-	if bucket == nil {
-		return Baselines{}, fmt.Errorf("state: bucket %q is missing", bucketBaseline)
+func ReadBaselines(tx *Tx) (Baselines, error) {
+	bucket, err := tx.bucket(bucketBaseline)
+	if err != nil {
+		return Baselines{}, err
 	}
 
 	baselines := Baselines{
@@ -281,7 +306,7 @@ func ReadBaselines(tx *bolt.Tx) (Baselines, error) {
 		baselines.LastSampleAt = int64(binary.BigEndian.Uint64(raw))
 	}
 
-	err := bucket.ForEach(func(key, value []byte) error {
+	err = bucket.ForEach(func(key, value []byte) error {
 		switch {
 		case bytes.HasPrefix(key, baselineUserPrefix):
 			counter, err := decodeBaseline(value)
@@ -307,14 +332,14 @@ func ReadBaselines(tx *bolt.Tx) (Baselines, error) {
 // ReplaceBaselines makes baselines the complete stored baseline set. Entries that
 // vanished from the sample are deleted, which is how a missing counter is cleaned
 // up instead of producing a negative delta on its return.
-func ReplaceBaselines(tx *bolt.Tx, baselines Baselines) error {
-	bucket := tx.Bucket(bucketBaseline)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketBaseline)
+func ReplaceBaselines(tx *Tx, baselines Baselines) error {
+	bucket, err := tx.bucket(bucketBaseline)
+	if err != nil {
+		return err
 	}
 
 	stale := make([][]byte, 0)
-	err := bucket.ForEach(func(key, _ []byte) error {
+	err = bucket.ForEach(func(key, _ []byte) error {
 		switch {
 		case bytes.HasPrefix(key, baselineUserPrefix):
 			if _, found := baselines.Users[string(key[len(baselineUserPrefix):])]; !found {
@@ -456,10 +481,10 @@ func decodeReport(raw []byte) (TrafficReport, error) {
 
 // PendingReportsForHour returns open reports whose period starts at hourStart, in
 // report_id order.
-func PendingReportsForHour(tx *bolt.Tx, hourStart int64) ([]TrafficReport, error) {
-	bucket := tx.Bucket(bucketPending)
-	if bucket == nil {
-		return nil, fmt.Errorf("state: bucket %q is missing", bucketPending)
+func PendingReportsForHour(tx *Tx, hourStart int64) ([]TrafficReport, error) {
+	bucket, err := tx.bucket(bucketPending)
+	if err != nil {
+		return nil, err
 	}
 	prefix := make([]byte, 8)
 	binary.BigEndian.PutUint64(prefix, uint64(hourStart))
@@ -478,14 +503,14 @@ func PendingReportsForHour(tx *bolt.Tx, hourStart int64) ([]TrafficReport, error
 
 // PutPendingReport creates or replaces an open report. Its key is derived from
 // PeriodStart and ReportID.
-func PutPendingReport(tx *bolt.Tx, report TrafficReport) error {
+func PutPendingReport(tx *Tx, report TrafficReport) error {
 	encoded, err := encodeReport(report)
 	if err != nil {
 		return err
 	}
-	bucket := tx.Bucket(bucketPending)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketPending)
+	bucket, err := tx.bucket(bucketPending)
+	if err != nil {
+		return err
 	}
 	if err := bucket.Put(pendingKey(report.PeriodStart, report.ReportID), encoded); err != nil {
 		return fmt.Errorf("state: write pending report %s: %w", report.ReportID, err)
@@ -494,10 +519,10 @@ func PutPendingReport(tx *bolt.Tx, report TrafficReport) error {
 }
 
 // DeletePendingReport removes one open report after it moved to the outbox.
-func DeletePendingReport(tx *bolt.Tx, report TrafficReport) error {
-	bucket := tx.Bucket(bucketPending)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketPending)
+func DeletePendingReport(tx *Tx, report TrafficReport) error {
+	bucket, err := tx.bucket(bucketPending)
+	if err != nil {
+		return err
 	}
 	if err := bucket.Delete(pendingKey(report.PeriodStart, report.ReportID)); err != nil {
 		return fmt.Errorf("state: delete pending report %s: %w", report.ReportID, err)
@@ -506,13 +531,13 @@ func DeletePendingReport(tx *bolt.Tx, report TrafficReport) error {
 }
 
 // PendingReports returns every open report ordered by period start and report_id.
-func PendingReports(tx *bolt.Tx) ([]TrafficReport, error) {
-	bucket := tx.Bucket(bucketPending)
-	if bucket == nil {
-		return nil, fmt.Errorf("state: bucket %q is missing", bucketPending)
+func PendingReports(tx *Tx) ([]TrafficReport, error) {
+	bucket, err := tx.bucket(bucketPending)
+	if err != nil {
+		return nil, err
 	}
 	reports := make([]TrafficReport, 0)
-	err := bucket.ForEach(func(_, value []byte) error {
+	err = bucket.ForEach(func(_, value []byte) error {
 		report, err := decodeReport(value)
 		if err != nil {
 			return err
@@ -528,7 +553,7 @@ func PendingReports(tx *bolt.Tx) ([]TrafficReport, error) {
 
 // PutOutboxReport stores one closed report. The key is the report_id, so
 // re-enqueueing after a crash overwrites instead of duplicating.
-func PutOutboxReport(tx *bolt.Tx, report TrafficReport) error {
+func PutOutboxReport(tx *Tx, report TrafficReport) error {
 	if report.ReportID == "" {
 		return errors.New("state: outbox report requires a report_id")
 	}
@@ -536,9 +561,9 @@ func PutOutboxReport(tx *bolt.Tx, report TrafficReport) error {
 	if err != nil {
 		return err
 	}
-	bucket := tx.Bucket(bucketOutbox)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketOutbox)
+	bucket, err := tx.bucket(bucketOutbox)
+	if err != nil {
+		return err
 	}
 	if err := bucket.Put([]byte(report.ReportID), encoded); err != nil {
 		return fmt.Errorf("state: write outbox report %s: %w", report.ReportID, err)
@@ -546,29 +571,12 @@ func PutOutboxReport(tx *bolt.Tx, report TrafficReport) error {
 	return nil
 }
 
-// OutboxReport returns one stored report.
-func OutboxReport(tx *bolt.Tx, reportID string) (TrafficReport, bool, error) {
-	bucket := tx.Bucket(bucketOutbox)
-	if bucket == nil {
-		return TrafficReport{}, false, fmt.Errorf("state: bucket %q is missing", bucketOutbox)
-	}
-	raw := bucket.Get([]byte(reportID))
-	if raw == nil {
-		return TrafficReport{}, false, nil
-	}
-	report, err := decodeReport(raw)
-	if err != nil {
-		return TrafficReport{}, false, err
-	}
-	return report, true, nil
-}
-
 // EarliestOutboxReport returns the oldest pending report. Outbox keys are ULIDs,
 // which sort chronologically.
-func EarliestOutboxReport(tx *bolt.Tx) (TrafficReport, bool, error) {
-	bucket := tx.Bucket(bucketOutbox)
-	if bucket == nil {
-		return TrafficReport{}, false, fmt.Errorf("state: bucket %q is missing", bucketOutbox)
+func EarliestOutboxReport(tx *Tx) (TrafficReport, bool, error) {
+	bucket, err := tx.bucket(bucketOutbox)
+	if err != nil {
+		return TrafficReport{}, false, err
 	}
 	key, value := bucket.Cursor().First()
 	if key == nil {
@@ -582,13 +590,13 @@ func EarliestOutboxReport(tx *bolt.Tx) (TrafficReport, bool, error) {
 }
 
 // OutboxReports returns every stored report in report_id order.
-func OutboxReports(tx *bolt.Tx) ([]TrafficReport, error) {
-	bucket := tx.Bucket(bucketOutbox)
-	if bucket == nil {
-		return nil, fmt.Errorf("state: bucket %q is missing", bucketOutbox)
+func OutboxReports(tx *Tx) ([]TrafficReport, error) {
+	bucket, err := tx.bucket(bucketOutbox)
+	if err != nil {
+		return nil, err
 	}
 	reports := make([]TrafficReport, 0)
-	err := bucket.ForEach(func(_, value []byte) error {
+	err = bucket.ForEach(func(_, value []byte) error {
 		report, err := decodeReport(value)
 		if err != nil {
 			return err
@@ -604,10 +612,10 @@ func OutboxReports(tx *bolt.Tx) ([]TrafficReport, error) {
 
 // DeleteOutboxReport removes one acknowledged report. Deleting a missing key is
 // not an error: duplicate ACKs are harmless.
-func DeleteOutboxReport(tx *bolt.Tx, reportID string) error {
-	bucket := tx.Bucket(bucketOutbox)
-	if bucket == nil {
-		return fmt.Errorf("state: bucket %q is missing", bucketOutbox)
+func DeleteOutboxReport(tx *Tx, reportID string) error {
+	bucket, err := tx.bucket(bucketOutbox)
+	if err != nil {
+		return err
 	}
 	if err := bucket.Delete([]byte(reportID)); err != nil {
 		return fmt.Errorf("state: delete outbox report %s: %w", reportID, err)
@@ -618,10 +626,10 @@ func DeleteOutboxReport(tx *bolt.Tx, reportID string) error {
 // OutboxLen returns the number of reports waiting for an ACK.
 func (s *Store) OutboxLen() (int, error) {
 	count := 0
-	err := s.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(bucketOutbox)
-		if bucket == nil {
-			return fmt.Errorf("state: bucket %q is missing", bucketOutbox)
+	err := s.View(func(tx *Tx) error {
+		bucket, err := tx.bucket(bucketOutbox)
+		if err != nil {
+			return err
 		}
 		cursor := bucket.Cursor()
 		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
@@ -639,7 +647,7 @@ func (s *Store) OutboxLen() (int, error) {
 func (s *Store) EarliestOutbox() (TrafficReport, bool, error) {
 	var report TrafficReport
 	var found bool
-	err := s.View(func(tx *bolt.Tx) error {
+	err := s.View(func(tx *Tx) error {
 		var err error
 		report, found, err = EarliestOutboxReport(tx)
 		return err
@@ -652,81 +660,9 @@ func (s *Store) EarliestOutbox() (TrafficReport, bool, error) {
 
 // DeleteOutbox removes one report in its own transaction.
 func (s *Store) DeleteOutbox(reportID string) error {
-	return s.Update(func(tx *bolt.Tx) error {
+	return s.Update(func(tx *Tx) error {
 		return DeleteOutboxReport(tx, reportID)
 	})
-}
-
-// ClosePendingReports moves every open report to the outbox in one transaction.
-// Closed reports keep their report_id, so a crash between close and send cannot
-// change the idempotency key.
-//
-// period_end is clamped to closeAt: reports are normally closed before the hour
-// bucket ends, and the Worker rejects a period_end more than five minutes in the
-// future. A report that outlives its bucket keeps the bucket end because the
-// Worker requires period_start and period_end to stay inside one hour.
-func (s *Store) ClosePendingReports(closeAt time.Time) (int, error) {
-	closed := 0
-	err := s.Update(func(tx *bolt.Tx) error {
-		reports, err := PendingReports(tx)
-		if err != nil {
-			return err
-		}
-		for _, report := range reports {
-			if report.Empty() {
-				if err := DeletePendingReport(tx, report); err != nil {
-					return err
-				}
-				continue
-			}
-			report.PeriodEnd = closedPeriodEnd(report, closeAt)
-			if err := PutOutboxReport(tx, report); err != nil {
-				return err
-			}
-			if err := DeletePendingReport(tx, report); err != nil {
-				return err
-			}
-			closed++
-		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return closed, nil
-}
-
-// DiscardExpiredOutbox deletes reports whose period ended before now-maxAge and
-// returns those reports so the caller can log them. The Worker drops report IDs
-// after 30 days; keeping local reports for 7 days avoids a permanent retry loop
-// over an unprocessable backlog.
-func (s *Store) DiscardExpiredOutbox(now time.Time, maxAge time.Duration) ([]TrafficReport, error) {
-	if maxAge <= 0 {
-		return nil, errors.New("state: outbox max age must be positive")
-	}
-	cutoff := now.Add(-maxAge).Unix()
-
-	dropped := make([]TrafficReport, 0)
-	err := s.Update(func(tx *bolt.Tx) error {
-		reports, err := OutboxReports(tx)
-		if err != nil {
-			return err
-		}
-		for _, report := range reports {
-			if report.PeriodEnd >= cutoff {
-				continue
-			}
-			if err := DeleteOutboxReport(tx, report.ReportID); err != nil {
-				return err
-			}
-			dropped = append(dropped, report)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return dropped, nil
 }
 
 func (s *Store) handle() (*bolt.DB, error) {
@@ -734,17 +670,4 @@ func (s *Store) handle() (*bolt.DB, error) {
 		return nil, ErrClosed
 	}
 	return s.db, nil
-}
-
-// closedPeriodEnd caps a report at the close time without leaving its hour
-// bucket. The clamp keeps period_end greater than period_start.
-func closedPeriodEnd(report TrafficReport, closeAt time.Time) int64 {
-	end := closeAt.Unix()
-	if end > report.PeriodEnd {
-		end = report.PeriodEnd
-	}
-	if end <= report.PeriodStart {
-		end = report.PeriodStart + 1
-	}
-	return end
 }

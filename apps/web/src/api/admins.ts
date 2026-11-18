@@ -1,5 +1,5 @@
 import type { AdminUser, CreateAdminRequest, UpdateAdminRequest } from '@zako/contracts';
-import { apiPage, apiRequest, type Page } from './client';
+import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface AdminListParams {
 	limit?: number;
@@ -8,7 +8,7 @@ export interface AdminListParams {
 
 export const adminsApi = {
 	list(params: AdminListParams = {}): Promise<Page<AdminUser>> {
-		return apiPage<AdminUser>('/api/v1/admin/admins', { query: { ...params } });
+		return apiPage<AdminUser>('/api/v1/admin/admins', { query: { limit: LIST_LIMIT, ...params } });
 	},
 	create(input: CreateAdminRequest): Promise<AdminUser> {
 		return apiRequest<AdminUser>('/api/v1/admin/admins', { method: 'POST', body: input });

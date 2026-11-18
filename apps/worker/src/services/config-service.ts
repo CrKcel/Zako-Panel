@@ -1,7 +1,6 @@
 import type { AgentConfig, AgentConfigResult, ConfigVersion, PublishConfigRequest } from '@zako/contracts';
 import { notImplemented } from '../lib/errors';
-import type { Paginated } from '../types';
-import type { ListQuery } from './node-service';
+import type { ListQuery, Paginated } from '../types';
 
 export async function listConfigs(_db: D1Database, _nodeId: string, _query: ListQuery): Promise<Paginated<ConfigVersion>> {
 	throw notImplemented('configuration history');

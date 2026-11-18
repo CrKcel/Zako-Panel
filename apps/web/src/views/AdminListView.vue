@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import type { AdminRole, AdminUser, CreateAdminRequest, UpdateAdminRequest } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { adminsApi } from '../api/admins';
+import PageToolbar from '../components/PageToolbar.vue';
+import { useAsyncResource } from '../composables/useAsyncResource';
+import { useCrudDialog } from '../composables/useCrudDialog';
+import { adminRoleDescriptor } from '../domain/status';
 import { showError, showSuccess } from '../utils/feedback';
-import { ADMIN_ROLE_LABEL, formatTimestamp } from '../utils/format';
+import { formatTimestamp } from '../utils/format';
 
 interface AdminForm {
 	email: string;
@@ -14,27 +18,23 @@ interface AdminForm {
 
 const ROLE_OPTIONS: AdminRole[] = ['owner', 'admin', 'viewer'];
 
-const ROLE_TAG: Record<AdminRole, 'warning' | 'primary' | 'info'> = {
-	owner: 'warning',
-	admin: 'primary',
-	viewer: 'info',
-};
-
-const admins = ref<AdminUser[]>([]);
-const loading = ref(true);
-const saving = ref(false);
-const createDialogVisible = ref(false);
-const editDialogVisible = ref(false);
-const editingId = ref<string | null>(null);
-const createFormRef = ref<FormInstance>();
-const editFormRef = ref<FormInstance>();
-
-function emptyCreateForm(): AdminForm {
+function emptyAdminForm(): AdminForm {
 	return { email: '', role: 'admin', enabled: true };
 }
 
-const createForm = ref<AdminForm>(emptyCreateForm());
-const editForm = ref<AdminForm>(emptyCreateForm());
+const createForm = ref<AdminForm>(emptyAdminForm());
+const editForm = ref<AdminForm>(emptyAdminForm());
+const createFormRef = ref<FormInstance>();
+const editFormRef = ref<FormInstance>();
+
+const {
+	data: admins,
+	loading,
+	reload,
+} = useAsyncResource<AdminUser[]>(() => adminsApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '管理员加载失败'),
+});
 
 const createRules: FormRules = {
 	email: [
@@ -50,82 +50,79 @@ const editRules: FormRules = {
 
 const editTitle = computed(() => `编辑管理员 · ${editForm.value.email}`);
 
-async function load(): Promise<void> {
-	loading.value = true;
-	try {
-		const page = await adminsApi.list({ limit: 200 });
-		admins.value = page.items;
-	} catch (error) {
-		showError(error, '管理员加载失败');
-	} finally {
-		loading.value = false;
-	}
-}
+const {
+	visible: createVisible,
+	submitting: createSubmitting,
+	openCreate,
+	close: closeCreate,
+	submit: submitCreateTask,
+} = useCrudDialog({
+	reset: () => {
+		createForm.value = emptyAdminForm();
+	},
+});
 
-function openCreate(): void {
-	createForm.value = emptyCreateForm();
-	createDialogVisible.value = true;
-}
+const {
+	visible: editVisible,
+	editingId: editingAdminId,
+	submitting: editSubmitting,
+	openEdit,
+	close: closeEdit,
+	submit: submitEditTask,
+} = useCrudDialog({
+	load: (id) => {
+		const admin = admins.value.find((item) => item.id === id);
+		if (admin === undefined) return;
+		editForm.value = { email: admin.email, role: admin.role, enabled: admin.enabled };
+	},
+});
 
 async function submitCreate(): Promise<void> {
-	const valid = await createFormRef.value?.validate().catch(() => false);
-	if (!valid) return;
+	if (!(await createFormRef.value?.validate().catch(() => false))) return;
 	const payload: CreateAdminRequest = {
 		email: createForm.value.email.trim(),
 		role: createForm.value.role,
 	};
-	saving.value = true;
-	try {
-		await adminsApi.create(payload);
-		createDialogVisible.value = false;
-		showSuccess('管理员已创建');
-		await load();
-	} catch (error) {
-		showError(error, '管理员创建失败');
-	} finally {
-		saving.value = false;
-	}
-}
-
-function openEdit(row: AdminUser): void {
-	editingId.value = row.id;
-	editForm.value = { email: row.email, role: row.role, enabled: row.enabled };
-	editDialogVisible.value = true;
+	const saved = await submitCreateTask(
+		async () => {
+			await adminsApi.create(payload);
+			closeCreate();
+			showSuccess('管理员已创建');
+		},
+		(error) => showError(error, '管理员创建失败'),
+	);
+	if (saved) await reload();
 }
 
 async function submitEdit(): Promise<void> {
-	if (editingId.value === null) return;
-	const valid = await editFormRef.value?.validate().catch(() => false);
-	if (!valid) return;
+	const adminId = editingAdminId.value;
+	if (adminId === null) return;
+	if (!(await editFormRef.value?.validate().catch(() => false))) return;
 	const payload: UpdateAdminRequest = { role: editForm.value.role, enabled: editForm.value.enabled };
-	saving.value = true;
-	try {
-		await adminsApi.update(editingId.value, payload);
-		editDialogVisible.value = false;
-		showSuccess('管理员已更新');
-		await load();
-	} catch (error) {
-		showError(error, '管理员更新失败');
-	} finally {
-		saving.value = false;
-	}
+	const saved = await submitEditTask(
+		async () => {
+			await adminsApi.update(adminId, payload);
+			closeEdit();
+			showSuccess('管理员已更新');
+		},
+		(error) => showError(error, '管理员更新失败'),
+	);
+	if (saved) await reload();
 }
-
-onMounted(load);
 </script>
 
 <template>
 	<el-card shadow="never">
-		<div class="toolbar">
-			<el-button :loading="loading" @click="load">刷新</el-button>
+		<PageToolbar>
+			<el-button :loading="loading" @click="reload">刷新</el-button>
 			<el-button type="primary" @click="openCreate">新增管理员</el-button>
-		</div>
+		</PageToolbar>
 		<el-table v-loading="loading" :data="admins" empty-text="暂无数据">
 			<el-table-column prop="email" label="邮箱" min-width="260" />
 			<el-table-column label="角色" width="110">
 				<template #default="{ row }">
-					<el-tag :type="ROLE_TAG[row.role as AdminRole]" disable-transitions>
-						{{ ADMIN_ROLE_LABEL[row.role as AdminRole] }}
+					<el-tag :type="adminRoleDescriptor(row.role as AdminRole).tag" disable-transitions>
+						{{ adminRoleDescriptor(row.role as AdminRole).label }}
 					</el-tag>
 				</template>
 			</el-table-column>
@@ -144,37 +141,37 @@ onMounted(load);
 			</el-table-column>
 			<el-table-column label="操作" width="100" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" @click="openEdit(row as AdminUser)">编辑</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
 				</template>
 			</el-table-column>
 		</el-table>
 	</el-card>
 
-	<el-dialog v-model="createDialogVisible" title="新增管理员" width="460px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog v-model="createVisible" title="新增管理员" width="460px" :close-on-click-modal="false" destroy-on-close>
 		<el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
 			<el-form-item label="邮箱" prop="email">
 				<el-input v-model="createForm.email" />
 			</el-form-item>
 			<el-form-item label="角色" prop="role">
 				<el-select v-model="createForm.role" class="full-width">
-					<el-option v-for="role in ROLE_OPTIONS" :key="role" :label="ADMIN_ROLE_LABEL[role]" :value="role" />
+					<el-option v-for="role in ROLE_OPTIONS" :key="role" :label="adminRoleDescriptor(role).label" :value="role" />
 				</el-select>
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="createDialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="submitCreate">创建</el-button>
+			<el-button @click="closeCreate">取消</el-button>
+			<el-button type="primary" :loading="createSubmitting" @click="submitCreate">创建</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="editDialogVisible" :title="editTitle" width="460px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog v-model="editVisible" :title="editTitle" width="460px" :close-on-click-modal="false" destroy-on-close>
 		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">
 			<el-form-item label="邮箱">
 				<el-input :model-value="editForm.email" disabled />
 			</el-form-item>
 			<el-form-item label="角色" prop="role">
 				<el-select v-model="editForm.role" class="full-width">
-					<el-option v-for="role in ROLE_OPTIONS" :key="role" :label="ADMIN_ROLE_LABEL[role]" :value="role" />
+					<el-option v-for="role in ROLE_OPTIONS" :key="role" :label="adminRoleDescriptor(role).label" :value="role" />
 				</el-select>
 			</el-form-item>
 			<el-form-item label="启用" prop="enabled">
@@ -182,20 +179,13 @@ onMounted(load);
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="editDialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button>
+			<el-button @click="closeEdit">取消</el-button>
+			<el-button type="primary" :loading="editSubmitting" @click="submitEdit">保存</el-button>
 		</template>
 	</el-dialog>
 </template>
 
 <style scoped>
-.toolbar {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-bottom: 16px;
-}
-
 .full-width {
 	width: 100%;
 }

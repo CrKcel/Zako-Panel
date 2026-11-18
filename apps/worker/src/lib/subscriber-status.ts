@@ -1,4 +1,4 @@
-import type { SubscriberStatus } from '@zako/contracts';
+import type { SubscriberBlockReason, SubscriberStatus } from '@zako/contracts';
 
 export interface UsageSnapshot {
 	cycle_start: number;
@@ -14,6 +14,11 @@ export interface EntitlementInput {
 	usage: UsageSnapshot | null;
 }
 
+export interface Entitlement {
+	status: SubscriberStatus;
+	blocked_reason: SubscriberBlockReason | null;
+}
+
 /**
  * Usage only counts for the current cycle. A row left over from a previous cycle
  * is treated as zero until the cron resets it.
@@ -25,15 +30,40 @@ export function cycleUsage(usage: UsageSnapshot | null, usageCycleStart: number)
 	return { uplink, downlink, total: uplink + downlink };
 }
 
+const BLOCK_REASON_BY_STATUS: Record<SubscriberStatus, SubscriberBlockReason | null> = {
+	active: null,
+	limited: 'over_quota',
+	expired: 'expired',
+	disabled: 'inactive',
+};
+
 /**
- * Materialised status follows the documented priority. `disabled` is sticky
- * because the column also carries an administrator's explicit suspension; the
- * other values are re-derived whenever the cron or a management write runs.
+ * Single decision point for subscriber entitlement. The materialised status
+ * (cron and management writes) and the subscription gate (serving and preview)
+ * both project this result, so the two cannot disagree on priority.
+ *
+ * `disabled` is sticky because the column also carries an administrator's
+ * explicit suspension; the other values are re-derived on every write.
  */
+export function evaluateEntitlement(input: EntitlementInput, now: number): Entitlement {
+	let status: SubscriberStatus;
+	if (input.status === 'disabled') {
+		status = 'disabled';
+	} else if (input.expires_at !== null && input.expires_at <= now) {
+		status = 'expired';
+	} else if (input.traffic_limit_bytes !== null && cycleUsage(input.usage, input.usage_cycle_start).total >= input.traffic_limit_bytes) {
+		status = 'limited';
+	} else {
+		status = 'active';
+	}
+	return { status, blocked_reason: BLOCK_REASON_BY_STATUS[status] };
+}
+
 export function deriveSubscriberStatus(input: EntitlementInput, now: number): SubscriberStatus {
-	if (input.status === 'disabled') return 'disabled';
-	if (input.expires_at !== null && input.expires_at <= now) return 'expired';
-	const used = cycleUsage(input.usage, input.usage_cycle_start);
-	if (input.traffic_limit_bytes !== null && used.total >= input.traffic_limit_bytes) return 'limited';
-	return 'active';
+	return evaluateEntitlement(input, now).status;
+}
+
+/** Non-null means a subscription request must be refused with 403. */
+export function subscriberBlockReason(input: EntitlementInput, now: number): SubscriberBlockReason | null {
+	return evaluateEntitlement(input, now).blocked_reason;
 }

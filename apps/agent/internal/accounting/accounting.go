@@ -17,8 +17,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/zako-panel/zako-agent/internal/collector"
 	"github.com/zako-panel/zako-agent/internal/state"
-	"github.com/zako-panel/zako-agent/internal/xray"
-	bolt "go.etcd.io/bbolt"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 const (
@@ -32,8 +31,15 @@ const (
 	hourSeconds = int64(3600)
 )
 
-// Accountant owns delta accounting. Sampling and closing are serialized by the
-// caller, so no internal lock is needed.
+// Accountant owns delta accounting.
+//
+// Sampling (Handle, collector goroutine) and closing (CloseReports, reporter
+// goroutine) are not guarded by a caller lock. Every state change runs inside one
+// state.Store.Update write transaction, and bbolt serializes writers, so the two
+// goroutines cannot interleave a baseline read with a report write. Do not add an
+// in-memory cache that lives across transactions: Handle must read the baselines,
+// update the open report and replace the baselines in the same transaction, or a
+// concurrent close could split one sample across two transactions.
 type Accountant struct {
 	store       *state.Store
 	now         func() time.Time
@@ -112,7 +118,7 @@ func (a *Accountant) Handle(_ context.Context, sample collector.Sample) error {
 		missingInbound int
 	)
 
-	err := a.store.Update(func(tx *bolt.Tx) error {
+	err := a.store.Update(func(tx *state.Tx) error {
 		baselines, err := state.ReadBaselines(tx)
 		if err != nil {
 			return err
@@ -147,7 +153,7 @@ func (a *Accountant) Handle(_ context.Context, sample collector.Sample) error {
 			// API inbound traffic is control traffic; the StatsClient already
 			// filters it, and ignoring it here keeps the billing invariant local
 			// to the code that sums node traffic.
-			if tag == xray.APITag {
+			if tag == xraycore.APITag {
 				continue
 			}
 			next.Inbounds[tag] = state.CounterBaseline{
@@ -260,7 +266,7 @@ func hourBucket(unix int64) int64 {
 // appendDelta stores the sample's deltas in the open report for at's hour. When
 // the current report already holds MaxUsersPerReport users, a new report for the
 // same hour is opened instead of exceeding the contract limit.
-func (a *Accountant) appendDelta(tx *bolt.Tx, at time.Time, userDeltas map[string]state.CounterBaseline, nodeUplink, nodeDownlink int64, gap bool) error {
+func (a *Accountant) appendDelta(tx *state.Tx, at time.Time, userDeltas map[string]state.CounterBaseline, nodeUplink, nodeDownlink int64, gap bool) error {
 	if len(userDeltas) == 0 && nodeUplink == 0 && nodeDownlink == 0 {
 		return nil
 	}
@@ -318,10 +324,38 @@ func (a *Accountant) appendDelta(tx *bolt.Tx, at time.Time, userDeltas map[strin
 	return nil
 }
 
-// CloseReports moves every open report to the outbox. The Worker acknowledges
-// reports individually, so closing is independent of sending.
+// CloseReports moves every open report to the outbox in one transaction. The
+// close policy lives here because it is a reporting rule, not a storage format:
+// period_end is clamped to the close time because the Worker rejects a period_end
+// more than five minutes in the future, and it stays inside the report's hour
+// bucket because the Worker requires period_start and period_end in one hour.
+// Empty reports are discarded instead of enqueued.
 func (a *Accountant) CloseReports() (int, error) {
-	closed, err := a.store.ClosePendingReports(a.now())
+	closeAt := a.now()
+	closed := 0
+	err := a.store.Update(func(tx *state.Tx) error {
+		reports, err := state.PendingReports(tx)
+		if err != nil {
+			return err
+		}
+		for _, report := range reports {
+			if report.Empty() {
+				if err := state.DeletePendingReport(tx, report); err != nil {
+					return err
+				}
+				continue
+			}
+			report.PeriodEnd = closedPeriodEnd(report, closeAt)
+			if err := state.PutOutboxReport(tx, report); err != nil {
+				return err
+			}
+			if err := state.DeletePendingReport(tx, report); err != nil {
+				return err
+			}
+			closed++
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("accounting: close reports: %w", err)
 	}
@@ -331,10 +365,29 @@ func (a *Accountant) CloseReports() (int, error) {
 	return closed, nil
 }
 
-// DropExpired removes outbox reports older than OutboxMaxAge and logs one
-// warning per dropped report so an operator can see the lost traffic window.
+// DropExpired removes outbox reports older than OutboxMaxAge and logs one warning
+// per dropped report so an operator can see the lost traffic window. The Worker
+// keeps report IDs for 30 days, so a 7 day local backlog is always still accepted
+// and a longer one would retry forever.
 func (a *Accountant) DropExpired(now time.Time) (int, error) {
-	dropped, err := a.store.DiscardExpiredOutbox(now, OutboxMaxAge)
+	cutoff := now.Add(-OutboxMaxAge).Unix()
+	dropped := make([]state.TrafficReport, 0)
+	err := a.store.Update(func(tx *state.Tx) error {
+		reports, err := state.OutboxReports(tx)
+		if err != nil {
+			return err
+		}
+		for _, report := range reports {
+			if report.PeriodEnd >= cutoff {
+				continue
+			}
+			if err := state.DeleteOutboxReport(tx, report.ReportID); err != nil {
+				return err
+			}
+			dropped = append(dropped, report)
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("accounting: drop expired reports: %w", err)
 	}
@@ -347,6 +400,19 @@ func (a *Accountant) DropExpired(now time.Time) (int, error) {
 		)
 	}
 	return len(dropped), nil
+}
+
+// closedPeriodEnd caps a report at the close time without leaving its hour
+// bucket. The clamp keeps period_end greater than period_start.
+func closedPeriodEnd(report state.TrafficReport, closeAt time.Time) int64 {
+	end := closeAt.Unix()
+	if end > report.PeriodEnd {
+		end = report.PeriodEnd
+	}
+	if end <= report.PeriodStart {
+		end = report.PeriodStart + 1
+	}
+	return end
 }
 
 func sortedKeys[V any](values map[string]V) []string {

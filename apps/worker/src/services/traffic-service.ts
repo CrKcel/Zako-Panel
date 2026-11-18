@@ -1,4 +1,5 @@
 import type { AgentReport, AgentReportResponse, TrafficSummary } from '@zako/contracts';
+import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { hourBucket, nowSeconds } from '../lib/node-status';
 import { assertReportWindow, assertUniqueXrayEmails, trafficPayloadHash } from '../lib/traffic';
@@ -33,10 +34,6 @@ export interface TrafficQuery {
 
 export const TRAFFIC_INTERVAL_SECONDS = 900;
 const MAX_TRAFFIC_RANGE_SECONDS = 31 * 86_400;
-
-function isUniqueConstraintError(error: unknown): boolean {
-	return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
-}
 
 async function responseFor(
 	db: D1Database,

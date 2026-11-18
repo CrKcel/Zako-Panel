@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import type { CreateSubscriberRequest, Node, Subscriber, SubscriberStatus, UpdateSubscriberRequest } from '@zako/contracts';
+import type { CreateSubscriberRequest, Node, Subscriber, UpdateSubscriberRequest } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
+import NodeGrantDialog from '../components/NodeGrantDialog.vue';
+import PageToolbar from '../components/PageToolbar.vue';
+import { useAsyncResource } from '../composables/useAsyncResource';
+import { useCrudDialog } from '../composables/useCrudDialog';
+import { LIMIT_UNITS, limitBytes, limitParts, usageCycleLabel, usageLabel, type LimitUnit } from '../domain/subscriber';
+import { subscriberStatusDescriptor } from '../domain/status';
 import { showError, showSuccess } from '../utils/feedback';
-import { formatBytes, formatTimestamp, SUBSCRIBER_STATUS_LABEL, SUBSCRIBER_STATUS_TAG } from '../utils/format';
-
-type LimitUnit = 'GB' | 'MB';
+import { formatTimestamp } from '../utils/format';
+import { fromUnixSeconds, toUnixSeconds } from '../utils/time';
 
 interface SubscriberForm {
 	name: string;
@@ -19,183 +24,102 @@ interface SubscriberForm {
 	suspended: boolean;
 }
 
-const UNIT_BYTES: Record<LimitUnit, number> = {
-	GB: 1024 ** 3,
-	MB: 1024 ** 2,
-};
-
-const LIMIT_UNITS: LimitUnit[] = ['GB', 'MB'];
-
-const subscribers = ref<Subscriber[]>([]);
-const nodes = ref<Node[]>([]);
-const loading = ref(true);
-const saving = ref(false);
-const dialogVisible = ref(false);
-const editingId = ref<string | null>(null);
-const formRef = ref<FormInstance>();
-
-const grantDialogVisible = ref(false);
-const grantSubscriber = ref<Subscriber | null>(null);
-const grantedNodeIds = ref<string[]>([]);
-const grantLoading = ref(false);
-const grantSaving = ref(false);
-
-function emptyForm(): SubscriberForm {
+function emptySubscriberForm(): SubscriberForm {
 	return { name: '', email: '', limit_value: undefined, limit_unit: 'GB', expires_at: null, suspended: false };
 }
 
-const form = ref<SubscriberForm>(emptyForm());
+const form = ref<SubscriberForm>(emptySubscriberForm());
+const formRef = ref<FormInstance>();
+const grantVisible = ref(false);
+const grantTarget = ref<Subscriber | null>(null);
+
+const {
+	data: subscribers,
+	loading,
+	reload,
+} = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '订阅用户加载失败'),
+});
+
+const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '节点加载失败'),
+});
 
 const rules: FormRules = {
 	name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
 	email: [{ type: 'email', message: '邮箱格式不正确', trigger: 'blur' }],
 };
 
-const dialogTitle = computed(() => (editingId.value === null ? '创建订阅用户' : '编辑订阅用户'));
+const grantTitle = computed(() => `节点授权 · ${grantTarget.value?.name ?? ''}`);
 
-function limitBytes(): number | null {
-	const value = form.value.limit_value;
-	if (value === undefined || value <= 0) return null;
-	return Math.round(value * UNIT_BYTES[form.value.limit_unit]);
-}
-
-function limitParts(bytes: number | null | undefined): Pick<SubscriberForm, 'limit_value' | 'limit_unit'> {
-	if (bytes === null || bytes === undefined) return { limit_value: undefined, limit_unit: 'GB' };
-	if (bytes >= UNIT_BYTES.GB) return { limit_value: Number((bytes / UNIT_BYTES.GB).toFixed(2)), limit_unit: 'GB' };
-	return { limit_value: Number((bytes / UNIT_BYTES.MB).toFixed(2)), limit_unit: 'MB' };
-}
-
-function usedBytes(row: Subscriber): number {
-	if (row.usage === null || row.usage === undefined) return 0;
-	return row.usage.uplink_bytes + row.usage.downlink_bytes;
-}
-
-function usedLabel(row: Subscriber): string {
-	const limit = row.traffic_limit_bytes === null || row.traffic_limit_bytes === undefined ? '不限量' : formatBytes(row.traffic_limit_bytes);
-	return `${formatBytes(usedBytes(row))} / ${limit}`;
-}
-
-function cycleLabel(row: Subscriber): string {
-	return `${formatTimestamp(row.usage_cycle_start)} ~ ${formatTimestamp(row.usage_cycle_end)}`;
-}
-
-function expiresAtSeconds(): number | null {
-	const expiresAt = form.value.expires_at;
-	return expiresAt === null ? null : Math.floor(expiresAt.getTime() / 1000);
-}
-
-async function load(): Promise<void> {
-	loading.value = true;
-	try {
-		const page = await subscribersApi.list({ limit: 200 });
-		subscribers.value = page.items;
-	} catch (error) {
-		showError(error, '订阅用户加载失败');
-	} finally {
-		loading.value = false;
-	}
-}
-
-async function loadNodes(): Promise<void> {
-	try {
-		const page = await nodesApi.list({ limit: 200 });
-		nodes.value = page.items;
-	} catch (error) {
-		showError(error, '节点加载失败');
-	}
-}
-
-function openCreate(): void {
-	editingId.value = null;
-	form.value = emptyForm();
-	dialogVisible.value = true;
-}
-
-function openEdit(row: Subscriber): void {
-	editingId.value = row.id;
-	form.value = {
-		name: row.name,
-		email: row.email ?? '',
-		...limitParts(row.traffic_limit_bytes),
-		expires_at: row.expires_at === null || row.expires_at === undefined ? null : new Date(row.expires_at * 1000),
-		suspended: row.status === 'disabled',
-	};
-	dialogVisible.value = true;
-}
+const {
+	visible: dialogVisible,
+	editingId,
+	submitting,
+	openCreate,
+	openEdit,
+	close: closeDialog,
+	submit: submitDialog,
+} = useCrudDialog({
+	reset: () => {
+		form.value = emptySubscriberForm();
+	},
+	load: (id) => {
+		const row = subscribers.value.find((item) => item.id === id);
+		if (row === undefined) return;
+		form.value = {
+			name: row.name,
+			email: row.email ?? '',
+			...limitParts(row.traffic_limit_bytes),
+			expires_at: fromUnixSeconds(row.expires_at),
+			suspended: row.status === 'disabled',
+		};
+	},
+});
 
 async function submit(): Promise<void> {
-	const valid = await formRef.value?.validate().catch(() => false);
-	if (!valid) return;
+	if (!(await formRef.value?.validate().catch(() => false))) return;
 	const email = form.value.email.trim();
 	const payload: CreateSubscriberRequest & UpdateSubscriberRequest = {
 		name: form.value.name.trim(),
 		email: email === '' ? null : email,
-		traffic_limit_bytes: limitBytes(),
-		expires_at: expiresAtSeconds(),
+		traffic_limit_bytes: limitBytes(form.value.limit_value, form.value.limit_unit),
+		expires_at: toUnixSeconds(form.value.expires_at),
 	};
-	saving.value = true;
-	try {
-		if (editingId.value === null) {
-			await subscribersApi.create(payload);
-			showSuccess('订阅用户已创建');
-		} else {
-			// Only suspension is an administrator decision; limited and expired are
-			// derived from quota and expiry on every write.
-			const update: UpdateSubscriberRequest = { ...payload, status: form.value.suspended ? 'disabled' : 'active' };
-			await subscribersApi.update(editingId.value, update);
-			showSuccess('订阅用户已更新');
-		}
-		dialogVisible.value = false;
-		await load();
-	} catch (error) {
-		showError(error, '订阅用户保存失败');
-	} finally {
-		saving.value = false;
-	}
+	const subscriberId = editingId.value;
+	const saved = await submitDialog(
+		async () => {
+			if (subscriberId === null) {
+				await subscribersApi.create(payload);
+				showSuccess('订阅用户已创建');
+			} else {
+				// Only suspension is an administrator decision; limited and expired are
+				// derived from quota and expiry on every write.
+				const update: UpdateSubscriberRequest = { ...payload, status: form.value.suspended ? 'disabled' : 'active' };
+				await subscribersApi.update(subscriberId, update);
+				showSuccess('订阅用户已更新');
+			}
+			closeDialog();
+		},
+		(error) => showError(error, '订阅用户保存失败'),
+	);
+	if (saved) await reload();
 }
 
-async function openGrant(row: Subscriber): Promise<void> {
-	grantSubscriber.value = row;
-	grantedNodeIds.value = [];
-	grantDialogVisible.value = true;
-	grantLoading.value = true;
-	try {
-		const detail = await subscribersApi.get(row.id);
-		grantedNodeIds.value = detail.node_ids;
-	} catch (error) {
-		grantDialogVisible.value = false;
-		showError(error, '订阅用户加载失败');
-	} finally {
-		grantLoading.value = false;
-	}
+function openGrant(row: Subscriber): void {
+	grantTarget.value = row;
+	grantVisible.value = true;
 }
-
-async function submitGrant(): Promise<void> {
-	if (grantSubscriber.value === null) return;
-	grantSaving.value = true;
-	try {
-		await subscribersApi.replaceNodes(grantSubscriber.value.id, grantedNodeIds.value);
-		grantDialogVisible.value = false;
-		await load();
-		showSuccess('节点授权已更新');
-	} catch (error) {
-		showError(error, '节点授权保存失败');
-	} finally {
-		grantSaving.value = false;
-	}
-}
-
-onMounted(async () => {
-	await Promise.all([load(), loadNodes()]);
-});
 </script>
 
 <template>
 	<el-card shadow="never">
-		<div class="toolbar">
-			<el-button :loading="loading" @click="load">刷新</el-button>
+		<PageToolbar>
+			<el-button :loading="loading" @click="reload">刷新</el-button>
 			<el-button type="primary" @click="openCreate">创建订阅用户</el-button>
-		</div>
+		</PageToolbar>
 		<el-table v-loading="loading" :data="subscribers" empty-text="暂无数据">
 			<el-table-column prop="name" label="名称" min-width="160" />
 			<el-table-column label="邮箱" min-width="200">
@@ -203,16 +127,16 @@ onMounted(async () => {
 			</el-table-column>
 			<el-table-column label="状态" width="100">
 				<template #default="{ row }">
-					<el-tag :type="SUBSCRIBER_STATUS_TAG[row.status as SubscriberStatus]" disable-transitions>
-						{{ SUBSCRIBER_STATUS_LABEL[row.status as SubscriberStatus] }}
+					<el-tag :type="subscriberStatusDescriptor(row.status).tag" disable-transitions>
+						{{ subscriberStatusDescriptor(row.status).label }}
 					</el-tag>
 				</template>
 			</el-table-column>
 			<el-table-column label="已用 / 额度" min-width="190">
-				<template #default="{ row }">{{ usedLabel(row as Subscriber) }}</template>
+				<template #default="{ row }">{{ usageLabel(row as Subscriber) }}</template>
 			</el-table-column>
 			<el-table-column label="周期" min-width="330">
-				<template #default="{ row }">{{ cycleLabel(row as Subscriber) }}</template>
+				<template #default="{ row }">{{ usageCycleLabel(row as Subscriber) }}</template>
 			</el-table-column>
 			<el-table-column label="到期" width="180">
 				<template #default="{ row }">{{ formatTimestamp(row.expires_at) }}</template>
@@ -226,7 +150,7 @@ onMounted(async () => {
 			</el-table-column>
 			<el-table-column label="操作" width="210" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" @click="openEdit(row as Subscriber)">编辑</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
 					<el-button link type="primary" @click="openGrant(row as Subscriber)">节点授权</el-button>
 					<RouterLink :to="`/subscribers/${row.id}`" custom v-slot="{ navigate }">
 						<el-button link type="primary" @click="navigate">详情</el-button>
@@ -236,7 +160,13 @@ onMounted(async () => {
 		</el-table>
 	</el-card>
 
-	<el-dialog v-model="dialogVisible" :title="dialogTitle" width="520px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog
+		v-model="dialogVisible"
+		:title="editingId === null ? '创建订阅用户' : '编辑订阅用户'"
+		width="520px"
+		:close-on-click-modal="false"
+		destroy-on-close
+	>
 		<el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
 			<el-form-item label="名称" prop="name">
 				<el-input v-model="form.name" />
@@ -260,42 +190,15 @@ onMounted(async () => {
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="dialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+			<el-button @click="closeDialog">取消</el-button>
+			<el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog
-		v-model="grantDialogVisible"
-		:title="`节点授权 · ${grantSubscriber?.name ?? ''}`"
-		width="520px"
-		:close-on-click-modal="false"
-		destroy-on-close
-	>
-		<div v-loading="grantLoading">
-			<el-select v-model="grantedNodeIds" multiple filterable class="full-width">
-				<el-option v-for="node in nodes" :key="node.id" :label="node.name" :value="node.id" />
-			</el-select>
-		</div>
-		<template #footer>
-			<el-button @click="grantDialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="grantSaving" @click="submitGrant">保存</el-button>
-		</template>
-	</el-dialog>
+	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="reload" />
 </template>
 
 <style scoped>
-.notice {
-	margin-bottom: 16px;
-}
-
-.toolbar {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-bottom: 16px;
-}
-
 .full-width {
 	width: 100%;
 }

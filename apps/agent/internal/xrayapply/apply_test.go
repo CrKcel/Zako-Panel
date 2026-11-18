@@ -1,4 +1,4 @@
-package xray
+package xrayapply
 
 import (
 	"context"

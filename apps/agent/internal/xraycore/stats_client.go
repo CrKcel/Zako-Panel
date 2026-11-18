@@ -1,4 +1,4 @@
-package xray
+package xraycore
 
 import (
 	"context"

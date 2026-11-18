@@ -26,8 +26,10 @@ function uriHost(host: string): string {
 	return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
+export const VLESS_REALITY_PROTOCOL = 'vless-reality' as const;
+
 export const vlessRealityAdapter: ProtocolAdapter = {
-	protocol: 'vless-reality',
+	protocol: VLESS_REALITY_PROTOCOL,
 	paramsSchema: vlessRealityParamsSchema,
 	toClash(endpoint: ProxyEndpoint, uuid: string): Record<string, unknown> {
 		const params = paramsOf(endpoint);
@@ -65,34 +67,5 @@ export const vlessRealityAdapter: ProtocolAdapter = {
 		if (params.short_id !== '') query.push(`sid=${encodeURIComponent(params.short_id)}`);
 		query.push(`type=${encodeURIComponent(params.network)}`);
 		return `vless://${uuid}@${uriHost(endpoint.host)}:${endpoint.port}?${query.join('&')}#${encodeURIComponent(endpoint.name)}`;
-	},
-	toXrayInbound(endpoint: ProxyEndpoint): Record<string, unknown> {
-		const params = paramsOf(endpoint);
-		return {
-			tag: `vless-reality-${endpoint.id}`,
-			listen: '0.0.0.0',
-			port: endpoint.port,
-			protocol: 'vless',
-			settings: {
-				clients: [],
-				decryption: 'none',
-			},
-			streamSettings: {
-				network: params.network,
-				security: 'reality',
-				realitySettings: {
-					show: false,
-					dest: `${params.sni}:443`,
-					xver: 0,
-					serverNames: [params.sni],
-					shortIds: [params.short_id],
-					fingerprint: params.fingerprint,
-				},
-			},
-			sniffing: {
-				enabled: true,
-				destOverride: ['http', 'tls', 'quic'],
-			},
-		};
 	},
 };

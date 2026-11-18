@@ -31,3 +31,9 @@ export interface Paginated<T> {
 	items: T[];
 	next_cursor: string | null;
 }
+
+/** Cursor page input shared by every list endpoint. */
+export interface ListQuery {
+	limit: number;
+	cursor?: string;
+}

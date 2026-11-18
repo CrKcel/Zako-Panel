@@ -1,5 +1,5 @@
 import type { ClashPreview, CreateProfileRequest, Profile, ProfileDetail, UpdateProfileRequest } from '@zako/contracts';
-import { apiPage, apiRequest, type Page } from './client';
+import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface ProfileListParams {
 	limit?: number;
@@ -8,7 +8,7 @@ export interface ProfileListParams {
 
 export const profilesApi = {
 	list(params: ProfileListParams = {}): Promise<Page<Profile>> {
-		return apiPage<Profile>('/api/v1/admin/profiles', { query: { ...params } });
+		return apiPage<Profile>('/api/v1/admin/profiles', { query: { limit: LIST_LIMIT, ...params } });
 	},
 	create(input: CreateProfileRequest): Promise<ProfileDetail> {
 		return apiRequest<ProfileDetail>('/api/v1/admin/profiles', { method: 'POST', body: input });

@@ -1,6 +1,6 @@
 import { advanceUsageCycle, initialUsageCycle } from '../lib/cycle';
 import { deriveSubscriberStatus, type UsageSnapshot } from '../lib/subscriber-status';
-import { incrementMetaStatement, META_KEYS } from '../repositories/meta';
+
 import {
 	findUsageBySubscribers,
 	resetUsageStatement,
@@ -10,6 +10,7 @@ import {
 	type SubscriberRow,
 	type SubscriberUsageRow,
 } from '../repositories/subscribers';
+import { bumpUsersVersionStatement } from './users-version';
 
 const MAX_SUBSCRIBERS_PER_RUN = 500;
 /** A dormant row may be years behind; the loop stays bounded per row. */
@@ -88,7 +89,7 @@ export async function reconcileSubscriberCycles(db: D1Database, now: number): Pr
 		if (status !== row.status) statusChanged += 1;
 	}
 
-	if (statusChanged > 0) statements.push(incrementMetaStatement(db, META_KEYS.usersVersion));
+	if (statusChanged > 0) statements.push(bumpUsersVersionStatement(db));
 
 	for (let index = 0; index < statements.length; index += STATEMENTS_PER_BATCH) {
 		await db.batch(statements.slice(index, index + STATEMENTS_PER_BATCH));

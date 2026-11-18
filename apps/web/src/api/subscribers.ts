@@ -5,7 +5,7 @@ import type {
 	SubscriberDetail,
 	UpdateSubscriberRequest,
 } from '@zako/contracts';
-import { apiPage, apiRequest, type Page } from './client';
+import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface SubscriberListParams {
 	limit?: number;
@@ -14,7 +14,7 @@ export interface SubscriberListParams {
 
 export const subscribersApi = {
 	list(params: SubscriberListParams = {}): Promise<Page<Subscriber>> {
-		return apiPage<Subscriber>('/api/v1/admin/subscribers', { query: { ...params } });
+		return apiPage<Subscriber>('/api/v1/admin/subscribers', { query: { limit: LIST_LIMIT, ...params } });
 	},
 	create(input: CreateSubscriberRequest): Promise<Subscriber> {
 		return apiRequest<Subscriber>('/api/v1/admin/subscribers', { method: 'POST', body: input });

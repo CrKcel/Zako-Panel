@@ -1,28 +1,62 @@
 <script setup lang="ts">
 import type { Node, SubscriberDetail, TrafficSummary } from '@zako/contracts';
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
 import { trafficApi } from '../api/traffic';
-import { showError, showSuccess } from '../utils/feedback';
-import { formatBytes, formatTimestamp, SUBSCRIBER_STATUS_LABEL, SUBSCRIBER_STATUS_TAG } from '../utils/format';
+import NodeGrantDialog from '../components/NodeGrantDialog.vue';
+import PageToolbar from '../components/PageToolbar.vue';
+import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
+import { useAsyncResource } from '../composables/useAsyncResource';
+import { trafficLimitLabel, usageCycleLabel } from '../domain/subscriber';
+import { subscriberStatusDescriptor } from '../domain/status';
+import { DAY_SECONDS, trafficChartData, trafficWindow } from '../domain/traffic';
+import { showError } from '../utils/feedback';
+import { formatTimestamp } from '../utils/format';
 
 const TrafficChart = defineAsyncComponent(() => import('../components/TrafficChart.vue'));
+
+interface SubscriberTraffic {
+	totals: TrafficSummary;
+	byNode: TrafficSummary;
+}
 
 const route = useRoute();
 const router = useRouter();
 const subscriberId = computed(() => String(route.params.subscriberId ?? ''));
 
-const subscriber = ref<SubscriberDetail | null>(null);
-const nodes = ref<Node[]>([]);
-const traffic = ref<TrafficSummary | null>(null);
-const trafficByNode = ref<TrafficSummary | null>(null);
-const loading = ref(true);
-const trafficLoading = ref(true);
-const grantSaving = ref(false);
-const grantDialogVisible = ref(false);
-const grantedNodeIds = ref<string[]>([]);
+const {
+	data: subscriber,
+	loading,
+	reload: reloadSubscriber,
+} = useAsyncResource<SubscriberDetail | null>(() => subscribersApi.get(subscriberId.value), {
+	initialValue: null,
+	onError: (error) => showError(error, '订阅用户加载失败'),
+});
+
+const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '节点加载失败'),
+});
+
+const {
+	data: traffic,
+	loading: trafficLoading,
+	reload: reloadTraffic,
+} = useAsyncResource<SubscriberTraffic | null>(
+	async () => {
+		const window = trafficWindow(DAY_SECONDS);
+		const [totals, byNode] = await Promise.all([
+			trafficApi.summary({ ...window, groupBy: 'subscriber', subscriberId: subscriberId.value }),
+			trafficApi.summary({ ...window, groupBy: 'node', subscriberId: subscriberId.value }),
+		]);
+		return { totals, byNode };
+	},
+	{ initialValue: null, onError: (error) => showError(error, '流量加载失败') },
+);
+
+const grantVisible = ref(false);
 
 const nodeNames = computed(() => new Map(nodes.value.map((node) => [node.id, node.name])));
 
@@ -30,109 +64,36 @@ const grantedNodes = computed(() =>
 	(subscriber.value?.node_ids ?? []).map((nodeId) => ({ id: nodeId, name: nodeNames.value.get(nodeId) ?? nodeId })),
 );
 
-const limitLabel = computed(() => {
-	const limit = subscriber.value?.traffic_limit_bytes;
-	if (limit === null || limit === undefined) return '不限量';
-	return formatBytes(limit);
-});
+const limitLabel = computed(() => trafficLimitLabel(subscriber.value?.traffic_limit_bytes));
 
-const cycleLabel = computed(() =>
-	subscriber.value === null
-		? '—'
-		: `${formatTimestamp(subscriber.value.usage_cycle_start)} ~ ${formatTimestamp(subscriber.value.usage_cycle_end)}`,
-);
+const cycleLabel = computed(() => (subscriber.value === null ? '—' : usageCycleLabel(subscriber.value)));
 
-const trafficTotals = computed(() => {
-	const items = traffic.value?.items ?? [];
-	const uplink = items.reduce((total, item) => total + item.uplink_bytes, 0);
-	const downlink = items.reduce((total, item) => total + item.downlink_bytes, 0);
-	return { uplink, downlink, total: uplink + downlink };
-});
+const chart = computed(() => trafficChartData(traffic.value?.byNode.items));
 
-const chartItems = computed(() => trafficByNode.value?.items ?? []);
-const chartCategories = computed(() => chartItems.value.map((item) => item.label ?? item.key));
-const chartSeries = computed(() => [
-	{ name: '上行', values: chartItems.value.map((item) => item.uplink_bytes) },
-	{ name: '下行', values: chartItems.value.map((item) => item.downlink_bytes) },
-]);
-
-async function loadSubscriber(): Promise<void> {
-	loading.value = true;
-	try {
-		subscriber.value = await subscribersApi.get(subscriberId.value);
-	} catch (error) {
-		showError(error, '订阅用户加载失败');
-	} finally {
-		loading.value = false;
-	}
+function openGrant(): void {
+	if (subscriber.value === null) return;
+	grantVisible.value = true;
 }
 
-async function loadNodes(): Promise<void> {
-	try {
-		const page = await nodesApi.list({ limit: 200 });
-		nodes.value = page.items;
-	} catch (error) {
-		showError(error, '节点加载失败');
-	}
-}
-
-async function loadTraffic(): Promise<void> {
-	trafficLoading.value = true;
-	try {
-		const to = Math.floor(Date.now() / 1000);
-		const from = to - 24 * 60 * 60;
-		const [totals, byNode] = await Promise.all([
-			trafficApi.summary({ from, to, groupBy: 'subscriber', subscriberId: subscriberId.value }),
-			trafficApi.summary({ from, to, groupBy: 'node', subscriberId: subscriberId.value }),
-		]);
-		traffic.value = totals;
-		trafficByNode.value = byNode;
-	} catch (error) {
-		showError(error, '流量加载失败');
-	} finally {
-		trafficLoading.value = false;
-	}
-}
-
-async function refresh(): Promise<void> {
-	await Promise.all([loadSubscriber(), loadTraffic()]);
+function onGrantSaved(detail: SubscriberDetail): void {
+	subscriber.value = detail;
 }
 
 function backToList(): void {
 	void router.push({ name: 'subscribers' });
 }
 
-function openGrant(): void {
-	if (subscriber.value === null) return;
-	grantedNodeIds.value = [...subscriber.value.node_ids];
-	grantDialogVisible.value = true;
+async function refresh(): Promise<void> {
+	await Promise.all([reloadSubscriber(), reloadTraffic()]);
 }
-
-async function submitGrant(): Promise<void> {
-	if (subscriber.value === null) return;
-	grantSaving.value = true;
-	try {
-		subscriber.value = await subscribersApi.replaceNodes(subscriber.value.id, grantedNodeIds.value);
-		grantDialogVisible.value = false;
-		showSuccess('节点授权已更新');
-	} catch (error) {
-		showError(error, '节点授权保存失败');
-	} finally {
-		grantSaving.value = false;
-	}
-}
-
-onMounted(async () => {
-	await Promise.all([loadSubscriber(), loadNodes(), loadTraffic()]);
-});
 </script>
 
 <template>
 	<div v-loading="loading">
-		<div class="toolbar">
+		<PageToolbar spread>
 			<el-button @click="backToList">返回列表</el-button>
 			<el-button :loading="loading" @click="refresh">刷新</el-button>
-		</div>
+		</PageToolbar>
 
 		<el-card shadow="never" class="section">
 			<template #header>
@@ -140,8 +101,8 @@ onMounted(async () => {
 			</template>
 			<el-descriptions :column="3" border>
 				<el-descriptions-item label="状态">
-					<el-tag v-if="subscriber" :type="SUBSCRIBER_STATUS_TAG[subscriber.status]" disable-transitions>
-						{{ SUBSCRIBER_STATUS_LABEL[subscriber.status] }}
+					<el-tag v-if="subscriber" :type="subscriberStatusDescriptor(subscriber.status).tag" disable-transitions>
+						{{ subscriberStatusDescriptor(subscriber.status).label }}
 					</el-tag>
 					<span v-else>—</span>
 				</el-descriptions-item>
@@ -166,46 +127,21 @@ onMounted(async () => {
 			<span v-else>—</span>
 		</el-card>
 
-		<el-card v-loading="trafficLoading" shadow="never" class="section">
-			<template #header>
-				<span class="card-title">近 24 小时流量</span>
-			</template>
-			<div class="metric-grid">
-				<div class="metric">
-					<div class="metric-label">上行</div>
-					<div class="metric-value">{{ formatBytes(trafficTotals.uplink) }}</div>
-				</div>
-				<div class="metric">
-					<div class="metric-label">下行</div>
-					<div class="metric-value">{{ formatBytes(trafficTotals.downlink) }}</div>
-				</div>
-				<div class="metric">
-					<div class="metric-label">总计</div>
-					<div class="metric-value">{{ formatBytes(trafficTotals.total) }}</div>
-				</div>
-			</div>
-			<TrafficChart v-if="chartCategories.length > 0" :categories="chartCategories" :series="chartSeries" />
-		</el-card>
+		<TrafficTotalsCard :summary="traffic?.totals ?? null" :loading="trafficLoading" title="近 24 小时流量">
+			<TrafficChart v-if="chart.categories.length > 0" :categories="chart.categories" :series="chart.series" class="chart" />
+		</TrafficTotalsCard>
 	</div>
 
-	<el-dialog v-model="grantDialogVisible" title="节点授权" width="520px" :close-on-click-modal="false" destroy-on-close>
-		<el-select v-model="grantedNodeIds" multiple filterable class="full-width">
-			<el-option v-for="node in nodes" :key="node.id" :label="node.name" :value="node.id" />
-		</el-select>
-		<template #footer>
-			<el-button @click="grantDialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="grantSaving" @click="submitGrant">保存</el-button>
-		</template>
-	</el-dialog>
+	<NodeGrantDialog
+		v-model:visible="grantVisible"
+		:subscriber="subscriber"
+		:nodes="nodes"
+		:node-ids="subscriber?.node_ids ?? []"
+		@saved="onGrantSaved"
+	/>
 </template>
 
 <style scoped>
-.toolbar {
-	display: flex;
-	justify-content: space-between;
-	margin-bottom: 16px;
-}
-
 .section {
 	margin-bottom: 16px;
 }
@@ -221,32 +157,13 @@ onMounted(async () => {
 	font-weight: 600;
 }
 
+.chart {
+	margin-top: 16px;
+}
+
 .node-tags {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
-}
-
-.metric-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-	gap: 16px;
-	margin-bottom: 16px;
-}
-
-.metric-label {
-	font-size: 13px;
-	color: #6b7280;
-}
-
-.metric-value {
-	margin-top: 8px;
-	font-size: 22px;
-	font-weight: 600;
-	color: #111827;
-}
-
-.full-width {
-	width: 100%;
 }
 </style>

@@ -2,13 +2,8 @@ import { env, SELF } from 'cloudflare:test';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { replaceSubscriberNodes } from '../src/services/subscriber-service';
-import {
-	createSubscription,
-	getClashSubscription,
-	previewProfile,
-	revokeSubscription,
-	rotateSubscription,
-} from '../src/services/subscription-service';
+import { previewProfile } from '../src/services/distribution';
+import { createSubscription, getClashSubscription, revokeSubscription, rotateSubscription } from '../src/services/subscription-service';
 import {
 	DEFAULT_PARAMS,
 	hourStart,

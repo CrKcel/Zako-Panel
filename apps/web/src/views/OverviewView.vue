@@ -1,19 +1,36 @@
 <script setup lang="ts">
 import type { Node, TrafficSummary } from '@zako/contracts';
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
+import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
+import { useAsyncResource } from '../composables/useAsyncResource';
 import { usePolling } from '../composables/usePolling';
+import { DAY_SECONDS, trafficWindow } from '../domain/traffic';
+import { nodeStatusDescriptor } from '../domain/status';
 import { showError } from '../utils/feedback';
-import { formatBytes, formatTimestamp, NODE_STATUS_LABEL, NODE_STATUS_TAG } from '../utils/format';
+import { formatTimestamp } from '../utils/format';
 
-const nodes = ref<Node[]>([]);
-const traffic = ref<TrafficSummary | null>(null);
-const nodeLoading = ref(true);
-const trafficLoading = ref(true);
+const {
+	data: nodes,
+	loading: nodeLoading,
+	reload: reloadNodes,
+} = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
+	immediate: false,
+	initialValue: [],
+	onError: (error) => showError(error, '节点加载失败'),
+});
 
-const uptimeSeconds = 24 * 60 * 60;
+const {
+	data: traffic,
+	loading: trafficLoading,
+	reload: reloadTraffic,
+} = useAsyncResource<TrafficSummary | null>(() => trafficApi.summary({ ...trafficWindow(DAY_SECONDS), groupBy: 'site' }), {
+	immediate: false,
+	initialValue: null,
+	onError: (error) => showError(error, '流量加载失败'),
+});
 
 const stats = computed(() => {
 	const count = (status: Node['status']): number => nodes.value.filter((node) => node.status === status).length;
@@ -25,13 +42,6 @@ const stats = computed(() => {
 	];
 });
 
-const trafficTotals = computed(() => {
-	const items = traffic.value?.items ?? [];
-	const uplink = items.reduce((total, item) => total + item.uplink_bytes, 0);
-	const downlink = items.reduce((total, item) => total + item.downlink_bytes, 0);
-	return { uplink, downlink, total: uplink + downlink };
-});
-
 const anomalies = computed(() =>
 	nodes.value
 		.filter(
@@ -41,32 +51,8 @@ const anomalies = computed(() =>
 		.sort((a, b) => (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0)),
 );
 
-async function loadNodes(): Promise<void> {
-	nodeLoading.value = true;
-	try {
-		const page = await nodesApi.list({ limit: 200 });
-		nodes.value = page.items;
-	} catch (error) {
-		showError(error, '节点加载失败');
-	} finally {
-		nodeLoading.value = false;
-	}
-}
-
-async function loadTraffic(): Promise<void> {
-	trafficLoading.value = true;
-	try {
-		const to = Math.floor(Date.now() / 1000);
-		traffic.value = await trafficApi.summary({ from: to - uptimeSeconds, to, groupBy: 'site' });
-	} catch (error) {
-		showError(error, '流量加载失败');
-	} finally {
-		trafficLoading.value = false;
-	}
-}
-
 const { refresh } = usePolling(async () => {
-	await Promise.all([loadNodes(), loadTraffic()]);
+	await Promise.all([reloadNodes(), reloadTraffic()]);
 }, 30_000);
 </script>
 
@@ -78,25 +64,7 @@ const { refresh } = usePolling(async () => {
 		</el-card>
 	</div>
 
-	<el-card v-loading="trafficLoading" shadow="never" class="traffic-card">
-		<template #header>
-			<span class="card-title">近 24 小时流量</span>
-		</template>
-		<div class="traffic-grid">
-			<div class="traffic-item">
-				<div class="stat-label">上行</div>
-				<div class="traffic-value">{{ formatBytes(trafficTotals.uplink) }}</div>
-			</div>
-			<div class="traffic-item">
-				<div class="stat-label">下行</div>
-				<div class="traffic-value">{{ formatBytes(trafficTotals.downlink) }}</div>
-			</div>
-			<div class="traffic-item">
-				<div class="stat-label">总计</div>
-				<div class="traffic-value">{{ formatBytes(trafficTotals.total) }}</div>
-			</div>
-		</div>
-	</el-card>
+	<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" title="近 24 小时流量" />
 
 	<el-card shadow="never">
 		<template #header>
@@ -113,8 +81,8 @@ const { refresh } = usePolling(async () => {
 			</el-table-column>
 			<el-table-column label="状态" width="100">
 				<template #default="{ row }">
-					<el-tag :type="NODE_STATUS_TAG[row.status as Node['status']]" disable-transitions>
-						{{ NODE_STATUS_LABEL[row.status as Node['status']] }}
+					<el-tag :type="nodeStatusDescriptor(row.status as Node['status']).tag" disable-transitions>
+						{{ nodeStatusDescriptor(row.status as Node['status']).label }}
 					</el-tag>
 				</template>
 			</el-table-column>
@@ -148,23 +116,6 @@ const { refresh } = usePolling(async () => {
 .stat-value {
 	margin-top: 8px;
 	font-size: 26px;
-	font-weight: 600;
-	color: #111827;
-}
-
-.traffic-card {
-	margin-bottom: 16px;
-}
-
-.traffic-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-	gap: 16px;
-}
-
-.traffic-value {
-	margin-top: 8px;
-	font-size: 22px;
 	font-weight: 600;
 	color: #111827;
 }

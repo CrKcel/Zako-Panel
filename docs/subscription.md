@@ -32,7 +32,7 @@
 ## 2. 查询顺序
 
 1. 对 URL token 做 SHA-256，以唯一索引查询订阅与订阅用户。
-2. 校验订阅撤销、订阅到期、用户状态与到期。
+2. 校验订阅撤销、订阅到期，再按 `lib/subscriber-status.ts` 的同一优先级判定订阅用户资格。
 3. 一次 `batch` 读取：档案、`profile_nodes`、`node_clients`、节点、启用的 endpoints、`subscriber_usage`。
 4. 若 `subscriber_usage.cycle_start` 早于订阅用户当前周期，按 0 处理；再校验额度。
 5. 取档案节点集合与用户授权集合的交集。

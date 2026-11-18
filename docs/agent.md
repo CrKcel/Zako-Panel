@@ -7,12 +7,16 @@ Agent 以单一 Go 二进制运行在 Debian 节点上，由 systemd 管理，�
 | 模块 | 职责 |
 | --- | --- |
 | `config` | 读取少量 YAML/环境配置并校验 |
-| `collector` | 定时读取 StatsService、计算增量 |
-| `state` | BoltDB 基线、Xray uptime、outbox 与用户版本元数据 |
+| `collector` | 采样循环、采样结构与健康标记 |
+| `accounting` | 增量计算、小时切分、outbox 关闭与过期策略 |
+| `state` | BoltDB 存储原语与不透明事务句柄；隔离 bbolt |
 | `reporter` | 心跳、流量重试、退避与 jitter |
 | `syncer` | 用户集合拉取、持久化与热更新 |
 | `sysinfo` | CPU、内存、负载、uptime |
-| `xray` | gRPC 客户端、配置渲染、校验与重启回退 |
+| `xraycore` | Stats/Handler gRPC 客户端与 protobuf 编解码 |
+| `xrayconfig` | 配置渲染与 config.json 唯一写入点 |
+| `xrayapply` | 校验、切换、重启、健康检查与回滚编排 |
+| `atomicfile` | 同目录临时文件、fsync 与原子替换 |
 | `cmd/zako-agent` | 依赖组装、signal 与优雅退出 |
 
 ## 2. 配置文件
@@ -57,6 +61,7 @@ Agent 构建为 `CGO_ENABLED=0` 的 Linux amd64/arm64 静态二进制，由 syst
 
 - 期望用户集合与 `users.json` 求差集：新增邮箱经 `HandlerService.AlterInbound` 的 `AddUser` 热更新，删除邮箱经 `RemoveUser`。UUID 变化表现为一次删除加一次新增；删除先于新增，因为 Xray 拒绝同一 `email` 的重复账号。
 - 热更新成功后先原子写 `users.json`（0600），渲染结果与磁盘 `config.json` 不同时再原子写入，最后推进 `users_version`。
+- `config.json` 的所有替换路径（热更新、重启回退、回滚）都经 `xrayconfig.ConfigStore` 单点写入，原子替换、文件权限与目录创建只定义一次。
 - `config.json` 以当前文件为模板，只替换 VLESS 入站的 `clients`，并合入本地 REALITY 私钥；其余字段（API inbound、routing、policy、REALITY 参数）原样保留。
 - 热更新失败时回退为重启路径：`xray run -test` 校验渲染结果，原子替换配置，`systemctl restart xray.service`，再用 StatsService 的 `GetSysStats` 做健康检查。校验失败时不替换配置；重启或健康检查失败时恢复上一份配置并再次重启。这两种情况下 `users_version` 与 `users.json` 都不推进。
 - 磁盘 `config.json` 与按当前用户集合渲染的结果不一致时，即使差集为空也走重启路径，让运行中的进程与磁盘配置收敛。

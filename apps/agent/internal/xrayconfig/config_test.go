@@ -1,11 +1,15 @@
-package xray
+package xrayconfig
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 const staticConfig = `{
@@ -68,9 +72,9 @@ func inboundByTag(t *testing.T, document map[string]any, tag string) map[string]
 }
 
 func TestRenderConfigReplacesClientsAndKeepsStaticFields(t *testing.T) {
-	users := []User{
-		{Email: "u_b", UUID: "uuid-b", Flow: FlowVision},
-		{Email: "u_a", UUID: "uuid-a", Flow: FlowVision},
+	users := []xraycore.User{
+		{Email: "u_b", UUID: "uuid-b", Flow: xraycore.FlowVision},
+		{Email: "u_a", UUID: "uuid-a", Flow: xraycore.FlowVision},
 	}
 	rendered, err := RenderConfig([]byte(staticConfig), users, "reality-private-key")
 	if err != nil {
@@ -96,7 +100,7 @@ func TestRenderConfigReplacesClientsAndKeepsStaticFields(t *testing.T) {
 	// Clients are rendered in email order so two renders of one set are byte
 	// identical and cannot look like a config change.
 	first, _ := clients[0].(map[string]any)
-	if first["email"] != "u_a" || first["id"] != "uuid-a" || first["flow"] != FlowVision {
+	if first["email"] != "u_a" || first["id"] != "uuid-a" || first["flow"] != xraycore.FlowVision {
 		t.Errorf("first client = %+v, want u_a with its uuid and vision flow", first)
 	}
 	if level, ok := first["level"].(float64); !ok || level != 0 {
@@ -184,7 +188,7 @@ func TestConfigFileRenderReadsLocalRealityKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Static: %v", err)
 	}
-	rendered, err := file.Render(static, []User{{Email: "u_a", UUID: "uuid-a"}})
+	rendered, err := file.Render(static, []xraycore.User{{Email: "u_a", UUID: "uuid-a"}})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -205,5 +209,54 @@ func TestConfigFileRenderReadsLocalRealityKey(t *testing.T) {
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0o640); got != want {
 		t.Errorf("config mode = %o, want %o", got, want)
+	}
+}
+
+func TestConfigStoreCreatesPrivateDirectoryAndReplacesFile(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "xray")
+	path := filepath.Join(directory, "config.json")
+	store, err := NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+
+	probe, cleanup, err := store.WriteProbe([]byte(`{"inbounds": []}`))
+	if err != nil {
+		t.Fatalf("WriteProbe: %v", err)
+	}
+	// The probe must live next to the config so the binary validates it with the
+	// permissions the replacement file will have.
+	if filepath.Dir(probe) != directory {
+		t.Errorf("probe directory = %q, want %q", filepath.Dir(probe), directory)
+	}
+	cleanup()
+	if _, err := os.Stat(probe); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("probe survived cleanup: %v", err)
+	}
+
+	if err := store.Write([]byte(`{"inbounds": []}`)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	data, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if string(data) != `{"inbounds": []}` {
+		t.Errorf("config = %q, want the written document", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o640); got != want {
+		t.Errorf("config mode = %o, want %o", got, want)
+	}
+	// A directory the agent creates itself must not be group or world writable.
+	directoryInfo, err := os.Stat(directory)
+	if err != nil {
+		t.Fatalf("Stat directory: %v", err)
+	}
+	if got, want := directoryInfo.Mode().Perm(), os.FileMode(0o700); got != want {
+		t.Errorf("config directory mode = %o, want %o", got, want)
 	}
 }

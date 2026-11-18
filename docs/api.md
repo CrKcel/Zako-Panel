@@ -195,6 +195,8 @@ Agent 请求使用 `Authorization: Bearer <node_id>.<secret>`。请求体上限�
 
 ### 3.3 配置
 
+这两个端点属于 P2：路由与入参校验已注册，服务层尚未实现，当前返回 `501 NOT_IMPLEMENTED`。以下为契约定义的响应形状。
+
 - `GET /api/v1/agent/config`：返回当前 `desired_config_version` 的定义、SHA-256 与版本；Agent 版本已是最新时返回 `204`。
 - `POST /api/v1/agent/config/result`：
 

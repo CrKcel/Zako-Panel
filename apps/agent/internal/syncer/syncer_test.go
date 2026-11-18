@@ -16,7 +16,7 @@ import (
 
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
-	"github.com/zako-panel/zako-agent/internal/xray"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 type fetchCall struct {
@@ -65,7 +65,7 @@ func (f *fakeFetcher) call(index int) fetchCall {
 }
 
 type fakeUsers struct {
-	added   []xray.User
+	added   []xraycore.User
 	removed []string
 	addErr  map[string]error
 	rmErr   map[string]error
@@ -73,7 +73,7 @@ type fakeUsers struct {
 	live map[string]string
 }
 
-func (u *fakeUsers) AddUser(_ context.Context, user xray.User) error {
+func (u *fakeUsers) AddUser(_ context.Context, user xraycore.User) error {
 	if err := u.addErr[user.Email]; err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ type fakeConfig struct {
 	present bool
 	static  []byte
 	writes  [][]byte
-	written []xray.User
+	written []xraycore.User
 	err     error
 }
 
@@ -124,11 +124,11 @@ func (c *fakeConfig) Exists() (bool, error) { return c.present, nil }
 
 func (c *fakeConfig) Static() ([]byte, error) { return c.static, nil }
 
-func (c *fakeConfig) Render(_ []byte, users []xray.User) ([]byte, error) {
+func (c *fakeConfig) Render(_ []byte, users []xraycore.User) ([]byte, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
-	sorted := make([]xray.User, len(users))
+	sorted := make([]xraycore.User, len(users))
 	copy(sorted, users)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Email < sorted[j].Email })
 	encoded, err := json.Marshal(sorted)
@@ -159,7 +159,7 @@ func (a *fakeApplier) Apply(_ context.Context, config []byte) error {
 		return a.err
 	}
 	if a.live != nil {
-		var users []xray.User
+		var users []xraycore.User
 		if err := json.Unmarshal(config, &users); err != nil {
 			return err
 		}
@@ -271,8 +271,8 @@ func TestSyncOnceAppliesInitialSetAndPersistsIt(t *testing.T) {
 	if len(f.users.added) != 2 {
 		t.Fatalf("added = %+v, want both users", f.users.added)
 	}
-	if f.users.added[0].Flow != xray.FlowVision {
-		t.Errorf("flow = %q, want %q", f.users.added[0].Flow, xray.FlowVision)
+	if f.users.added[0].Flow != xraycore.FlowVision {
+		t.Errorf("flow = %q, want %q", f.users.added[0].Flow, xraycore.FlowVision)
 	}
 	if len(f.applier.applied) != 0 {
 		t.Errorf("restart fallback used for a clean hot update: %d applies", len(f.applier.applied))

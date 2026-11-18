@@ -1,10 +1,11 @@
 import type { CreateSubscriberRequest, Subscriber, SubscriberDetail, UpdateSubscriberRequest } from '@zako/contracts';
 import { initialUsageCycle } from '../lib/cycle';
+import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { newId, newXrayEmail } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { deriveSubscriberStatus } from '../lib/subscriber-status';
-import { incrementMetaStatement, META_KEYS } from '../repositories/meta';
+
 import { findNodesByIds } from '../repositories/nodes';
 import {
 	countNodeClientsBySubscribers,
@@ -22,8 +23,8 @@ import {
 	type SubscriberUpdateInput,
 	type SubscriberUsageRow,
 } from '../repositories/subscribers';
-import type { Paginated } from '../types';
-import type { ListQuery } from './node-service';
+import type { ListQuery, Paginated } from '../types';
+import { bumpUsersVersionStatement } from './users-version';
 
 function subscriberNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Subscriber not found', 404);
@@ -31,10 +32,6 @@ function subscriberNotFound(): AppError {
 
 function nodeNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Node not found', 404);
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-	return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 }
 
 function emailConflict(): AppError {
@@ -175,7 +172,7 @@ export async function updateSubscriber(db: D1Database, subscriberId: string, inp
 	if (input.expires_at !== undefined) update.expires_at = input.expires_at;
 
 	const statements = [updateSubscriberStatement(db, subscriberId, update, now)];
-	if (status !== existing.status) statements.push(incrementMetaStatement(db, META_KEYS.usersVersion));
+	if (status !== existing.status) statements.push(bumpUsersVersionStatement(db));
 
 	try {
 		await db.batch(statements);
@@ -239,7 +236,7 @@ export async function replaceSubscriberNodes(db: D1Database, subscriberId: strin
 	}
 
 	if (statements.length > 0) {
-		statements.push(incrementMetaStatement(db, META_KEYS.usersVersion));
+		statements.push(bumpUsersVersionStatement(db));
 		await db.batch(statements);
 	}
 

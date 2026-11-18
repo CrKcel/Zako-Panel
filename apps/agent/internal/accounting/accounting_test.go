@@ -9,8 +9,7 @@ import (
 
 	"github.com/zako-panel/zako-agent/internal/collector"
 	"github.com/zako-panel/zako-agent/internal/state"
-	"github.com/zako-panel/zako-agent/internal/xray"
-	bolt "go.etcd.io/bbolt"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 var testHour = time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
@@ -37,13 +36,13 @@ func newTestAccountant(t *testing.T) (*Accountant, *state.Store) {
 func makeSample(at time.Time, users map[string][2]int64, inbounds map[string][2]int64, uptime int64) collector.Sample {
 	sample := collector.Sample{At: at, XrayUptimeSeconds: uptime}
 	for email, counters := range users {
-		sample.Users = append(sample.Users, xray.UserCounters{
+		sample.Users = append(sample.Users, xraycore.UserCounters{
 			Email: email, UplinkBytes: counters[0], DownlinkBytes: counters[1],
 		})
 	}
-	sample.Inbounds = make(map[string]xray.ByteCounters, len(inbounds))
+	sample.Inbounds = make(map[string]xraycore.ByteCounters, len(inbounds))
 	for tag, counters := range inbounds {
-		sample.Inbounds[tag] = xray.ByteCounters{UplinkBytes: counters[0], DownlinkBytes: counters[1]}
+		sample.Inbounds[tag] = xraycore.ByteCounters{UplinkBytes: counters[0], DownlinkBytes: counters[1]}
 	}
 	return sample
 }
@@ -58,7 +57,7 @@ func handle(t *testing.T, accountant *Accountant, sample collector.Sample) {
 func readBaselines(t *testing.T, store *state.Store) state.Baselines {
 	t.Helper()
 	var baselines state.Baselines
-	if err := store.View(func(tx *bolt.Tx) error {
+	if err := store.View(func(tx *state.Tx) error {
 		var err error
 		baselines, err = state.ReadBaselines(tx)
 		return err
@@ -71,7 +70,7 @@ func readBaselines(t *testing.T, store *state.Store) state.Baselines {
 func readPending(t *testing.T, store *state.Store) []state.TrafficReport {
 	t.Helper()
 	var reports []state.TrafficReport
-	if err := store.View(func(tx *bolt.Tx) error {
+	if err := store.View(func(tx *state.Tx) error {
 		var err error
 		reports, err = state.PendingReports(tx)
 		return err
@@ -84,7 +83,7 @@ func readPending(t *testing.T, store *state.Store) []state.TrafficReport {
 func readOutbox(t *testing.T, store *state.Store) []state.TrafficReport {
 	t.Helper()
 	var reports []state.TrafficReport
-	if err := store.View(func(tx *bolt.Tx) error {
+	if err := store.View(func(tx *state.Tx) error {
 		var err error
 		reports, err = state.OutboxReports(tx)
 		return err
@@ -485,7 +484,7 @@ func TestDropExpiredReports(t *testing.T) {
 		PeriodStart: now.Add(-time.Hour).Unix(),
 		PeriodEnd:   now.Unix(),
 	}
-	if err := store.Update(func(tx *bolt.Tx) error {
+	if err := store.Update(func(tx *state.Tx) error {
 		if err := state.PutOutboxReport(tx, expired); err != nil {
 			return err
 		}
@@ -503,5 +502,156 @@ func TestDropExpiredReports(t *testing.T) {
 	}
 	if outbox := readOutbox(t, store); len(outbox) != 1 || outbox[0].ReportID != fresh.ReportID {
 		t.Errorf("outbox = %+v, want only the fresh report", outbox)
+	}
+}
+
+func TestCloseReportsMovesPendingAndDiscardsEmpty(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	periodStart := int64(1_780_000_000) / 3600 * 3600
+	pending := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
+		PeriodStart: periodStart,
+		PeriodEnd:   periodStart + 3600,
+		Users:       []state.ReportUser{{Email: "alice@example.com", UplinkBytes: 10, DownlinkBytes: 20}},
+	}
+	empty := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E7",
+		PeriodStart: periodStart,
+		PeriodEnd:   periodStart + 3600,
+	}
+	if err := store.Update(func(tx *state.Tx) error {
+		if err := state.PutPendingReport(tx, pending); err != nil {
+			return err
+		}
+		return state.PutPendingReport(tx, empty)
+	}); err != nil {
+		t.Fatalf("put pending: %v", err)
+	}
+
+	closeAt := time.Unix(periodStart+1800, 0)
+	accountant, err := New(store, WithClock(func() time.Time { return closeAt }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	closed, err := accountant.CloseReports()
+	if err != nil {
+		t.Fatalf("CloseReports: %v", err)
+	}
+	if closed != 1 {
+		t.Errorf("closed = %d, want 1 (empty reports are discarded)", closed)
+	}
+
+	var remaining []state.TrafficReport
+	if err := store.View(func(tx *state.Tx) error {
+		var err error
+		remaining, err = state.PendingReports(tx)
+		return err
+	}); err != nil {
+		t.Fatalf("PendingReports: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("pending reports = %+v, want none", remaining)
+	}
+
+	stored, found, err := store.EarliestOutbox()
+	if err != nil {
+		t.Fatalf("EarliestOutbox: %v", err)
+	}
+	if !found || stored.ReportID != pending.ReportID || len(stored.Users) != 1 {
+		t.Errorf("outbox report = %+v, want the closed report", stored)
+	}
+	if stored.PeriodEnd != closeAt.Unix() {
+		t.Errorf("closed period_end = %d, want the close time %d", stored.PeriodEnd, closeAt.Unix())
+	}
+}
+
+func TestCloseReportsKeepsBucketEndAfterHour(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	periodStart := int64(1_780_000_000) / 3600 * 3600
+	pending := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
+		PeriodStart: periodStart,
+		PeriodEnd:   periodStart + 3600,
+		Users:       []state.ReportUser{{Email: "alice@example.com", UplinkBytes: 10, DownlinkBytes: 20}},
+	}
+	if err := store.Update(func(tx *state.Tx) error { return state.PutPendingReport(tx, pending) }); err != nil {
+		t.Fatalf("put pending: %v", err)
+	}
+
+	closeAt := time.Unix(pending.PeriodEnd+30, 0)
+	accountant, err := New(store, WithClock(func() time.Time { return closeAt }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := accountant.CloseReports(); err != nil {
+		t.Fatalf("CloseReports: %v", err)
+	}
+
+	stored, found, err := store.EarliestOutbox()
+	if err != nil {
+		t.Fatalf("EarliestOutbox: %v", err)
+	}
+	if !found {
+		t.Fatal("outbox is empty")
+	}
+	if stored.PeriodEnd != pending.PeriodEnd {
+		t.Errorf("closed period_end = %d, want the bucket end %d", stored.PeriodEnd, pending.PeriodEnd)
+	}
+}
+
+func TestDropExpiredKeepsReportsInsideRetention(t *testing.T) {
+	accountant, store := newTestAccountant(t)
+	now := testHour
+	old := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E01",
+		PeriodStart: now.Add(-9 * 24 * time.Hour).Unix(),
+		PeriodEnd:   now.Add(-9*24*time.Hour + time.Hour).Unix(),
+	}
+	boundary := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E02",
+		PeriodStart: now.Add(-OutboxMaxAge - time.Hour).Unix(),
+		PeriodEnd:   now.Add(-OutboxMaxAge).Unix(),
+	}
+	fresh := state.TrafficReport{
+		ReportID:    "01J2Z6Q8Y3V9M4K7T1B5C0D2E03",
+		PeriodStart: now.Add(-time.Hour).Unix(),
+		PeriodEnd:   now.Unix(),
+	}
+	if err := store.Update(func(tx *state.Tx) error {
+		for _, report := range []state.TrafficReport{old, boundary, fresh} {
+			if err := state.PutOutboxReport(tx, report); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed outbox: %v", err)
+	}
+
+	dropped, err := accountant.DropExpired(now)
+	if err != nil {
+		t.Fatalf("DropExpired: %v", err)
+	}
+	if dropped != 1 {
+		t.Errorf("dropped = %d, want only the report older than %s", dropped, OutboxMaxAge)
+	}
+	outbox := readOutbox(t, store)
+	if len(outbox) != 2 {
+		t.Fatalf("outbox = %+v, want the boundary and fresh reports", outbox)
+	}
+	for _, report := range outbox {
+		if report.ReportID == old.ReportID {
+			t.Errorf("expired report survived: %+v", report)
+		}
 	}
 }

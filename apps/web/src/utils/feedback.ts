@@ -9,6 +9,11 @@ export function showSuccess(message: string): void {
 	ElMessage.success(message);
 }
 
+/** Reports a client-side validation problem that has no request behind it. */
+export function showValidationError(message: string): void {
+	ElMessage.error(message);
+}
+
 export async function confirmAction(message: string, title = '确认操作'): Promise<boolean> {
 	try {
 		await ElMessageBox.confirm(message, title, {

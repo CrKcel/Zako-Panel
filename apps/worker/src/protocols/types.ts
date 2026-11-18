@@ -20,5 +20,4 @@ export interface ProtocolAdapter {
 	readonly paramsSchema: z.ZodType<unknown>;
 	toClash(_endpoint: ProxyEndpoint, _uuid: string): Record<string, unknown>;
 	toUri(_endpoint: ProxyEndpoint, _uuid: string): string;
-	toXrayInbound(_endpoint: ProxyEndpoint): Record<string, unknown>;
 }

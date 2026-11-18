@@ -242,7 +242,7 @@ CREATE TABLE audit_events (
 CREATE INDEX idx_audit_created ON audit_events(created_at);
 ```
 
-`meta` 保存 `users_ver`（全局用户集合版本）、`default_subscriber_id`（新建节点时默认授权的订阅用户）与少量运行时设置。`definition_json` 不含 REALITY 私钥与用户凭据；版本号在节点内严格递增，回滚创建新版本而非降低版本号。配置发布语义见 [config-delivery.md](config-delivery.md)。
+`meta` 保存 `users_ver`（全局用户集合版本，由 `services/users-version.ts` 统一递增）、`default_subscriber_id`（新建节点时默认授权的订阅用户）与少量运行时设置。`audit_events` 只有保留期清理，写入路径尚未接入。`definition_json` 不含 REALITY 私钥与用户凭据；版本号在节点内严格递增，回滚创建新版本而非降低版本号。配置发布语义见 [config-delivery.md](config-delivery.md)。
 
 ## 5. 数据保留与清理
 

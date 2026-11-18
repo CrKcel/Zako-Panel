@@ -1,5 +1,5 @@
 import type { CreateSubscriptionRequest, Subscription } from '@zako/contracts';
-import { apiPage, apiRequest, type Page } from './client';
+import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface SubscriptionListParams {
 	limit?: number;
@@ -8,7 +8,7 @@ export interface SubscriptionListParams {
 
 export const subscriptionsApi = {
 	list(params: SubscriptionListParams = {}): Promise<Page<Subscription>> {
-		return apiPage<Subscription>('/api/v1/admin/subscriptions', { query: { ...params } });
+		return apiPage<Subscription>('/api/v1/admin/subscriptions', { query: { limit: LIST_LIMIT, ...params } });
 	},
 	create(input: CreateSubscriptionRequest): Promise<{ subscription: Subscription; token: string }> {
 		return apiRequest<{ subscription: Subscription; token: string }>('/api/v1/admin/subscriptions', {

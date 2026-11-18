@@ -4,11 +4,10 @@ import type {
 	Endpoint,
 	Node,
 	NodeClient,
-	NodeStatusDetail,
 	UpdateEndpointRequest,
 	UpdateNodeRequest,
 } from '@zako/contracts';
-import { apiPage, apiRequest, type Page } from './client';
+import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface NodeListParams {
 	limit?: number;
@@ -28,7 +27,7 @@ export interface NodeDetail {
 
 export const nodesApi = {
 	list(params: NodeListParams = {}): Promise<Page<Node>> {
-		return apiPage<Node>('/api/v1/admin/nodes', { query: { ...params } });
+		return apiPage<Node>('/api/v1/admin/nodes', { query: { limit: LIST_LIMIT, ...params } });
 	},
 	create(input: CreateNodeRequest): Promise<CreateNodeResult> {
 		return apiRequest<CreateNodeResult>('/api/v1/admin/nodes', { method: 'POST', body: input });
@@ -44,14 +43,8 @@ export const nodesApi = {
 			method: 'POST',
 		});
 	},
-	status(nodeId: string): Promise<NodeStatusDetail> {
-		return apiRequest<NodeStatusDetail>(`/api/v1/admin/nodes/${nodeId}/status`);
-	},
 	listClients(nodeId: string): Promise<NodeClient[]> {
 		return apiRequest<{ items: NodeClient[] }>(`/api/v1/admin/nodes/${nodeId}/clients`).then((data) => data.items);
-	},
-	listEndpoints(nodeId: string): Promise<Endpoint[]> {
-		return apiRequest<{ items: Endpoint[] }>(`/api/v1/admin/nodes/${nodeId}/endpoints`).then((data) => data.items);
 	},
 	createEndpoint(nodeId: string, input: CreateEndpointRequest): Promise<Endpoint> {
 		return apiRequest<Endpoint>(`/api/v1/admin/nodes/${nodeId}/endpoints`, { method: 'POST', body: input });

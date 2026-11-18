@@ -1,228 +1,135 @@
 <script setup lang="ts">
-import type {
-	ClashPreview,
-	CreateProfileRequest,
-	DistributionSkipReason,
-	Node,
-	Profile,
-	ProxyGroup,
-	UpdateProfileRequest,
-} from '@zako/contracts';
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { onMounted, ref } from 'vue';
+import type { ClashPreview, DistributionSkipReason, Node, Profile } from '@zako/contracts';
+import type { FormInstance, FormRules } from 'element-plus';
+import { ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
-import { confirmAction, showError, showSuccess } from '../utils/feedback';
+import PageToolbar from '../components/PageToolbar.vue';
+import { useAsyncAction } from '../composables/useAsyncAction';
+import { useAsyncResource } from '../composables/useAsyncResource';
+import { useCrudDialog } from '../composables/useCrudDialog';
+import {
+	buildProfilePayload,
+	emptyProfileForm,
+	profileFormFrom,
+	type ProfileFormError,
+	type ProfileFormState,
+} from '../domain/profile-form';
+import { distributionSkipReasonLabel, subscriberBlockReasonLabel } from '../domain/status';
+import { confirmAction, showError, showSuccess, showValidationError } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
-interface ProfileForm {
-	name: string;
-	description: string;
-	node_selection: 'all' | 'selected';
-	node_ids: string[];
-	online_only: boolean;
-	clash_base: string;
-	proxy_groups: string;
-	rules: string;
-}
-
-const SKIP_REASON_LABEL: Record<DistributionSkipReason, string> = {
-	disabled: '节点停用',
-	offline: '心跳过期',
-	unhealthy: 'Xray 不健康',
-	not_selected: '未在档案选择中',
-	no_endpoint: '无可用端点',
+const PARSE_ERROR_MESSAGE: Record<ProfileFormError, string> = {
+	clash_base: 'clash_base 必须是合法的 JSON 对象',
+	proxy_groups: 'proxy_groups 必须是合法的 JSON 数组',
 };
 
-const BLOCK_REASON_LABEL: Record<NonNullable<ClashPreview['subscriber']['blocked_reason']>, string> = {
-	inactive: '用户未启用',
-	expired: '用户已到期',
-	over_quota: '流量已超额',
-};
-
-const profiles = ref<Profile[]>([]);
-const nodes = ref<Node[]>([]);
-const loading = ref(true);
-const saving = ref(false);
-const dialogVisible = ref(false);
-const editingId = ref<string | null>(null);
+const form = ref<ProfileFormState>(emptyProfileForm());
 const formRef = ref<FormInstance>();
 const previewVisible = ref(false);
-const previewLoading = ref(false);
 const preview = ref<ClashPreview | null>(null);
 const previewName = ref('');
 
-function emptyForm(): ProfileForm {
-	return {
-		name: '',
-		description: '',
-		node_selection: 'all',
-		node_ids: [],
-		online_only: true,
-		clash_base: '{}',
-		proxy_groups: '[]',
-		rules: '',
-	};
-}
+const {
+	data: profiles,
+	loading,
+	reload,
+} = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '订阅档案加载失败'),
+});
 
-const form = ref<ProfileForm>(emptyForm());
+const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
+	initialValue: [],
+	onError: (error) => showError(error, '节点加载失败'),
+});
 
 const rules: FormRules = {
 	name: [{ required: true, message: '请输入档案名称', trigger: 'blur' }],
 };
 
-async function load(): Promise<void> {
-	loading.value = true;
-	try {
-		const page = await profilesApi.list({ limit: 200 });
-		profiles.value = page.items;
-	} catch (error) {
-		showError(error, '订阅档案加载失败');
-	} finally {
-		loading.value = false;
-	}
-}
-
-async function loadNodes(): Promise<void> {
-	try {
-		const page = await nodesApi.list({ limit: 200 });
-		nodes.value = page.items;
-	} catch (error) {
-		showError(error, '节点加载失败');
-	}
-}
-
-function openCreate(): void {
-	editingId.value = null;
-	form.value = emptyForm();
-	dialogVisible.value = true;
-}
-
-async function openEdit(profile: Profile): Promise<void> {
-	try {
-		const detail = await profilesApi.get(profile.id);
-		editingId.value = profile.id;
-		form.value = {
-			name: detail.name,
-			description: detail.description ?? '',
-			node_selection: detail.node_selection,
-			node_ids: detail.node_ids,
-			online_only: detail.online_only,
-			clash_base: JSON.stringify(detail.clash_base, null, 2),
-			proxy_groups: JSON.stringify(detail.proxy_groups, null, 2),
-			rules: detail.rules.join('\n'),
-		};
-		dialogVisible.value = true;
-	} catch (error) {
-		showError(error, '订阅档案加载失败');
-	}
-}
-
-function parseClashBase(text: string): Record<string, unknown> | null {
-	try {
-		const parsed: unknown = JSON.parse(text || '{}');
-		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-		return parsed as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-}
-
-function parseProxyGroups(text: string): ProxyGroup[] | null {
-	try {
-		const parsed: unknown = JSON.parse(text || '[]');
-		if (!Array.isArray(parsed)) return null;
-		return parsed as ProxyGroup[];
-	} catch {
-		return null;
-	}
-}
+const {
+	visible: dialogVisible,
+	editingId,
+	submitting,
+	openCreate,
+	openEdit,
+	close: closeDialog,
+	submit: submitDialog,
+} = useCrudDialog({
+	reset: () => {
+		form.value = emptyProfileForm();
+	},
+	load: async (id) => {
+		form.value = profileFormFrom(await profilesApi.get(id));
+	},
+	onError: (error) => showError(error, '订阅档案加载失败'),
+});
 
 async function submit(): Promise<void> {
-	const valid = await formRef.value?.validate().catch(() => false);
-	if (!valid) return;
-
-	const clashBase = parseClashBase(form.value.clash_base);
-	if (clashBase === null) {
-		ElMessage.error('clash_base 必须是合法的 JSON 对象');
+	if (!(await formRef.value?.validate().catch(() => false))) return;
+	const result = buildProfilePayload(form.value);
+	if (!result.ok) {
+		showValidationError(PARSE_ERROR_MESSAGE[result.error]);
 		return;
 	}
-	const proxyGroups = parseProxyGroups(form.value.proxy_groups);
-	if (proxyGroups === null) {
-		ElMessage.error('proxy_groups 必须是合法的 JSON 数组');
-		return;
-	}
-
-	const payload: CreateProfileRequest & UpdateProfileRequest = {
-		name: form.value.name,
-		description: form.value.description.trim() === '' ? null : form.value.description.trim(),
-		node_selection: form.value.node_selection,
-		online_only: form.value.online_only,
-		clash_base: clashBase,
-		proxy_groups: proxyGroups,
-		rules: form.value.rules
-			.split('\n')
-			.map((line) => line.trim())
-			.filter((line) => line.length > 0),
-		node_ids: form.value.node_selection === 'selected' ? form.value.node_ids : [],
-	};
-
-	saving.value = true;
-	try {
-		if (editingId.value === null) {
-			await profilesApi.create(payload);
-			showSuccess('订阅档案已创建');
-		} else {
-			await profilesApi.update(editingId.value, payload);
-			showSuccess('订阅档案已更新');
-		}
-		dialogVisible.value = false;
-		await load();
-	} catch (error) {
-		showError(error, '订阅档案保存失败');
-	} finally {
-		saving.value = false;
-	}
+	const profileId = editingId.value;
+	const saved = await submitDialog(
+		async () => {
+			if (profileId === null) {
+				await profilesApi.create(result.payload);
+				showSuccess('订阅档案已创建');
+			} else {
+				await profilesApi.update(profileId, result.payload);
+				showSuccess('订阅档案已更新');
+			}
+			closeDialog();
+		},
+		(error) => showError(error, '订阅档案保存失败'),
+	);
+	if (saved) await reload();
 }
+
+const { running: previewLoading, run: runPreview } = useAsyncAction(
+	async (profile: Profile) => {
+		preview.value = await profilesApi.preview(profile.id);
+	},
+	{
+		onError: (error) => {
+			previewVisible.value = false;
+			showError(error, '预览失败');
+		},
+	},
+);
 
 async function openPreview(profile: Profile): Promise<void> {
 	previewName.value = profile.name;
 	preview.value = null;
 	previewVisible.value = true;
-	previewLoading.value = true;
-	try {
-		preview.value = await profilesApi.preview(profile.id);
-	} catch (error) {
-		previewVisible.value = false;
-		showError(error, '预览失败');
-	} finally {
-		previewLoading.value = false;
-	}
+	await runPreview(profile);
 }
 
-async function remove(profile: Profile): Promise<void> {
-	const confirmed = await confirmAction(`删除订阅档案「${profile.name}」？`);
-	if (!confirmed) return;
-	try {
+const removeAction = useAsyncAction(
+	async (profile: Profile) => {
 		await profilesApi.remove(profile.id);
 		showSuccess('订阅档案已删除');
-		await load();
-	} catch (error) {
-		showError(error, '订阅档案删除失败');
-	}
-}
+		await reload();
+	},
+	{ onError: (error) => showError(error, '订阅档案删除失败') },
+);
 
-onMounted(async () => {
-	await Promise.all([load(), loadNodes()]);
-});
+async function remove(profile: Profile): Promise<void> {
+	if (!(await confirmAction(`删除订阅档案「${profile.name}」？`))) return;
+	await removeAction.run(profile);
+}
 </script>
 
 <template>
 	<el-card shadow="never">
-		<div class="toolbar">
-			<el-button :loading="loading" @click="load">刷新</el-button>
+		<PageToolbar>
+			<el-button :loading="loading" @click="reload">刷新</el-button>
 			<el-button type="primary" @click="openCreate">创建档案</el-button>
-		</div>
+		</PageToolbar>
 		<el-table v-loading="loading" :data="profiles" empty-text="暂无数据">
 			<el-table-column prop="name" label="名称" min-width="160" />
 			<el-table-column label="描述" min-width="200">
@@ -249,7 +156,7 @@ onMounted(async () => {
 			<el-table-column label="操作" width="190" fixed="right">
 				<template #default="{ row }">
 					<el-button link type="primary" @click="openPreview(row as Profile)">预览</el-button>
-					<el-button link type="primary" @click="openEdit(row as Profile)">编辑</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
 					<el-button link type="danger" @click="remove(row as Profile)">删除</el-button>
 				</template>
 			</el-table-column>
@@ -295,8 +202,8 @@ onMounted(async () => {
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="dialogVisible = false">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+			<el-button @click="closeDialog">取消</el-button>
+			<el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
 		</template>
 	</el-dialog>
 
@@ -305,7 +212,7 @@ onMounted(async () => {
 			<template v-if="preview">
 				<el-alert
 					v-if="preview.subscriber.blocked_reason !== null"
-					:title="`订阅用户当前不可用：${BLOCK_REASON_LABEL[preview.subscriber.blocked_reason]}`"
+					:title="`订阅用户当前不可用：${subscriberBlockReasonLabel(preview.subscriber.blocked_reason)}`"
 					type="warning"
 					:closable="false"
 					show-icon
@@ -320,7 +227,7 @@ onMounted(async () => {
 				<el-table v-if="preview.skipped.length > 0" :data="preview.skipped" size="small" class="preview-skipped">
 					<el-table-column prop="node_name" label="节点" min-width="160" />
 					<el-table-column label="原因" min-width="160">
-						<template #default="{ row }">{{ SKIP_REASON_LABEL[row.reason as DistributionSkipReason] }}</template>
+						<template #default="{ row }">{{ distributionSkipReasonLabel(row.reason as DistributionSkipReason) }}</template>
 					</el-table-column>
 				</el-table>
 			</template>
@@ -339,13 +246,6 @@ onMounted(async () => {
 
 .preview-skipped {
 	margin-top: 4px;
-}
-
-.toolbar {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-bottom: 16px;
 }
 
 .full-width {

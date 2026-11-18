@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted } from 'vue';
 
 export interface PollingHandle {
+	/** Runs the task now and restarts the countdown; an in-flight run absorbs the call. */
 	refresh: () => Promise<void>;
 }
 
@@ -29,10 +30,13 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 	}
 
 	async function tick(): Promise<void> {
-		if (running) return;
+		if (stopped || running) return;
+		clearTimer();
 		running = true;
 		try {
 			await task();
+		} catch {
+			// The task reports its own failures; swallowing here keeps the loop alive.
 		} finally {
 			running = false;
 			schedule();

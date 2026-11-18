@@ -1,4 +1,5 @@
 import type { AdminUser, CreateAdminRequest, UpdateAdminRequest } from '@zako/contracts';
+import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
@@ -11,15 +12,10 @@ import {
 	updateAdminStatement,
 	type AdminRow,
 } from '../repositories/admins';
-import type { Paginated } from '../types';
-import type { ListQuery } from './node-service';
+import type { ListQuery, Paginated } from '../types';
 
 function adminNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Administrator not found', 404);
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-	return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 }
 
 function toAdminUser(row: AdminRow): AdminUser {

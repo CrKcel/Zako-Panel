@@ -78,16 +78,6 @@ export async function findSubscriberById(db: D1Database, subscriberId: string): 
 	return row ?? null;
 }
 
-export async function findSubscribersByIds(db: D1Database, subscriberIds: string[]): Promise<SubscriberRow[]> {
-	if (subscriberIds.length === 0) return [];
-	return (
-		await db
-			.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE id IN (${sqlPlaceholders(subscriberIds.length)})`)
-			.bind(...subscriberIds)
-			.all<SubscriberRow>()
-	).results;
-}
-
 export async function listSubscriberRows(db: D1Database, limit: number, cursor?: string): Promise<SubscriberRow[]> {
 	if (cursor) {
 		return (
@@ -97,11 +87,6 @@ export async function listSubscriberRows(db: D1Database, limit: number, cursor?:
 				.all<SubscriberRow>()
 		).results;
 	}
-	return (await db.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriberRow>())
-		.results;
-}
-
-export async function listAllSubscriberRows(db: D1Database, limit: number): Promise<SubscriberRow[]> {
 	return (await db.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriberRow>())
 		.results;
 }
@@ -199,20 +184,6 @@ export function setNodeClientEnabledStatement(db: D1Database, clientId: string, 
 	return db.prepare('UPDATE node_clients SET enabled = ?, updated_at = ? WHERE id = ?').bind(enabled ? 1 : 0, now, clientId);
 }
 
-export async function findNodeClientsByNodeAndEmails(db: D1Database, nodeId: string, emails: string[]): Promise<NodeClientRow[]> {
-	if (emails.length === 0) return [];
-	return (
-		await db
-			.prepare(
-				`SELECT id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at
-				 FROM node_clients
-				 WHERE node_id = ? AND xray_email IN (${sqlPlaceholders(emails.length)})`,
-			)
-			.bind(nodeId, ...emails)
-			.all<NodeClientRow>()
-	).results;
-}
-
 export function enabledNodeClientsStatement(db: D1Database, subscriberId: string): D1PreparedStatement {
 	return db
 		.prepare(
@@ -250,10 +221,6 @@ export function nodeClientUsageMapStatement(db: D1Database, nodeId: string, emai
 			 WHERE nc.node_id = ? AND nc.xray_email IN (${sqlPlaceholders(emails.length)})`,
 		)
 		.bind(nodeId, ...emails);
-}
-
-export async function findEnabledNodeClientsBySubscriber(db: D1Database, subscriberId: string): Promise<NodeClientRow[]> {
-	return (await enabledNodeClientsStatement(db, subscriberId).all<NodeClientRow>()).results;
 }
 
 /**
@@ -369,25 +336,28 @@ export async function countNodeClientsBySubscribers(db: D1Database, subscriberId
 }
 
 /**
- * Subscribers whose materialised state may be stale: the cycle ended, or the
- * stored status disagrees with what expiry and current-cycle usage imply. Filtering
- * in SQL keeps the quarter-hourly cron from re-reading every subscriber row and
- * leaves the derivation itself in one place in the service.
+ * Candidates for the quarter-hourly reconciliation: rows whose cycle ended, or
+ * whose stored status could have gone stale since the last run. Each clause asks
+ * only "can this stored value still be right", never what the next value is, so
+ * the status priority stays in `lib/subscriber-status.ts`. Rows are a superset of
+ * the rows that actually change, which keeps the cron from reading every row.
+ *
+ * `expires_at <= now` and `used_bytes >= traffic_limit_bytes` are NULL when the
+ * corresponding column is unset, so a NULL comparison never selects a row.
  */
 export function subscribersNeedingReconcileStatement(db: D1Database, now: number, limit: number): D1PreparedStatement {
 	return db
 		.prepare(
-			`SELECT ${SUBSCRIBER_COLUMNS_QUALIFIED} FROM subscribers s
-			 LEFT JOIN subscriber_usage u ON u.subscriber_id = s.id
+			`SELECT ${SUBSCRIBER_COLUMNS_QUALIFIED} FROM (
+			   SELECT s.*, COALESCE(CASE WHEN u.cycle_start = s.usage_cycle_start
+			                             THEN u.uplink_bytes + u.downlink_bytes ELSE 0 END, 0) AS used_bytes
+			   FROM subscribers s
+			   LEFT JOIN subscriber_usage u ON u.subscriber_id = s.id
+			 ) s
 			 WHERE s.usage_cycle_end <= ?1
-			    OR (s.status <> 'disabled' AND s.status <> CASE
-			          WHEN s.expires_at IS NOT NULL AND s.expires_at <= ?1 THEN 'expired'
-			          WHEN s.traffic_limit_bytes IS NOT NULL
-			            AND COALESCE(CASE WHEN u.cycle_start = s.usage_cycle_start
-			                              THEN u.uplink_bytes + u.downlink_bytes ELSE 0 END, 0) >= s.traffic_limit_bytes
-			          THEN 'limited'
-			          ELSE 'active'
-			        END)
+			    OR (s.status = 'active' AND (s.expires_at <= ?1 OR s.used_bytes >= s.traffic_limit_bytes))
+			    OR (s.status = 'expired' AND (s.expires_at IS NULL OR s.expires_at > ?1))
+			    OR (s.status = 'limited' AND (s.traffic_limit_bytes IS NULL OR s.used_bytes < s.traffic_limit_bytes))
 			 ORDER BY s.id ASC
 			 LIMIT ?2`,
 		)

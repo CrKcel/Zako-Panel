@@ -52,7 +52,7 @@ P0 与 P1 已交付，表中阶段标签用于标注接口与页面的归属。�
 | Worker 路由 | Hono + route / service / repository | 小型运行时，按资源横向扩展 |
 | 数据访问 | D1 prepared statements + batch | 明确 SQL、参数绑定与行读取量 |
 | API 契约 | OpenAPI 3.1 | 生成 TypeScript 类型；Go 端以契约测试约束 |
-| 前端 | Vue 3 + Vite + Vue Router + Pinia | 静态 SPA，无 SSR Worker 开销 |
+| 前端 | Vue 3 + Vite + Vue Router | 静态 SPA，无 SSR Worker 开销 |
 | UI 组件 | Element Plus + ECharts | 管理表格、表单与流量图表 |
 | 管理认证 | Cloudflare Access JWT + D1 RBAC | 避免在 10ms CPU 内执行密码哈希 |
 | Agent 认证 | 每节点独立高熵 Bearer token | 可单独撤销，数据库只存哈希 |
@@ -100,10 +100,12 @@ flowchart LR
 ### 4.1 Worker 分层
 
 - `routes`：HTTP 参数、状态码、响应组装；不直接拼 SQL。
-- `services`：订阅筛选、流量入账、节点状态、订阅用户与周期推进、管理员规则、用户同步、配置发布等业务规则。
+- `services`：业务规则。订阅分发筛选在 `distribution`，档案行映射在 `profile-mapping`，节点用户集合版本递增在 `users-version`，其余按资源划分。
 - `repositories`：D1 SQL、batch、查询映射与行数约束。
+- `protocols`：协议适配器（参数校验、Clash 与 URI 渲染），按 `endpoints.protocol` 经注册表查找。
+- `renderers`：Clash.Meta YAML 与通用 URI 文档序列化。
 - `middleware`：Access JWT、Agent token、角色、请求 ID、错误处理、请求体限制。
-- `lib`：哈希、随机 token、ULID、YAML/URI、周期与状态派生、时间与字节工具。
+- `lib`：哈希、随机 token、ULID、周期与状态规则（节点状态、订阅用户资格）、时间与字节工具。
 
 新增资源时新增独立 route 模块与 service，通过 Hono `.route()` 组合。API 统一使用 `/api/v1`；订阅路径使用 `/sub/{token}`；Agent 路径使用 `/api/v1/agent`。
 
@@ -121,6 +123,9 @@ flowchart LR
 | 管理员 | P1 | Access 身份、角色与启用状态 |
 | 配置中心 | P2 | 版本 diff、发布、结果与回滚 |
 
+- `domain/`：纯函数规则（流量窗口与合计、额度单位换算、状态与原因描述符、表单序列化），不依赖 Vue。
+- `composables/`：`useAsyncResource` 负责单次读取，`useAsyncAction` 负责写操作与按行 loading，`useCrudDialog` 负责对话框状态，`usePolling` 负责定时刷新。
+- `components/`：端点表单、节点授权、流量合计与页面工具栏等跨页复用块；页面只做编排与布局。
 - 路由懒加载，ECharts 独立异步 chunk。
 - 状态轮询 30–60 秒，页面隐藏时暂停；流量页不高频轮询。
 - 订阅与 Agent token 只在创建或轮换时显示一次，不写入 `localStorage`。
@@ -135,7 +140,7 @@ flowchart LR
 
 ## 5. 扩展方式
 
-- 新协议：新增 `ProtocolAdapter`，实现参数校验、`toClash`、`toUri`、`toXrayInbound`；在注册表注册，不改表结构。当前注册 `vless-reality`。
+- 新协议：新增 `ProtocolAdapter`，实现参数校验、`toClash` 与 `toUri`；在 `protocols/index.ts` 注册并把 `DEFAULT_PROTOCOL` 指向它，端点校验、分发渲染与管理表单都经由注册表。当前注册 `vless-reality`。
 - 新订阅格式：复用筛选后的 endpoint DTO，新增 Renderer；不复制授权逻辑。
 - 新采集指标：扩展心跳可选字段与独立 service，旧 Agent 可继续工作。
 - 新管理功能：新增 `/api/v1/admin/<resource>`、OpenAPI 路径、D1 migration 与 Vue 页面。

@@ -337,17 +337,33 @@ func (l *Loop) applyResponse(now time.Time, response *Response) {
 	// response.users_ver is the Worker's expectation, not proof that the node
 	// applied it. Persisting it as users_version would make the next report claim
 	// a set the node may not serve; the syncer owns that key.
-	if err := l.store.SetMetaInt64(state.KeyDesiredUsersVersion, response.UsersVer); err != nil {
-		l.logger.Warn("store desired users version failed", "error", err)
-	}
-	if err := l.store.SetMetaInt64(state.KeyDesiredConfigVersion, response.DesiredConfigVersion); err != nil {
-		l.logger.Warn("store desired config version failed", "error", err)
-	}
+	l.storeDesiredVersion(state.KeyDesiredUsersVersion, response.UsersVer)
+	// P2: desired_config_version is persisted for the remote configuration
+	// delivery work. Nothing consumes it yet, and it is written only when the
+	// advertised value changes so a steady heartbeat stays read-only.
+	l.storeDesiredVersion(state.KeyDesiredConfigVersion, response.DesiredConfigVersion)
 
 	// The agent cannot change the node clock; a large skew is logged so an
 	// operator can fix time sync before hourly buckets drift.
 	if skew := time.Duration(response.ServerTime-now.Unix()) * time.Second; skew > clockSkewWarn || skew < -clockSkewWarn {
 		l.logger.Warn("clock skew detected", "skew_seconds", int(skew.Seconds()))
+	}
+}
+
+// storeDesiredVersion persists a version the Worker advertised, but only when it
+// differs from the stored value. A heartbeat that repeats the same versions must
+// not open a write transaction every interval.
+func (l *Loop) storeDesiredVersion(key state.MetadataKey, value int64) {
+	stored, found, err := l.store.MetaInt64(key)
+	if err != nil {
+		l.logger.Warn("read desired version failed", "key", key, "error", err)
+		return
+	}
+	if found && stored == value {
+		return
+	}
+	if err := l.store.SetMetaInt64(key, value); err != nil {
+		l.logger.Warn("store desired version failed", "key", key, "error", err)
 	}
 }
 

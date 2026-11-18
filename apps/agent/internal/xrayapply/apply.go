@@ -1,4 +1,11 @@
-package xray
+// Package xrayapply converges a running Xray onto a validated config document.
+//
+// Apply is the fallback when the hot-update path fails: it validates the rendered
+// document with `xray run -test`, replaces the file through the xrayconfig store,
+// restarts the unit, checks the API inbound, and restores the previous document
+// when validation, restart or health fails. Every host capability is injected so
+// the whole rollback path is unit testable.
+package xrayapply
 
 import (
 	"context"
@@ -6,13 +13,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/zako-panel/zako-agent/internal/atomicfile"
+	"github.com/zako-panel/zako-agent/internal/xrayconfig"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 const (
@@ -85,7 +91,7 @@ func (r SystemctlRestarter) Restart(ctx context.Context) error {
 // StatsHealth treats a successful SysStats call as proof that the restarted Xray
 // opened its API inbound.
 type StatsHealth struct {
-	Stats StatsReader
+	Stats xraycore.StatsReader
 }
 
 // Check implements HealthChecker.
@@ -120,7 +126,7 @@ type ConfigApplierOptions struct {
 // when a handler update fails: validate, replace, restart, health check, and
 // restore the previous file when any step fails.
 type ConfigApplier struct {
-	configPath     string
+	store          xrayconfig.ConfigStore
 	binaryPath     string
 	runner         CommandRunner
 	restarter      Restarter
@@ -142,6 +148,10 @@ func NewConfigApplier(opts ConfigApplierOptions) (*ConfigApplier, error) {
 	}
 	if opts.Health == nil {
 		return nil, errors.New("xray: health checker is required")
+	}
+	store, err := xrayconfig.NewConfigStore(opts.ConfigPath)
+	if err != nil {
+		return nil, err
 	}
 
 	runner := opts.Runner
@@ -174,7 +184,7 @@ func NewConfigApplier(opts ConfigApplierOptions) (*ConfigApplier, error) {
 	}
 
 	return &ConfigApplier{
-		configPath:     opts.ConfigPath,
+		store:          store,
 		binaryPath:     opts.BinaryPath,
 		runner:         runner,
 		restarter:      restarter,
@@ -206,7 +216,7 @@ func (a *ConfigApplier) Apply(ctx context.Context, config []byte) error {
 	if err := a.validate(ctx, config); err != nil {
 		return fmt.Errorf("xray: config was not applied: %w", err)
 	}
-	if err := WriteConfig(a.configPath, config); err != nil {
+	if err := a.store.Write(config); err != nil {
 		return err
 	}
 
@@ -217,13 +227,13 @@ func (a *ConfigApplier) Apply(ctx context.Context, config []byte) error {
 	applyErr := fmt.Errorf("xray: config apply failed: %w", restartErr)
 
 	if !hadPrevious {
-		if removeErr := os.Remove(a.configPath); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+		if removeErr := a.store.Remove(); removeErr != nil {
 			return errors.Join(applyErr, fmt.Errorf("xray: remove failed config: %w", removeErr))
 		}
 		return applyErr
 	}
 
-	if restoreErr := WriteConfig(a.configPath, previous); restoreErr != nil {
+	if restoreErr := a.store.Write(previous); restoreErr != nil {
 		return errors.Join(applyErr, fmt.Errorf("xray: restore previous config: %w", restoreErr))
 	}
 	a.logger.Warn("xray config apply failed; previous config restored", "error", restartErr)
@@ -233,41 +243,13 @@ func (a *ConfigApplier) Apply(ctx context.Context, config []byte) error {
 	return fmt.Errorf("%w (previous config restored)", applyErr)
 }
 
-// WriteConfig replaces the config file atomically with the shared Xray mode.
-func WriteConfig(path string, config []byte) error {
-	if path == "" {
-		return errors.New("xray: config path is required")
-	}
-	if err := atomicfile.Write(path, config, configFileMode); err != nil {
-		return fmt.Errorf("xray: write config %s: %w", path, err)
-	}
-	return nil
-}
-
 func (a *ConfigApplier) validate(ctx context.Context, config []byte) error {
-	directory := filepath.Dir(a.configPath)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return fmt.Errorf("xray: prepare config directory %s: %w", directory, err)
-	}
-	probe, err := os.CreateTemp(directory, ".zako-agent-config-test-*.json")
+	probe, cleanup, err := a.store.WriteProbe(config)
 	if err != nil {
-		return fmt.Errorf("xray: create config probe: %w", err)
+		return err
 	}
-	name := probe.Name()
-	defer func() { _ = os.Remove(name) }()
-
-	if _, err := probe.Write(config); err != nil {
-		_ = probe.Close()
-		return fmt.Errorf("xray: write config probe: %w", err)
-	}
-	if err := probe.Chmod(configFileMode); err != nil {
-		_ = probe.Close()
-		return fmt.Errorf("xray: set probe mode: %w", err)
-	}
-	if err := probe.Close(); err != nil {
-		return fmt.Errorf("xray: close config probe: %w", err)
-	}
-	return a.run(ctx, a.binaryPath, "run", "-test", "-config", name)
+	defer cleanup()
+	return a.run(ctx, a.binaryPath, "run", "-test", "-config", probe)
 }
 
 func (a *ConfigApplier) restartAndCheck(ctx context.Context) error {
@@ -311,14 +293,14 @@ func (a *ConfigApplier) run(ctx context.Context, name string, args ...string) er
 }
 
 func (a *ConfigApplier) currentConfig() ([]byte, bool, error) {
-	data, err := os.ReadFile(a.configPath)
+	data, err := a.store.Read()
 	switch {
 	case err == nil:
 		return data, true, nil
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, false, nil
 	default:
-		return nil, false, fmt.Errorf("xray: read current config %s: %w", a.configPath, err)
+		return nil, false, err
 	}
 }
 

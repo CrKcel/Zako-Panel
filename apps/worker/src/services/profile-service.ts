@@ -1,4 +1,5 @@
 import type { CreateProfileRequest, Profile, ProfileDetail, ProxyGroup, UpdateProfileRequest } from '@zako/contracts';
+import { isUniqueConstraintError, isForeignKeyConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
@@ -14,73 +15,15 @@ import {
 	updateProfile as updateProfileRow,
 	type ProfileRow,
 } from '../repositories/profiles';
-import type { Paginated } from '../types';
-import type { ListQuery } from './node-service';
+import type { ListQuery, Paginated } from '../types';
+import { toProfile, toProfileDetail } from './profile-mapping';
 
 const MAX_RULES = 200;
 const MAX_RULE_LENGTH = 512;
 const MAX_GROUPS = 50;
 
-function parseObject(value: string): Record<string, unknown> {
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-			return parsed as Record<string, unknown>;
-		}
-	} catch {
-		// Fall through to the empty document; stored rows are written from validated input.
-	}
-	return {};
-}
-
-function parseProxyGroups(value: string): ProxyGroup[] {
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		return Array.isArray(parsed) ? (parsed as ProxyGroup[]) : [];
-	} catch {
-		return [];
-	}
-}
-
-function parseRules(value: string): string[] {
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		return Array.isArray(parsed) ? parsed.filter((rule): rule is string => typeof rule === 'string') : [];
-	} catch {
-		return [];
-	}
-}
-
-function toProfile(row: ProfileRow): Profile {
-	return {
-		id: row.id,
-		name: row.name,
-		description: row.description,
-		node_selection: row.node_selection,
-		online_only: row.online_only === 1,
-		clash_base: parseObject(row.clash_base_json),
-		proxy_groups: parseProxyGroups(row.proxy_groups_json),
-		rules: parseRules(row.rules_json),
-		revision: row.revision,
-		created_at: row.created_at,
-		updated_at: row.updated_at,
-	};
-}
-
-function toProfileDetail(row: ProfileRow, nodeIds: string[]): ProfileDetail {
-	return { ...toProfile(row), node_ids: nodeIds };
-}
-
 function profileNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Profile not found', 404);
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-	return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
-}
-
-function isForeignKeyError(error: unknown): boolean {
-	return error instanceof Error && /FOREIGN KEY constraint failed/i.test(error.message);
 }
 
 /**
@@ -229,7 +172,7 @@ export async function deleteProfile(db: D1Database, profileId: string): Promise<
 	try {
 		await deleteProfileRow(db, profileId);
 	} catch (error) {
-		if (isForeignKeyError(error)) {
+		if (isForeignKeyConstraintError(error)) {
 			throw new AppError('CONFLICT', 'Profile is referenced by a subscription', 409);
 		}
 		throw error;

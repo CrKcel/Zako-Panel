@@ -18,7 +18,7 @@
 ## 技术栈
 
 - Worker：Hono、D1、Cloudflare Access JWT、Zod
-- Web：Vue 3、Vite、Vue Router、Pinia、Element Plus、ECharts
+- Web：Vue 3、Vite、Vue Router、Element Plus、ECharts
 - Agent：Go、BoltDB、systemd
 - 契约：OpenAPI 3.1（`packages/contracts`），生成的类型供 Worker 与 Web 使用
 

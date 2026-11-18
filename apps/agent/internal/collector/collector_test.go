@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zako-panel/zako-agent/internal/xray"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 type fakeStats struct {
 	mu       sync.Mutex
-	users    []xray.UserCounters
-	inbounds map[string]xray.ByteCounters
+	users    []xraycore.UserCounters
+	inbounds map[string]xraycore.ByteCounters
 	uptime   int64
 	err      error
 }
 
-func (f *fakeStats) UserTraffic(context.Context) ([]xray.UserCounters, error) {
+func (f *fakeStats) UserTraffic(context.Context) ([]xraycore.UserCounters, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -29,7 +29,7 @@ func (f *fakeStats) UserTraffic(context.Context) ([]xray.UserCounters, error) {
 	return f.users, nil
 }
 
-func (f *fakeStats) InboundTraffic(context.Context) (map[string]xray.ByteCounters, error) {
+func (f *fakeStats) InboundTraffic(context.Context) (map[string]xraycore.ByteCounters, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -38,13 +38,13 @@ func (f *fakeStats) InboundTraffic(context.Context) (map[string]xray.ByteCounter
 	return f.inbounds, nil
 }
 
-func (f *fakeStats) SysStats(context.Context) (xray.SystemStats, error) {
+func (f *fakeStats) SysStats(context.Context) (xraycore.SystemStats, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
-		return xray.SystemStats{}, f.err
+		return xraycore.SystemStats{}, f.err
 	}
-	return xray.SystemStats{UptimeSeconds: f.uptime}, nil
+	return xraycore.SystemStats{UptimeSeconds: f.uptime}, nil
 }
 
 func (f *fakeStats) setError(err error) {
@@ -53,7 +53,7 @@ func (f *fakeStats) setError(err error) {
 	f.err = err
 }
 
-func newTestCollector(t *testing.T, stats xray.StatsReader, handle Handler) *Collector {
+func newTestCollector(t *testing.T, stats xraycore.StatsReader, handle Handler) *Collector {
 	t.Helper()
 	collector, err := New(time.Minute, stats, handle, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -64,8 +64,8 @@ func newTestCollector(t *testing.T, stats xray.StatsReader, handle Handler) *Col
 
 func TestCollectorHealthTracksStatsService(t *testing.T) {
 	stats := &fakeStats{
-		users:    []xray.UserCounters{{Email: "alice@example.com", UplinkBytes: 1, DownlinkBytes: 2}},
-		inbounds: map[string]xray.ByteCounters{"proxy": {UplinkBytes: 3, DownlinkBytes: 4}},
+		users:    []xraycore.UserCounters{{Email: "alice@example.com", UplinkBytes: 1, DownlinkBytes: 2}},
+		inbounds: map[string]xraycore.ByteCounters{"proxy": {UplinkBytes: 3, DownlinkBytes: 4}},
 		uptime:   10,
 	}
 	var (

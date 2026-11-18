@@ -17,7 +17,7 @@ configRoutes.get('/:nodeId/configs', requireRole('viewer'), async (c) => {
 configRoutes.post('/:nodeId/configs', requireRole('admin'), async (c) => {
 	const nodeId = pathId(c, 'nodeId');
 	const input = await readJson(c, publishConfigSchema);
-	return ok(c, await publishConfig(c.env.DB, nodeId, input), 201);
+	return ok(c, await publishConfig(c.env.DB, nodeId, input, c.get('admin')), 201);
 });
 
 configRoutes.get('/:nodeId/configs/:version', requireRole('viewer'), async (c) => {
@@ -29,5 +29,5 @@ configRoutes.get('/:nodeId/configs/:version', requireRole('viewer'), async (c) =
 configRoutes.post('/:nodeId/configs/:version/rollback', requireRole('admin'), async (c) => {
 	const nodeId = pathId(c, 'nodeId');
 	const version = positiveVersion(c);
-	return ok(c, await rollbackConfig(c.env.DB, nodeId, version), 201);
+	return ok(c, await rollbackConfig(c.env.DB, nodeId, version, c.get('admin')), 201);
 });

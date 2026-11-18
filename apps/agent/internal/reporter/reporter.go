@@ -21,9 +21,11 @@ import (
 )
 
 const (
-	reportPath      = "/api/v1/agent/report"
-	usersPath       = "/api/v1/agent/users"
-	maxResponseSize = 1 << 20
+	reportPath       = "/api/v1/agent/report"
+	usersPath        = "/api/v1/agent/users"
+	configPath       = "/api/v1/agent/config"
+	configResultPath = "/api/v1/agent/config/result"
+	maxResponseSize  = 1 << 20
 )
 
 // Report is one heartbeat plus optional traffic batch.
@@ -98,6 +100,13 @@ type UsersResponse struct {
 type User struct {
 	XrayEmail string `json:"xray_email"`
 	VlessUUID string `json:"vless_uuid"`
+}
+
+// AgentConfig is the data object returned by GET /api/v1/agent/config.
+type AgentConfig struct {
+	Version          int64           `json:"version"`
+	DefinitionSHA256 string          `json:"definition_sha256"`
+	Definition       json.RawMessage `json:"definition"`
 }
 
 type ConfigStatus string
@@ -236,6 +245,46 @@ func (r *Reporter) FetchUsers(ctx context.Context, etag string) (users *UsersRes
 		return nil, false, errors.New("fetch users: response missing data")
 	}
 	return body.Data, false, nil
+}
+
+// FetchConfig returns the node's desired static configuration definition.
+// hasConfig is false on HTTP 204 No Content, meaning the node is already at the
+// desired version or no configuration has been published.
+func (r *Reporter) FetchConfig(ctx context.Context) (cfg *AgentConfig, hasConfig bool, err error) {
+	result, err := r.do(ctx, http.MethodGet, configPath, nil, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("fetch config: %w", err)
+	}
+	if result.StatusCode == http.StatusNoContent {
+		return nil, false, nil
+	}
+	if err := result.httpError(); err != nil {
+		return nil, false, fmt.Errorf("fetch config: %w", err)
+	}
+
+	var body envelope[AgentConfig]
+	if err := json.Unmarshal(result.body, &body); err != nil {
+		return nil, false, fmt.Errorf("fetch config: decode response: %w", err)
+	}
+	if body.Data == nil {
+		return nil, false, errors.New("fetch config: response missing data")
+	}
+	return body.Data, true, nil
+}
+
+// ReportConfigResult posts the outcome of applying a configuration version.
+func (r *Reporter) ReportConfigResult(ctx context.Context, configResult *ConfigResult) error {
+	if configResult == nil {
+		return errors.New("reporter: config result is required")
+	}
+	result, err := r.do(ctx, http.MethodPost, configResultPath, configResult, nil)
+	if err != nil {
+		return fmt.Errorf("report config result: %w", err)
+	}
+	if err := result.httpError(); err != nil {
+		return fmt.Errorf("report config result: %w", err)
+	}
+	return nil
 }
 
 type httpResult struct {

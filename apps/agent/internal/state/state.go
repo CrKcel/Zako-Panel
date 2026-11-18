@@ -75,6 +75,9 @@ const (
 	KeyAppliedConfigVersion MetadataKey = "applied_config_version"
 	// KeyDesiredConfigVersion is the last desired version advertised by the Worker.
 	KeyDesiredConfigVersion MetadataKey = "desired_config_version"
+	// KeyFailedConfigVersion records the latest config version that failed to apply
+	// so the agent does not repeatedly restart Xray for the same broken version.
+	KeyFailedConfigVersion MetadataKey = "failed_config_version"
 )
 
 // Store is a BoltDB handle. It is safe for concurrent use by multiple goroutines

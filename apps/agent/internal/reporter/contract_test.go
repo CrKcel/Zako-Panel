@@ -135,3 +135,24 @@ func TestConfigResultFixture(t *testing.T) {
 		t.Errorf("error = %+v, want nil", result.Error)
 	}
 }
+
+func TestConfigFixture(t *testing.T) {
+	var cfg AgentConfig
+	if err := json.Unmarshal(readFixture(t, "agent-config.json"), &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	if cfg.Version != 4 {
+		t.Errorf("version = %d, want 4", cfg.Version)
+	}
+	if cfg.DefinitionSHA256 != "07866b080adc3987b886731eb991fa0d258cd7afdf91a2959f4b70691e8990ca" {
+		t.Errorf("definition_sha256 = %q, want expected sha256", cfg.DefinitionSHA256)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(cfg.Definition, &doc); err != nil {
+		t.Fatalf("unmarshal definition: %v", err)
+	}
+	if _, ok := doc["inbounds"]; !ok {
+		t.Errorf("definition missing inbounds key")
+	}
+}

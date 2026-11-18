@@ -107,6 +107,7 @@ type Options struct {
 	UsersPath string
 	Config    ConfigStore
 	Applier   ConfigApplier
+	XrayMu    *sync.Mutex
 	Logger    *slog.Logger
 }
 
@@ -120,9 +121,9 @@ type Syncer struct {
 	applier   ConfigApplier
 	logger    *slog.Logger
 	trigger   chan struct{}
-	// mutex serializes the whole fetch-diff-apply cycle. Remote config delivery
-	// takes the same lock once it exists (docs/agent.md §4.3).
-	mutex sync.Mutex
+	// mutex serializes the whole fetch-diff-apply cycle, shared with configsync
+	// when provided so user updates and config restarts never race on Xray.
+	mutex *sync.Mutex
 }
 
 // New validates dependencies. usersPath is where the applied user set is written
@@ -150,6 +151,10 @@ func New(opts Options) (*Syncer, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	xrayMu := opts.XrayMu
+	if xrayMu == nil {
+		xrayMu = &sync.Mutex{}
+	}
 	return &Syncer{
 		fetcher:   opts.Fetcher,
 		users:     opts.Users,
@@ -158,6 +163,7 @@ func New(opts Options) (*Syncer, error) {
 		config:    opts.Config,
 		applier:   opts.Applier,
 		logger:    logger,
+		mutex:     xrayMu,
 		// Capacity one collapses a burst of triggers into one pending sync while a
 		// sync is running, without dropping the trigger entirely.
 		trigger: make(chan struct{}, 1),

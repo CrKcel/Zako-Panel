@@ -80,8 +80,6 @@ Agent 安装包与二进制下载端点由独立 Downloads Worker 托管，不�
 | `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | 查看配置版本详情及 diff 内容 | viewer |
 | `POST /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback` | 基于历史版本创建新版本进行回滚 | admin |
 
-配置管理相关接口已在路由层定义入参规范，服务层未就绪时返回 `501 NOT_IMPLEMENTED`。
-
 ### 2.1 流量汇总与约束
 
 - 聚合统计支持参数：`from`、`to`（Unix 秒，对齐小时桶）、`groupBy`（`site`、`node`、`subscriber`）以及关联过滤 ID。

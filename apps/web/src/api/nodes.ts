@@ -1,4 +1,5 @@
 import type {
+	ConfigVersion,
 	CreateEndpointRequest,
 	CreateNodeRequest,
 	Endpoint,
@@ -58,6 +59,25 @@ export const nodesApi = {
 	disableEndpoint(nodeId: string, endpointId: string): Promise<void> {
 		return apiRequest<void>(`/api/v1/admin/nodes/${nodeId}/endpoints/${endpointId}`, {
 			method: 'DELETE',
+		});
+	},
+	listConfigs(nodeId: string, params: NodeListParams = {}): Promise<Page<ConfigVersion>> {
+		return apiPage<ConfigVersion>(`/api/v1/admin/nodes/${nodeId}/configs`, {
+			query: { limit: LIST_LIMIT, ...params },
+		});
+	},
+	publishConfig(nodeId: string, definition: Record<string, unknown>): Promise<ConfigVersion> {
+		return apiRequest<ConfigVersion>(`/api/v1/admin/nodes/${nodeId}/configs`, {
+			method: 'POST',
+			body: { definition },
+		});
+	},
+	getConfig(nodeId: string, version: number): Promise<ConfigVersion> {
+		return apiRequest<ConfigVersion>(`/api/v1/admin/nodes/${nodeId}/configs/${version}`);
+	},
+	rollbackConfig(nodeId: string, version: number): Promise<ConfigVersion> {
+		return apiRequest<ConfigVersion>(`/api/v1/admin/nodes/${nodeId}/configs/${version}/rollback`, {
+			method: 'POST',
 		});
 	},
 };

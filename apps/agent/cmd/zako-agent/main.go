@@ -23,6 +23,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/accounting"
 	"github.com/zako-panel/zako-agent/internal/collector"
 	"github.com/zako-panel/zako-agent/internal/config"
+	"github.com/zako-panel/zako-agent/internal/configsync"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/syncer"
@@ -146,17 +147,34 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	xrayConfigFile := xrayconfig.ConfigFile{
+		Path:                  cfg.XrayConfigPath,
+		RealityPrivateKeyPath: cfg.RealityPrivateKeyPath,
+	}
+	xrayMu := &sync.Mutex{}
+
 	userSyncer, err := syncer.New(syncer.Options{
 		Fetcher:   reporterClient,
 		Users:     handler,
 		Store:     store,
 		UsersPath: cfg.UsersPath,
-		Config: xrayconfig.ConfigFile{
-			Path:                  cfg.XrayConfigPath,
-			RealityPrivateKeyPath: cfg.RealityPrivateKeyPath,
-		},
-		Applier: applier,
-		Logger:  logger.With("component", "syncer"),
+		Config:    xrayConfigFile,
+		Applier:   applier,
+		XrayMu:    xrayMu,
+		Logger:    logger.With("component", "syncer"),
+	})
+	if err != nil {
+		return err
+	}
+
+	configSyncer, err := configsync.New(configsync.Options{
+		Client:    reporterClient,
+		Store:     store,
+		UsersPath: cfg.UsersPath,
+		Config:    xrayConfigFile,
+		Applier:   applier,
+		XrayMu:    xrayMu,
+		Logger:    logger.With("component", "config-syncer"),
 	})
 	if err != nil {
 		return err
@@ -172,10 +190,13 @@ func run(logger *slog.Logger) error {
 		HeartbeatInterval: cfg.HeartbeatInterval.Duration(),
 		TrafficInterval:   cfg.Collector.ReportInterval.Duration(),
 		Logger:            logger.With("component", "reporter"),
-		// A response carries the Worker's users_ver. It only wakes the syncer: the
-		// applied version advances after the node actually converged, which keeps a
-		// failed apply visible in the next heartbeat.
-		OnResponse: func(*reporter.Response) { userSyncer.Trigger() },
+		// A response carries the Worker's users_ver and desired_config_version.
+		// It only wakes the syncers: the applied versions advance after the node
+		// actually converged, which keeps a failed apply visible in the next heartbeat.
+		OnResponse: func(*reporter.Response) {
+			userSyncer.Trigger()
+			configSyncer.Trigger()
+		},
 	})
 	if err != nil {
 		return err
@@ -210,6 +231,7 @@ func run(logger *slog.Logger) error {
 	runLoop("collector", collectorLoop.Run)
 	runLoop("reporter", reporterLoop.Run)
 	runLoop("syncer", userSyncer.Run)
+	runLoop("config-syncer", configSyncer.Run)
 
 	<-ctx.Done()
 	logger.Info("shutdown requested")

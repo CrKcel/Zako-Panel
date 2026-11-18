@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
 import EndpointFormFields from '../components/EndpointFormFields.vue';
+import NodeConfigPanel from '../components/NodeConfigPanel.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
@@ -282,6 +283,15 @@ function backToList(): void {
 				</el-table-column>
 			</el-table>
 		</el-card>
+
+		<NodeConfigPanel
+			v-if="node"
+			:node-id="node.id"
+			:applied-version="node.applied_config_version"
+			:desired-version="node.desired_config_version"
+			:endpoints="endpoints"
+			@changed="reloadNode"
+		/>
 
 		<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" title="近 24 小时流量" />
 	</div>

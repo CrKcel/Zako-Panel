@@ -6,7 +6,7 @@ import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
-import { formatTimestamp, NODE_STATUS_LABEL, NODE_STATUS_TAG } from '../utils/format';
+import { formatPercent, formatTimestamp, NODE_STATUS_LABEL, NODE_STATUS_TAG } from '../utils/format';
 
 interface EndpointForm {
 	name: string;
@@ -216,6 +216,15 @@ onMounted(load);
 			</el-table-column>
 			<el-table-column label="Xray 版本" width="130">
 				<template #default="{ row }">{{ row.xray_version ?? '—' }}</template>
+			</el-table-column>
+			<el-table-column label="CPU" width="90">
+				<template #default="{ row }">{{ formatPercent(row.sys?.cpu) }}</template>
+			</el-table-column>
+			<el-table-column label="内存" width="90">
+				<template #default="{ row }">{{ formatPercent(row.sys?.mem) }}</template>
+			</el-table-column>
+			<el-table-column label="负载" width="90">
+				<template #default="{ row }">{{ row.sys ? row.sys.load.toFixed(2) : '—' }}</template>
 			</el-table-column>
 			<el-table-column label="启用" width="90">
 				<template #default="{ row }">

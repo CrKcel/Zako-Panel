@@ -285,6 +285,9 @@ func TestStoreSurvivesReopen(t *testing.T) {
 	if err := store.SetMetaInt64(KeyUsersVersion, 12); err != nil {
 		t.Fatalf("SetMetaInt64: %v", err)
 	}
+	if err := store.SetMetaInt64(KeyDesiredUsersVersion, 13); err != nil {
+		t.Fatalf("SetMetaInt64: %v", err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -319,6 +322,13 @@ func TestStoreSurvivesReopen(t *testing.T) {
 	}
 	if !found || version != 12 {
 		t.Errorf("users version after reopen = %d (found=%v), want 12", version, found)
+	}
+	desired, found, err := reopened.MetaInt64(KeyDesiredUsersVersion)
+	if err != nil {
+		t.Fatalf("MetaInt64: %v", err)
+	}
+	if !found || desired != 13 {
+		t.Errorf("desired users version after reopen = %d (found=%v), want 13", desired, found)
 	}
 }
 

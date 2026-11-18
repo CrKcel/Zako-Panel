@@ -1,4 +1,4 @@
-import type { NodeStatus } from '@zako/contracts';
+import type { AdminRole, NodeStatus, SubscriberStatus } from '@zako/contracts';
 
 export const NODE_STATUS_LABEL: Record<NodeStatus, string> = {
 	online: '在线',
@@ -12,6 +12,26 @@ export const NODE_STATUS_TAG: Record<NodeStatus, 'success' | 'warning' | 'info' 
 	degraded: 'warning',
 	offline: 'info',
 	disabled: 'danger',
+};
+
+export const SUBSCRIBER_STATUS_LABEL: Record<SubscriberStatus, string> = {
+	active: '正常',
+	limited: '超限',
+	expired: '已到期',
+	disabled: '停用',
+};
+
+export const SUBSCRIBER_STATUS_TAG: Record<SubscriberStatus, 'success' | 'warning' | 'info' | 'danger'> = {
+	active: 'success',
+	limited: 'warning',
+	expired: 'danger',
+	disabled: 'info',
+};
+
+export const ADMIN_ROLE_LABEL: Record<AdminRole, string> = {
+	owner: '所有者',
+	admin: '管理员',
+	viewer: '只读',
 };
 
 export function formatTimestamp(seconds: number | null | undefined): string {

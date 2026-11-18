@@ -129,11 +129,10 @@ function insertMany(table, columns, rows) {
 	return statements;
 }
 
+// Calendar-month cycle in UTC, matching the Worker's `initialUsageCycle`.
 function monthCycle(date) {
 	const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-	const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
-	const lastDay = new Date(target.getTime() - 86_400_000).getUTCDate();
-	const end = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(date.getUTCDate(), lastDay)));
+	const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
 	return { start: Math.floor(start.getTime() / 1000), end: Math.floor(end.getTime() / 1000) };
 }
 
@@ -666,6 +665,19 @@ async function main() {
 					const items = JSON.parse(body).data.items;
 					return items.length === nodeCount ? null : `list returned ${items.length} nodes, expected ${nodeCount}`;
 				},
+			},
+			{
+				label: 'subscribers list',
+				path: '/api/v1/admin/subscribers?limit=200',
+				validate: (body) => {
+					const items = JSON.parse(body).data.items;
+					return items.length === subscriberCount ? null : `list returned ${items.length} subscribers, expected ${subscriberCount}`;
+				},
+			},
+			{
+				label: 'admins list',
+				path: '/api/v1/admin/admins?limit=200',
+				validate: (body) => (Array.isArray(JSON.parse(body).data.items) ? null : 'missing data.items'),
 			},
 		];
 

@@ -1,9 +1,8 @@
 // Command zako-agent runs the node-side agent.
 //
-// P0 wires StatsService sampling, delta accounting, the BoltDB outbox and the
-// shared heartbeat/traffic reporter. User sync and remote configuration are P1/P2
-// and have no implementation; the agent logs that explicitly instead of pretending
-// a node was synchronized.
+// The process samples StatsService, accumulates traffic deltas in BoltDB, reports
+// heartbeats and traffic, and keeps the Xray user set in sync with the control
+// plane through HandlerService with a restart fallback.
 package main
 
 import (
@@ -26,6 +25,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/config"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/state"
+	"github.com/zako-panel/zako-agent/internal/syncer"
 	"github.com/zako-panel/zako-agent/internal/sysinfo"
 	"github.com/zako-panel/zako-agent/internal/xray"
 )
@@ -76,6 +76,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	desiredUsersVersion, _, err := store.MetaInt64(state.KeyDesiredUsersVersion)
+	if err != nil {
+		return err
+	}
 	appliedVersion, _, err := store.MetaInt64(state.KeyAppliedConfigVersion)
 	if err != nil {
 		return err
@@ -92,6 +96,16 @@ func run(logger *slog.Logger) error {
 	defer func() {
 		if err := stats.Close(); err != nil {
 			logger.Error("xray stats client close failed", "error", err)
+		}
+	}()
+
+	handler, err := xray.NewHandlerClient(cfg.XrayAPIAddress, cfg.XrayInboundTag)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := handler.Close(); err != nil {
+			logger.Error("xray handler client close failed", "error", err)
 		}
 	}()
 
@@ -115,6 +129,37 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	// The restart fallback needs a validated document, a restart and a health
+	// check. The agent runs unprivileged; the shipped polkit rule lets its service
+	// user restart xray.service only.
+	applier, err := xray.NewConfigApplier(xray.ConfigApplierOptions{
+		ConfigPath: cfg.XrayConfigPath,
+		BinaryPath: cfg.XrayBinaryPath,
+		Restarter:  xray.SystemctlRestarter{Runner: xray.ExecRunner{}},
+		Runner:     xray.ExecRunner{},
+		Health:     xray.StatsHealth{Stats: stats},
+		Logger:     logger.With("component", "config-applier"),
+	})
+	if err != nil {
+		return err
+	}
+	userSyncer, err := syncer.New(syncer.Options{
+		Fetcher:   reporterClient,
+		Users:     handler,
+		Store:     store,
+		UsersPath: cfg.UsersPath,
+		Config: xray.ConfigFile{
+			Path:                  cfg.XrayConfigPath,
+			RealityPrivateKeyPath: cfg.RealityPrivateKeyPath,
+		},
+		Applier: applier,
+		Logger:  logger.With("component", "syncer"),
+	})
+	if err != nil {
+		return err
+	}
+
 	reporterLoop, err := reporter.NewLoop(reporter.LoopOptions{
 		Client:            reporterClient,
 		Store:             store,
@@ -125,6 +170,10 @@ func run(logger *slog.Logger) error {
 		HeartbeatInterval: cfg.HeartbeatInterval.Duration(),
 		TrafficInterval:   cfg.Collector.ReportInterval.Duration(),
 		Logger:            logger.With("component", "reporter"),
+		// A response carries the Worker's users_ver. It only wakes the syncer: the
+		// applied version advances after the node actually converged, which keeps a
+		// failed apply visible in the next heartbeat.
+		OnResponse: func(*reporter.Response) { userSyncer.Trigger() },
 	})
 	if err != nil {
 		return err
@@ -140,12 +189,11 @@ func run(logger *slog.Logger) error {
 		"sample_interval", cfg.Collector.SampleInterval.String(),
 		"report_interval", cfg.Collector.ReportInterval.String(),
 		"users_version", usersVersion,
+		"desired_users_version", desiredUsersVersion,
 		"applied_config_version", appliedVersion,
 		"outbox_reports", outboxPending,
+		"xray_inbound_tag", cfg.XrayInboundTag,
 	)
-	// P1 keeps user sync and HandlerService hot updates out of this build. Logging
-	// once keeps the gap visible without running a loop that cannot do work.
-	logger.Info("user sync not implemented", "stage", "P1")
 
 	var loops sync.WaitGroup
 	runLoop := func(name string, loop func(context.Context) error) {
@@ -159,6 +207,7 @@ func run(logger *slog.Logger) error {
 	}
 	runLoop("collector", collectorLoop.Run)
 	runLoop("reporter", reporterLoop.Run)
+	runLoop("syncer", userSyncer.Run)
 
 	<-ctx.Done()
 	logger.Info("shutdown requested")

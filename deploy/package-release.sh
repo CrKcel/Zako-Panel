@@ -25,9 +25,9 @@ usage() {
 	cat <<'EOF'
 Usage: package-release.sh <version> <amd64|arm64> <binary> <outdir>
 
-Packages the agent binary, install.sh, config example, systemd unit and Xray
-templates as <outdir>/zako-agent-linux-<arch>.tar.gz. The archive top-level
-directory is always zako-agent/.
+Packages the agent binary, install.sh, config example, systemd unit, polkit rule
+and Xray templates as <outdir>/zako-agent-linux-<arch>.tar.gz. The archive
+top-level directory is always zako-agent/.
 EOF
 }
 
@@ -58,13 +58,14 @@ OUTDIR="$(cd -- "${OUTDIR}" && pwd)"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "${STAGE}"' EXIT
 ROOT="${STAGE}/zako-agent"
-mkdir -p "${ROOT}/systemd" "${ROOT}/lib" "${ROOT}/xray"
+mkdir -p "${ROOT}/systemd" "${ROOT}/lib" "${ROOT}/xray" "${ROOT}/polkit"
 
 install -m 0755 "${BINARY_SRC}" "${ROOT}/zako-agent"
 install -m 0755 "${REPO_ROOT}/deploy/install.sh" "${ROOT}/install.sh"
 install -m 0644 "${REPO_ROOT}/apps/agent/config.example.yaml" "${ROOT}/config.example.yaml"
 install -m 0755 "${REPO_ROOT}/deploy/lib/reality-key.sh" "${ROOT}/lib/reality-key.sh"
 install -m 0644 "${REPO_ROOT}/deploy/systemd/zako-agent.service" "${ROOT}/systemd/zako-agent.service"
+install -m 0644 "${REPO_ROOT}/deploy/polkit/50-zako-agent-xray.rules" "${ROOT}/polkit/50-zako-agent-xray.rules"
 install -m 0644 "${REPO_ROOT}/deploy/xray/config.example.json" "${ROOT}/xray/config.example.json"
 install -m 0755 "${REPO_ROOT}/deploy/xray/render-config.py" "${ROOT}/xray/render-config.py"
 printf '%s\n' "${VERSION}" >"${ROOT}/VERSION"

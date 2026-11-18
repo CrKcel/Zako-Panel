@@ -44,6 +44,7 @@ zako-agent/
   install.sh
   config.example.yaml
   systemd/zako-agent.service
+  polkit/50-zako-agent-xray.rules
   lib/reality-key.sh
   xray/config.example.json
   xray/render-config.py
@@ -110,7 +111,7 @@ sudo bash /tmp/zako-agent-install.sh
 - 检测 `amd64`/`arm64`，不支持时直接退出。
 - 下载当前 `version`、`SHA256SUMS` 与 tarball，校验 SHA-256。
 - 解压并核对 tarball `VERSION` 与二进制 `--version`。
-- 执行 tarball 内的 `install.sh`，复用现有的服务用户、目录、systemd unit、REALITY 密钥与 Xray 模板逻辑。
+- 执行 tarball 内的 `install.sh`，复用现有的服务用户、目录、systemd unit、polkit 规则、REALITY 密钥与 Xray 模板逻辑。
 - 保留已有的 `/etc/zako-agent/config.yaml`、`/etc/zako-agent/token`、`/var/lib/zako-agent/state.db` 与 `/etc/xray/reality.key`。
 - 安装并 enable 服务，不自动启动；服务已运行时提示 `systemctl restart zako-agent`，未运行时提示 `systemctl start zako-agent`。
 

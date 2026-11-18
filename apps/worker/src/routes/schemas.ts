@@ -111,11 +111,13 @@ export const createSubscriberSchema = z.object({
 	expires_at: nullableUnixSecondsSchema.optional(),
 });
 
+// `limited` and `expired` are derived from quota and expiry, so only the explicit
+// suspension switch is accepted from an administrator.
 export const updateSubscriberSchema = z
 	.object({
 		name: z.string().trim().min(1).max(64).optional(),
 		email: z.string().trim().toLowerCase().max(255).nullable().optional(),
-		status: z.enum(['active', 'limited', 'expired', 'disabled']).optional(),
+		status: z.enum(['active', 'disabled']).optional(),
 		traffic_limit_bytes: z.number().int().nonnegative().nullable().optional(),
 		expires_at: nullableUnixSecondsSchema.optional(),
 	})

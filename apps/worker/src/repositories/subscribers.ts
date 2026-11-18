@@ -1,4 +1,4 @@
-import { sqlPlaceholders } from '../lib/sql';
+import { chunk, sqlPlaceholders } from '../lib/sql';
 
 export interface SubscriberRow {
 	id: string;
@@ -41,8 +41,34 @@ export interface NewNodeClientRow {
 	now: number;
 }
 
+export interface NewSubscriberRow {
+	id: string;
+	name: string;
+	email: string | null;
+	status: SubscriberRow['status'];
+	traffic_limit_bytes: number | null;
+	expires_at: number | null;
+	usage_cycle_start: number;
+	usage_cycle_end: number;
+	now: number;
+}
+
+export interface SubscriberUpdateInput {
+	name?: string;
+	email?: string | null;
+	status?: SubscriberRow['status'];
+	traffic_limit_bytes?: number | null;
+	expires_at?: number | null;
+}
+
 const SUBSCRIBER_COLUMNS = `id, name, email, status, traffic_limit_bytes, expires_at,
 	usage_cycle_start, usage_cycle_end, created_at, updated_at`;
+
+/** D1 caps one statement at 100 bound parameters. */
+const MAX_IN_LIST = 90;
+
+const SUBSCRIBER_COLUMNS_QUALIFIED = `s.id, s.name, s.email, s.status, s.traffic_limit_bytes, s.expires_at,
+	s.usage_cycle_start, s.usage_cycle_end, s.created_at, s.updated_at`;
 
 export async function findSubscriberById(db: D1Database, subscriberId: string): Promise<SubscriberRow | null> {
 	const row = await db
@@ -60,6 +86,117 @@ export async function findSubscribersByIds(db: D1Database, subscriberIds: string
 			.bind(...subscriberIds)
 			.all<SubscriberRow>()
 	).results;
+}
+
+export async function listSubscriberRows(db: D1Database, limit: number, cursor?: string): Promise<SubscriberRow[]> {
+	if (cursor) {
+		return (
+			await db
+				.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE id > ? ORDER BY id ASC LIMIT ?`)
+				.bind(cursor, limit)
+				.all<SubscriberRow>()
+		).results;
+	}
+	return (await db.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriberRow>())
+		.results;
+}
+
+export async function listAllSubscriberRows(db: D1Database, limit: number): Promise<SubscriberRow[]> {
+	return (await db.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriberRow>())
+		.results;
+}
+
+export function insertSubscriberStatement(db: D1Database, row: NewSubscriberRow): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO subscribers
+			 (id, name, email, status, traffic_limit_bytes, expires_at, usage_cycle_start, usage_cycle_end, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
+			row.id,
+			row.name,
+			row.email,
+			row.status,
+			row.traffic_limit_bytes,
+			row.expires_at,
+			row.usage_cycle_start,
+			row.usage_cycle_end,
+			row.now,
+			row.now,
+		);
+}
+
+export function updateSubscriberStatement(
+	db: D1Database,
+	subscriberId: string,
+	input: SubscriberUpdateInput,
+	now: number,
+): D1PreparedStatement {
+	const assignments: string[] = ['updated_at = ?'];
+	const values: unknown[] = [now];
+	if (input.name !== undefined) {
+		assignments.push('name = ?');
+		values.push(input.name);
+	}
+	if (input.email !== undefined) {
+		assignments.push('email = ?');
+		values.push(input.email);
+	}
+	if (input.status !== undefined) {
+		assignments.push('status = ?');
+		values.push(input.status);
+	}
+	if (input.traffic_limit_bytes !== undefined) {
+		assignments.push('traffic_limit_bytes = ?');
+		values.push(input.traffic_limit_bytes);
+	}
+	if (input.expires_at !== undefined) {
+		assignments.push('expires_at = ?');
+		values.push(input.expires_at);
+	}
+	values.push(subscriberId);
+	return db.prepare(`UPDATE subscribers SET ${assignments.join(', ')} WHERE id = ?`).bind(...values);
+}
+
+/** Advances the cycle and rewrites the materialised status in one row update. */
+export function updateSubscriberCycleStatement(
+	db: D1Database,
+	subscriberId: string,
+	cycle: { start: number; end: number },
+	status: SubscriberRow['status'],
+	now: number,
+): D1PreparedStatement {
+	return db
+		.prepare('UPDATE subscribers SET usage_cycle_start = ?, usage_cycle_end = ?, status = ?, updated_at = ? WHERE id = ?')
+		.bind(cycle.start, cycle.end, status, now, subscriberId);
+}
+
+export function updateSubscriberStatusStatement(
+	db: D1Database,
+	subscriberId: string,
+	status: SubscriberRow['status'],
+	now: number,
+): D1PreparedStatement {
+	return db.prepare('UPDATE subscribers SET status = ?, updated_at = ? WHERE id = ?').bind(status, now, subscriberId);
+}
+
+export async function findNodeClientsBySubscriber(db: D1Database, subscriberId: string): Promise<NodeClientRow[]> {
+	return (
+		await db
+			.prepare(
+				`SELECT id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at
+				 FROM node_clients
+				 WHERE subscriber_id = ?
+				 ORDER BY node_id ASC`,
+			)
+			.bind(subscriberId)
+			.all<NodeClientRow>()
+	).results;
+}
+
+export function setNodeClientEnabledStatement(db: D1Database, clientId: string, enabled: boolean, now: number): D1PreparedStatement {
+	return db.prepare('UPDATE node_clients SET enabled = ?, updated_at = ? WHERE id = ?').bind(enabled ? 1 : 0, now, clientId);
 }
 
 export async function findNodeClientsByNodeAndEmails(db: D1Database, nodeId: string, emails: string[]): Promise<NodeClientRow[]> {
@@ -160,16 +297,99 @@ export function usageStatement(db: D1Database, subscriberId: string): D1Prepared
 		.bind(subscriberId);
 }
 
+/** Starts a new usage cycle at zero without deleting the row. */
+export function resetUsageStatement(db: D1Database, subscriberId: string, cycleStart: number, now: number): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO subscriber_usage (subscriber_id, cycle_start, uplink_bytes, downlink_bytes, updated_at)
+			 VALUES (?, ?, 0, 0, ?)
+			 ON CONFLICT(subscriber_id) DO UPDATE SET
+			   cycle_start = excluded.cycle_start,
+			   uplink_bytes = 0,
+			   downlink_bytes = 0,
+			   updated_at = excluded.updated_at`,
+		)
+		.bind(subscriberId, cycleStart, now);
+}
+
+/** Chunked so a full-page read stays under D1's 100 bound parameters. */
 export async function findUsageBySubscribers(db: D1Database, subscriberIds: string[]): Promise<SubscriberUsageRow[]> {
-	if (subscriberIds.length === 0) return [];
-	return (
-		await db
+	const rows: SubscriberUsageRow[] = [];
+	for (const group of chunk(subscriberIds, MAX_IN_LIST)) {
+		const result = await db
 			.prepare(
 				`SELECT subscriber_id, cycle_start, uplink_bytes, downlink_bytes, updated_at
 				 FROM subscriber_usage
-				 WHERE subscriber_id IN (${sqlPlaceholders(subscriberIds.length)})`,
+				 WHERE subscriber_id IN (${sqlPlaceholders(group.length)})`,
 			)
-			.bind(...subscriberIds)
-			.all<SubscriberUsageRow>()
-	).results;
+			.bind(...group)
+			.all<SubscriberUsageRow>();
+		rows.push(...result.results);
+	}
+	return rows;
+}
+
+/**
+ * Active credentials for one node. The join on subscribers is what makes a
+ * suspended, expired or over-quota subscriber disappear from the node user set
+ * after the cron materialises its status.
+ */
+export function nodeActiveUsersStatement(db: D1Database, nodeId: string): D1PreparedStatement {
+	return db
+		.prepare(
+			`SELECT nc.xray_email, nc.vless_uuid
+			 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
+			 WHERE nc.node_id = ? AND nc.enabled = 1 AND s.status = 'active'
+			 ORDER BY nc.created_at ASC, nc.id ASC`,
+		)
+		.bind(nodeId);
+}
+
+export interface SubscriberNodeCountRow {
+	subscriber_id: string;
+	node_count: number;
+}
+
+/** Enabled grant counts for one page of subscribers, avoiding a per-row query. */
+export async function countNodeClientsBySubscribers(db: D1Database, subscriberIds: string[]): Promise<SubscriberNodeCountRow[]> {
+	const rows: SubscriberNodeCountRow[] = [];
+	for (const group of chunk(subscriberIds, MAX_IN_LIST)) {
+		const result = await db
+			.prepare(
+				`SELECT subscriber_id, COUNT(*) AS node_count
+				 FROM node_clients
+				 WHERE enabled = 1 AND subscriber_id IN (${sqlPlaceholders(group.length)})
+				 GROUP BY subscriber_id`,
+			)
+			.bind(...group)
+			.all<SubscriberNodeCountRow>();
+		rows.push(...result.results);
+	}
+	return rows;
+}
+
+/**
+ * Subscribers whose materialised state may be stale: the cycle ended, or the
+ * stored status disagrees with what expiry and current-cycle usage imply. Filtering
+ * in SQL keeps the quarter-hourly cron from re-reading every subscriber row and
+ * leaves the derivation itself in one place in the service.
+ */
+export function subscribersNeedingReconcileStatement(db: D1Database, now: number, limit: number): D1PreparedStatement {
+	return db
+		.prepare(
+			`SELECT ${SUBSCRIBER_COLUMNS_QUALIFIED} FROM subscribers s
+			 LEFT JOIN subscriber_usage u ON u.subscriber_id = s.id
+			 WHERE s.usage_cycle_end <= ?1
+			    OR (s.status <> 'disabled' AND s.status <> CASE
+			          WHEN s.expires_at IS NOT NULL AND s.expires_at <= ?1 THEN 'expired'
+			          WHEN s.traffic_limit_bytes IS NOT NULL
+			            AND COALESCE(CASE WHEN u.cycle_start = s.usage_cycle_start
+			                              THEN u.uplink_bytes + u.downlink_bytes ELSE 0 END, 0) >= s.traffic_limit_bytes
+			          THEN 'limited'
+			          ELSE 'active'
+			        END)
+			 ORDER BY s.id ASC
+			 LIMIT ?2`,
+		)
+		.bind(now, limit);
 }

@@ -349,11 +349,12 @@ paths:
     get:
       operationId: listNodeClients
       tags: [admin]
-      summary: List credentials the node must configure locally
+      summary: List node credential grants
       description: |
-        P0 configures node-local users by hand, so an operator needs the
-        xray_email and UUID that the statistics keys and the inbound client
-        entry must share. P1 replaces this manual step with user sync.
+        Returns every node_client row, including disabled grants, so an operator
+        can match statistics keys and inbound clients. The agent's user sync is the
+        authority for the running inbound; this endpoint is for inspection and
+        troubleshooting.
       security:
         - AccessJwt: []
       parameters:
@@ -1022,6 +1023,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/admin/nodes/{nodeId}/configs:
     get:
       operationId: listNodeConfigs
@@ -1838,6 +1841,7 @@ components:
         - status
         - usage_cycle_start
         - usage_cycle_end
+        - node_count
         - created_at
         - updated_at
       properties:
@@ -1856,6 +1860,9 @@ components:
         usage_cycle_start:
           type: integer
         usage_cycle_end:
+          type: integer
+        node_count:
+          description: Number of nodes this subscriber currently holds an enabled credential for.
           type: integer
         usage:
           oneOf:
@@ -2249,7 +2256,9 @@ components:
         email:
           type: [string, 'null']
         status:
-          $ref: '#/components/schemas/SubscriberStatus'
+          description: Explicit suspension switch; `limited` and `expired` are derived from quota and expiry.
+          type: string
+          enum: [active, disabled]
         traffic_limit_bytes:
           type: [integer, 'null']
           minimum: 0

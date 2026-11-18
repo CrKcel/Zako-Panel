@@ -26,6 +26,10 @@ const (
 	// defaultXrayAPIAddress is Xray's loopback StatsService/HandlerService
 	// listener configured by the installation guide.
 	defaultXrayAPIAddress = "127.0.0.1:10085"
+	// defaultXrayInboundTag matches the VLESS inbound tag in the shipped Xray
+	// template. HandlerService addresses the inbound by tag, so a renamed inbound
+	// must be reflected here or hot updates fail and fall back to a restart.
+	defaultXrayInboundTag = "vless-reality"
 
 	minHeartbeatInterval = 60 * time.Second
 	maxHeartbeatInterval = 900 * time.Second
@@ -76,6 +80,7 @@ type Config struct {
 	XrayBinaryPath        string          `yaml:"xray_binary_path"`
 	RealityPrivateKeyPath string          `yaml:"reality_private_key_path"`
 	XrayAPIAddress        string          `yaml:"xray_api_address"`
+	XrayInboundTag        string          `yaml:"xray_inbound_tag"`
 	HeartbeatInterval     Duration        `yaml:"heartbeat_interval"`
 	Collector             CollectorConfig `yaml:"collector"`
 }
@@ -141,6 +146,9 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.XrayAPIAddress) == "" {
 		c.XrayAPIAddress = defaultXrayAPIAddress
+	}
+	if strings.TrimSpace(c.XrayInboundTag) == "" {
+		c.XrayInboundTag = defaultXrayInboundTag
 	}
 }
 

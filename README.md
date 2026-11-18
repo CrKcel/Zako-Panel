@@ -4,11 +4,14 @@
 
 ## 能力
 
-- 节点、endpoint 与订阅档案管理，P0 支持 VLESS + REALITY
+- 节点、endpoint 与订阅档案管理，支持 VLESS + REALITY
+- 订阅用户、额度、周期与到期管理，按节点授权
+- 管理员角色与启用状态管理
 - Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
 - Agent 心跳、Xray 统计采样、流量上报与按小时幂等入账
+- 用户集合下发与 Xray 热更新，失败自动回退为配置重启
 - Agent 静态资产滚动分发，节点通过面板域名一条命令安装
-- 派生节点状态、站点/节点流量汇总与保留期清理
+- 派生节点状态、系统指标、站点/节点/用户流量汇总与保留期清理
 
 阶段划分与设计边界见 [docs/architecture.md](docs/architecture.md)，交付顺序见 [docs/roadmap.md](docs/roadmap.md)。
 

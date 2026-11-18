@@ -32,7 +32,9 @@ var (
 	// bucketOutbox holds closed reports waiting for a Worker ACK, keyed by
 	// report_id. Report IDs are ULIDs, so iteration order is age order.
 	bucketOutbox = []byte("outbox")
-	// bucketUsers is reserved for the P1 user set.
+	// bucketUsers stays allocated after the on-disk format shipped. The applied
+	// user set lives in users.json so Xray's disk config and the set are written
+	// as one unit, not in a second Bolt record.
 	bucketUsers = []byte("users")
 	// bucketBaseline holds the last observed cumulative counters plus the
 	// uptime needed to detect an Xray restart.
@@ -59,8 +61,15 @@ var ErrClosed = errors.New("state: store is closed")
 type MetadataKey string
 
 const (
-	// KeyUsersVersion is the last users_ver applied locally; 0 means never synced.
+	// KeyUsersVersion is the last users_ver whose set was fully applied locally:
+	// the Xray config on disk and the persisted user set match it. Only the
+	// syncer advances it after every write succeeded, so a failed apply cannot
+	// claim users the node does not serve. 0 means never synced.
 	KeyUsersVersion MetadataKey = "users_version"
+	// KeyDesiredUsersVersion is the users_ver the Worker last advertised. It is a
+	// sync trigger hint, not proof of application, so the syncer never uses it as
+	// the applied version.
+	KeyDesiredUsersVersion MetadataKey = "desired_users_version"
 	// KeyAppliedConfigVersion is the last configuration version known to be running.
 	KeyAppliedConfigVersion MetadataKey = "applied_config_version"
 	// KeyDesiredConfigVersion is the last desired version advertised by the Worker.

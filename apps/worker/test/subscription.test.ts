@@ -1,6 +1,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import { replaceSubscriberNodes } from '../src/services/subscriber-service';
 import {
 	createSubscription,
 	getClashSubscription,
@@ -359,6 +360,10 @@ describe('profile preview', () => {
 		const disabledPreview = await previewProfile(env.DB, dist.profileId, dist.subscriberId);
 		expect(disabledPreview.subscriber.blocked_reason).toBe('inactive');
 
+		const expired = await seedDistribution({ scope: 'blockedexpired', subscriberExpiresAt: nowSeconds() - 10 });
+		const expiredPreview = await previewProfile(env.DB, expired.profileId, expired.subscriberId);
+		expect(expiredPreview.subscriber.blocked_reason).toBe('expired');
+
 		const quota = await seedDistribution({ scope: 'blockedquota', trafficLimitBytes: 100 });
 		const usage = await env.DB.prepare('SELECT usage_cycle_start FROM subscribers WHERE id = ?')
 			.bind(quota.subscriberId)
@@ -405,5 +410,27 @@ describe('profile preview endpoint', () => {
 		// the middleware rather than from preview not being registered.
 		const detail = await SELF.fetch(`https://panel.test/api/v1/admin/profiles/${dist.profileId}`);
 		expect(detail.status).toBe(401);
+	});
+});
+
+describe('subscriber node grants', () => {
+	it('serves a node only after the grant creates its node client', async () => {
+		const nodeId = await seedNode({ name: 'Granted node' });
+		await seedEndpoint(nodeId);
+		const subscriberId = await seedSubscriber();
+		const profileId = await seedProfile();
+		const token = testToken('grant');
+		await seedSubscription({ token, subscriberId, profileId });
+
+		expect((await fetchClash(token)).status).toBe(503);
+
+		await replaceSubscriberNodes(env.DB, subscriberId, [nodeId]);
+		const response = await fetchClash(token);
+		expect(response.status).toBe(200);
+		const document = parse(await response.text()) as ClashDocument;
+		expect(document.proxies.map((proxy) => proxy.name)).toEqual(['Granted node']);
+
+		await replaceSubscriberNodes(env.DB, subscriberId, []);
+		expect((await fetchClash(token)).status).toBe(503);
 	});
 });

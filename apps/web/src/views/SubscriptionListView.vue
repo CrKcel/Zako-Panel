@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { CreateSubscriptionRequest, Profile, Subscription } from '@zako/contracts';
+import type { CreateSubscriptionRequest, Profile, Subscriber, Subscription } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, onMounted, ref } from 'vue';
 import { profilesApi } from '../api/profiles';
+import { subscribersApi } from '../api/subscribers';
 import { subscriptionsApi } from '../api/subscriptions';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
@@ -17,6 +18,7 @@ interface SubscriptionForm {
 
 const subscriptions = ref<Subscription[]>([]);
 const profiles = ref<Profile[]>([]);
+const subscribers = ref<Subscriber[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const dialogVisible = ref(false);
@@ -33,7 +35,7 @@ const form = ref<SubscriptionForm>(emptyForm());
 
 const rules: FormRules = {
 	name: [{ required: true, message: '请输入订阅名称', trigger: 'blur' }],
-	subscriber_id: [{ required: true, message: '请输入订阅用户 ID', trigger: 'blur' }],
+	subscriber_id: [{ required: true, message: '请选择订阅用户', trigger: 'change' }],
 	profile_id: [{ required: true, message: '请选择订阅档案', trigger: 'change' }],
 };
 
@@ -75,6 +77,15 @@ async function loadProfiles(): Promise<void> {
 		profiles.value = page.items;
 	} catch (error) {
 		showError(error, '订阅档案加载失败');
+	}
+}
+
+async function loadSubscribers(): Promise<void> {
+	try {
+		const page = await subscribersApi.list({ limit: 200 });
+		subscribers.value = page.items;
+	} catch (error) {
+		showError(error, '订阅用户加载失败');
 	}
 }
 
@@ -137,7 +148,7 @@ async function revoke(row: Subscription): Promise<void> {
 }
 
 onMounted(async () => {
-	await Promise.all([load(), loadProfiles()]);
+	await Promise.all([load(), loadProfiles(), loadSubscribers()]);
 });
 </script>
 
@@ -180,8 +191,10 @@ onMounted(async () => {
 			<el-form-item label="名称" prop="name">
 				<el-input v-model="form.name" />
 			</el-form-item>
-			<el-form-item label="订阅用户 ID" prop="subscriber_id">
-				<el-input v-model="form.subscriber_id" />
+			<el-form-item label="订阅用户" prop="subscriber_id">
+				<el-select v-model="form.subscriber_id" filterable class="full-width">
+					<el-option v-for="subscriber in subscribers" :key="subscriber.id" :label="subscriber.name" :value="subscriber.id" />
+				</el-select>
 			</el-form-item>
 			<el-form-item label="档案" prop="profile_id">
 				<el-select v-model="form.profile_id" class="full-width">

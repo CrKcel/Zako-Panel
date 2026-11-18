@@ -17,10 +17,12 @@ readonly BIN_PATH="/usr/local/bin/zako-agent"
 readonly CONFIG_DIR="/etc/zako-agent"
 readonly STATE_DIR="/var/lib/zako-agent"
 readonly UNIT_PATH="/etc/systemd/system/zako-agent.service"
+readonly POLKIT_RULE="/etc/polkit-1/rules.d/50-zako-agent-xray.rules"
 readonly TOKEN_PATH="${CONFIG_DIR}/token"
 readonly CONFIG_PATH="${CONFIG_DIR}/config.yaml"
-readonly REALITY_KEY="/etc/xray/reality.key"
-readonly XRAY_CONFIG="/etc/xray/config.json"
+readonly XRAY_DIR="/etc/xray"
+readonly REALITY_KEY="${XRAY_DIR}/reality.key"
+readonly XRAY_CONFIG="${XRAY_DIR}/config.json"
 readonly XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +42,20 @@ warn() {
 die() {
 	printf '[zako-agent] error: %s\n' "$*" >&2
 	exit 1
+}
+
+# The agent replaces config.json through a same-directory temporary file and a
+# rename, which needs write permission on the directory rather than on the file.
+# Xray runs as root, so group ownership by the agent's group is enough.
+ensure_xray_dir() {
+	if [[ ! -d "${XRAY_DIR}" ]]; then
+		install -d -m 0770 -o root -g "${SERVICE_GROUP}" "${XRAY_DIR}"
+		return
+	fi
+	if [[ "$(stat -c '%G' "${XRAY_DIR}")" != "${SERVICE_GROUP}" ]]; then
+		chgrp "${SERVICE_GROUP}" "${XRAY_DIR}"
+	fi
+	chmod 0770 "${XRAY_DIR}"
 }
 
 usage() {
@@ -164,12 +180,28 @@ if [[ ! -f "${SCRIPT_DIR}/systemd/zako-agent.service" ]]; then
 	die "systemd unit not found at ${SCRIPT_DIR}/systemd/zako-agent.service"
 fi
 install -m 0644 -o root -g root "${SCRIPT_DIR}/systemd/zako-agent.service" "${UNIT_PATH}"
+
+# The agent applies user sets through HandlerService and restarts xray.service only
+# when a hot update fails. The unit runs unprivileged, so the restart is authorized
+# by a polkit rule limited to that one unit instead of a sudoers entry or root.
+polkit_rule="${SCRIPT_DIR}/polkit/50-zako-agent-xray.rules"
+if [[ ! -f "${polkit_rule}" ]]; then
+	die "polkit rule not found at ${polkit_rule}"
+fi
+if [[ -d /etc/polkit-1/rules.d ]]; then
+	install -d -m 0755 /etc/polkit-1/rules.d
+	install -m 0644 -o root -g root "${polkit_rule}" "${POLKIT_RULE}"
+	log "installed ${POLKIT_RULE} (zako-agent may restart xray.service)"
+else
+	warn "/etc/polkit-1/rules.d is missing; install polkit or user sync will not be able to restart xray"
+fi
+
 systemctl daemon-reload
 systemctl enable zako-agent.service
 log "installed and enabled zako-agent.service (not started)"
 
 if [[ -x "${XRAY_BIN}" ]]; then
-	install -d -m 0755 /etc/xray
+	ensure_xray_dir
 	if [[ -e "${REALITY_KEY}" ]]; then
 		log "preserving existing ${REALITY_KEY}"
 	else
@@ -188,9 +220,9 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		printf 'REALITY public key: %s\n' "${public_key}"
 	fi
 
-	# P0 has no remote config delivery, so the static inbound is materialised from
-	# the shipped template. Client credentials stay placeholders: the operator
-	# copies them from the panel's node credential list.
+	# The static inbound is materialised from the shipped template. Clients start as
+	# placeholders and are replaced by the first user sync, which renders the same
+	# file from the node's user set.
 	xray_template="${SCRIPT_DIR}/xray/config.example.json"
 	xray_renderer="${SCRIPT_DIR}/xray/render-config.py"
 	if [[ ! -f "${xray_template}" ]]; then

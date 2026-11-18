@@ -1,0 +1,25 @@
+// Allow the zako-agent service user to restart xray.service.
+//
+// The agent applies user sets through HandlerService, but a failed hot update falls
+// back to replacing /etc/xray/config.json and restarting Xray. The unit keeps
+// User=zako-agent and NoNewPrivileges=true, so this rule grants one systemd action
+// on one unit instead of running the agent as root.
+//
+// systemd exposes the unit and the requested verb as action details for
+// org.freedesktop.systemd1.manage-units, so neither "stop" nor another unit can be
+// authorized through the same policy.
+polkit.addRule(function (action, subject) {
+    if (action.id !== "org.freedesktop.systemd1.manage-units") {
+        return null;
+    }
+    if (!subject.user || subject.user !== "zako-agent") {
+        return null;
+    }
+    if (action.lookup("unit") !== "xray.service") {
+        return null;
+    }
+    if (action.lookup("verb") !== "restart") {
+        return null;
+    }
+    return polkit.Result.YES;
+});

@@ -57,7 +57,7 @@ CREATE TABLE endpoints (
 CREATE INDEX idx_endpoints_node_enabled ON endpoints(node_id, enabled);
 ```
 
-`params_json` 按协议校验：P0 为 `vless-reality`，字段包含 `sni`、`public_key`、`short_id`、`fingerprint`、`flow`、`network`；不接受任意 YAML 片段。
+`params_json` 按协议校验：当前只注册 `vless-reality`，字段包含 `sni`、`public_key`、`short_id`、`fingerprint`、`flow`、`network`；不接受任意 YAML 片段。
 
 ```sql
 CREATE TABLE subscribers (
@@ -97,7 +97,9 @@ CREATE INDEX idx_node_clients_subscriber
   ON node_clients(subscriber_id, enabled);
 ```
 
-`node_clients` 同时表达节点授权与凭据。P1 的 `PUT /subscribers/{subscriberId}/nodes` 对新增节点创建行，对移除节点置 `enabled=0` 而不删除，保留流量归属。多 endpoint 复用同一 `node_client`；需要协议独立凭据时再增加 `endpoint_clients` 表，不在 P0 提前抽象。
+`subscribers.status` 是物化值，取值 `active`、`limited`、`expired`、`disabled`，由周期任务按优先级派生（`disabled` 粘性、`expired`、`limited`、`active`）。`usage_cycle_start` 与 `usage_cycle_end` 为 UTC 自然月边界：每月 1 日 00:00 UTC 开始，下月 1 日结束。管理接口只接受 `active` 与 `disabled`，`limited` 与 `expired` 由额度与到期派生。
+
+`node_clients` 同时表达节点授权与凭据。`PUT /api/v1/admin/subscribers/{subscriberId}/nodes` 按请求的节点集合整体替换授权：新增节点创建行并生成 `xray_email` 与 UUID；此前被移除的节点复用原有行与凭据，只把 `enabled` 置回 1；移出集合的节点置 `enabled=0` 而不删除，保留流量归属。授权集合有实际变化时在同一 batch 内递增 `meta.users_ver`。多 endpoint 复用同一 `node_client`；需要协议独立凭据时再增加 `endpoint_clients` 表，不在当前模型提前抽象。
 
 ```sql
 CREATE TABLE subscription_profiles (
@@ -240,7 +242,7 @@ CREATE TABLE audit_events (
 CREATE INDEX idx_audit_created ON audit_events(created_at);
 ```
 
-`meta` 保存 `users_ver`（全局用户集合版本）与少量运行时设置。`definition_json` 不含 REALITY 私钥与用户凭据；版本号在节点内严格递增，回滚创建新版本而非降低版本号。配置发布语义见 [config-delivery.md](config-delivery.md)。
+`meta` 保存 `users_ver`（全局用户集合版本）、`default_subscriber_id`（新建节点时默认授权的订阅用户）与少量运行时设置。`definition_json` 不含 REALITY 私钥与用户凭据；版本号在节点内严格递增，回滚创建新版本而非降低版本号。配置发布语义见 [config-delivery.md](config-delivery.md)。
 
 ## 5. 数据保留与清理
 

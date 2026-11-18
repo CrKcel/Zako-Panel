@@ -48,6 +48,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if got, want := cfg.XrayAPIAddress, "127.0.0.1:10085"; got != want {
 		t.Errorf("xray_api_address = %q, want %q", got, want)
 	}
+	if got, want := cfg.XrayInboundTag, "vless-reality"; got != want {
+		t.Errorf("xray_inbound_tag = %q, want %q", got, want)
+	}
 }
 
 func TestLoadParsesXrayAPIAddress(t *testing.T) {

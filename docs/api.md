@@ -43,8 +43,8 @@ Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 O
 | `GET/PATCH /api/v1/admin/nodes/{nodeId}` | P0 | 节点详情、心跳间隔与启用状态 |
 | `POST /api/v1/admin/nodes/{nodeId}/agent-token/rotate` | P0 | 轮换 Agent token，返回一次性明文 |
 | `GET /api/v1/admin/nodes/{nodeId}/status` | P0 | 心跳、健康、版本与最近配置错误 |
-| `GET /api/v1/admin/nodes/{nodeId}/clients` | P0 | 节点本地入站需要的 `xray_email` 与 UUID |
-| `GET/POST /api/v1/admin/nodes/{nodeId}/endpoints` | P0/P2 | endpoint 列表与新增；P0 只有一个 |
+| `GET /api/v1/admin/nodes/{nodeId}/clients` | P0 | 节点入站凭据的 `xray_email` 与 UUID，用于核对 Agent 同步结果 |
+| `GET/POST /api/v1/admin/nodes/{nodeId}/endpoints` | P0/P2 | endpoint 列表与新增；当前节点只有一个 endpoint |
 | `PATCH/DELETE /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}` | P0/P2 | 修改或停用 endpoint |
 | `GET/POST /api/v1/admin/profiles` | P0 | 订阅档案列表与创建 |
 | `GET/PATCH/DELETE /api/v1/admin/profiles/{profileId}` | P0 | 节点选择、Clash 基础字段、代理组与规则 |
@@ -62,13 +62,19 @@ Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 O
 | `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | P2 | 配置详情与 diff 数据 |
 | `POST /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback` | P2 | 从历史定义创建新版本 |
 
-标为 P1 与 P2 的管理接口已注册路由并通过入参校验，但服务层尚未实现，返回 `501 NOT_IMPLEMENTED`。P0 验收不依赖这些接口。
+P2 的配置管理接口已注册路由并通过入参校验，服务层尚未实现，返回 `501 NOT_IMPLEMENTED`。P0 与 P1 的接口均已交付。
 
 流量汇总支持 `from`、`to`、`groupBy=node|subscriber|site`、`nodeId`、`subscriberId`；最大时间范围 31 天。`from`、`to` 为 Unix 秒，归一到小时边界。
 
-创建节点时，节点与首个 endpoint 在同一 D1 batch 写入，并为当前默认订阅用户创建 `node_clients`。P1 的 `PUT /subscribers/{subscriberId}/nodes` 为新增授权补齐凭据。
+创建节点时，节点与首个 endpoint 在同一 D1 batch 写入，并为当前默认订阅用户创建 `node_clients`。`PUT /subscribers/{subscriberId}/nodes` 为新增授权补齐凭据、重新授权时复用原凭据、移除授权时置 `enabled=0`。
 
-`GET /api/v1/admin/nodes/{nodeId}/clients` 返回该节点的 `node_clients` 记录，用于在 P0 手工配置节点本地入站。`xray_email` 必须与该入站 client 的 `email` 一致，否则统计无法归属到订阅用户。
+`GET /api/v1/admin/nodes/{nodeId}/clients` 返回该节点的 `node_clients` 记录，用于核对 Agent 同步到入站的 client。`xray_email` 必须与该入站 client 的 `email` 一致，否则统计无法归属到订阅用户。
+
+订阅用户与管理员接口的字段约束：
+
+- 订阅用户列表返回 `node_count`，即该用户当前 `enabled=1` 的 `node_clients` 数量；`node_ids` 只在详情返回。
+- `PATCH /api/v1/admin/subscribers/{subscriberId}` 的 `status` 只接受 `active` 与 `disabled`；`limited` 与 `expired` 由额度与到期派生后物化，不能直接写入。
+- `PATCH /api/v1/admin/admins/{adminId}` 在请求会移除最后一个启用的 `owner` 时返回 `409`。
 
 ### 2.1 档案预览
 
@@ -162,7 +168,7 @@ Agent 请求使用 `Authorization: Bearer <node_id>.<secret>`。请求体上限�
 - 未知 `xray_email` 仍计入节点与站点流量，跳过用户汇总，响应包含 `unknown_users` 计数。
 - 心跳字段先于流量批次提交；流量批次失败不会让节点被判离线。
 - Agent 以响应中的 `heartbeat_interval_seconds` 与 `traffic_interval_seconds` 为准，持久化后在下一次调度生效。
-- `sys` 为可选字段，限制 2 KB；P1 UI 使用，P0 可忽略。
+- `sys` 为可选字段，限制 2 KB；节点列表与节点详情展示该指标。
 - `directives` 保留给未来扩展，当前返回空数组；旧 Agent 忽略未知类型。
 
 ### 3.2 用户列表
@@ -184,7 +190,8 @@ Agent 请求使用 `Authorization: Bearer <node_id>.<secret>`。请求体上限�
 ```
 
 - 只返回该节点上启用且订阅用户状态为 `active` 的凭据。
-- 支持 `If-None-Match`；版本未变化返回 `304`。
+- 响应头 `ETag` 为带引号的版本号（如 `"13"`），与响应体的 `version` 相同。
+- 支持 `If-None-Match`：命中该标签（含 `W/"13"` 弱形式与 `*`）时返回 `304`，无响应体。
 
 ### 3.3 配置
 

@@ -12,7 +12,7 @@
 - `assets.directory` 指向 `apps/web/dist`，`not_found_handling` 为 `single-page-application`。
 - `assets.run_worker_first` 只包含 `/api/*` 与 `/sub/*`；`/admin/*` 静态页面由 Assets 直接返回。
 - `d1_databases` 把 `DB` 绑定到 `zako-panel`，`database_id` 使用创建 D1 时返回的值。
-- `triggers.crons` 设置 `*/15 * * * *` 与 `17 3 * * *`。当前只有后者执行保留期清理；`*/15` 在 P1 承接周期推进与状态检查，当前仅记录触发时间。
+- `triggers.crons` 设置 `*/15 * * * *` 与 `17 3 * * *`。`*/15` 执行订阅用户周期推进与状态判定，`17 3 * * *` 执行保留期清理。
 - `observability.enabled` 为 `true`。
 
 ### 1.2 环境变量与 Access
@@ -84,8 +84,10 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 - 创建 `/etc/zako-agent` 与 `/var/lib/zako-agent`，权限 0700。
 - 把 `config.example.yaml` 安装为 `/etc/zako-agent/config.yaml`（已存在时保留），并创建空的 `/etc/zako-agent/token`。
 - 安装并 enable `zako-agent.service`，不启动服务；服务已运行时提示重启。
-- 若本机存在 Xray，执行 `xray x25519` 生成 REALITY 密钥对：私钥写入 `/etc/xray/reality.key`（0600，属 `zako-agent`），公钥打印到终端。
-- 用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与随机 short id（0640，属组 `zako-agent`）；该步骤需要 `python3`，缺失时脚本给出警告并跳过。
+- 安装 polkit 规则 `/etc/polkit-1/rules.d/50-zako-agent-xray.rules`，只允许 `zako-agent` 重启 `xray.service`。
+- 若已安装 Xray，把 `/etc/xray` 设为 `root:zako-agent`、`0770`，使 Agent 能原子替换 `config.json`。
+- 若已安装 Xray，执行 `xray x25519` 生成 REALITY 密钥对：私钥写入 `/etc/xray/reality.key`（0600，属 `zako-agent`），公钥打印到终端。
+- 若已安装 Xray，用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与随机 short id（0640，属组 `zako-agent`）；该步骤需要 `python3`，缺失时脚本给出警告并跳过。
 
 启动前：
 
@@ -113,13 +115,13 @@ sudo deploy/install.sh apps/agent/bin/zako-agent-linux-amd64
 
 `install.sh` 也会在脚本目录查找 `zako-agent`，因此可以从解压后的发布包直接执行。
 
-### 3.3 P0 节点侧 Xray 配置
+### 3.3 节点侧 Xray 配置
 
-P0 不远程下发配置，节点使用安装脚本生成的静态配置：
+节点使用安装脚本生成的静态入站模板，客户端由 Agent 首次用户同步写入：
 
-1. 安装脚本在生成 REALITY 私钥后，用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与新生成的 short id，权限 `0640`、属组 `zako-agent`。
+1. 安装脚本在生成 REALITY 私钥后，用 `deploy/xray/config.example.json` 渲染 `/etc/xray/config.json`，写入私钥与新生成的 short id，权限 `0640`、属组 `zako-agent`。模板中的 `clients` 是占位项，由 Agent 覆盖。
 2. 脚本打印 REALITY 公钥与 short id。公钥填入 endpoint 的 `public_key`，short id 填入 `short_id`。
-3. 在面板的节点详情页“用户凭据”中复制 `xray_email` 与 `UUID`，替换模板中的对应占位项。`xray_email` 必须与 Xray 入站 client 的 `email` 完全一致，否则用户流量只计入节点与站点汇总，用户维度记为未知。
+3. 在面板创建节点并在该节点上授权订阅用户后，Agent 在下一次同步（启动时或心跳触发）按 `node_clients` 渲染 `clients` 并热更新运行中的入站。`xray_email` 必须与入站 client 的 `email` 完全一致，否则用户流量只计入节点与站点汇总，用户维度记为未知。
 4. 校验并启动 Xray：
 
 ```bash
@@ -127,7 +129,7 @@ xray run -test -config /etc/xray/config.json
 systemctl restart xray
 ```
 
-模板中的 API inbound、stats 与 policy 与 [traffic.md](traffic.md) 的统计要求一致，不要删除。systemd 单元的写路径与命令限制见 [security.md](security.md)。P1 起用户集合由 Agent 同步，本节的手工步骤随之移除。
+模板中的 API inbound、stats 与 policy 与 [traffic.md](traffic.md) 的统计要求一致，不要删除。Agent 以当前文件为模板，只替换 VLESS 入站的 `clients` 并合入本地 REALITY 私钥，其余字段保持不变。polkit 规则与 `/etc/xray` 权限由安装脚本设置，systemd 单元的写路径与命令限制见 [security.md](security.md)。
 
 默认档案（`bootstrap` 生成的档案）`online_only = 1`，而节点状态由心跳派生。因此新建节点在 Agent 首次上报前按离线处理，订阅返回 `503`；Agent 启动后的首次心跳（默认 5 分钟内）即恢复下发。需要提前验证配置时，可在档案中关闭在线过滤，或用档案预览查看渲染结果。
 

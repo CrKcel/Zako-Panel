@@ -7,12 +7,18 @@ const route = useRoute();
 const items = [
 	{ path: '/', label: '总览' },
 	{ path: '/nodes', label: '节点' },
+	{ path: '/subscribers', label: '订阅用户' },
 	{ path: '/profiles', label: '订阅档案' },
 	{ path: '/subscriptions', label: '订阅' },
 	{ path: '/traffic', label: '流量' },
+	{ path: '/admins', label: '管理员' },
 ];
 
-const activeMenu = computed(() => (route.path.startsWith('/nodes') ? '/nodes' : route.path));
+const activeMenu = computed(() => {
+	if (route.path.startsWith('/nodes')) return '/nodes';
+	if (route.path.startsWith('/subscribers')) return '/subscribers';
+	return route.path;
+});
 const title = computed(() => route.meta.title ?? '');
 </script>
 

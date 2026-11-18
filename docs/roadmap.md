@@ -1,6 +1,6 @@
 # 分阶段交付
 
-阶段能力范围见 [architecture.md](architecture.md)，测试范围见 [testing.md](testing.md)。本文件记录每个阶段的实施顺序与验收标准。
+阶段能力范围见 [architecture.md](architecture.md)，测试范围见 [testing.md](testing.md)。本文件记录各阶段的实施顺序与验收标准。
 
 ## 1. P0：可用订阅与流量闭环
 
@@ -27,26 +27,7 @@
 - 节点通过面板域名一条命令安装当前 Agent；稳定 URL 更新后 `/dl/agent/version` 与二进制版本一致。
 - 下载缺失路径返回 404，静态请求不计 Worker 请求；回滚 Downloads Worker 后稳定 URL 恢复上一版本。
 
-## 2. P1：多用户、授权与同步
-
-实施顺序：
-
-1. 开放订阅用户、额度、周期与到期管理。
-2. 实现 `PUT /subscribers/{subscriberId}/nodes` 与 `node_clients` 创建/停用，回填已有授权。
-3. 实现 `users_ver`、Agent 用户列表拉取、磁盘持久化与 `AlterInbound` 热更新。
-4. 实现 15 分钟状态/额度 Cron、周期推进、`subscription-userinfo` 与用户流量页面。
-5. 接入管理员角色与角色边界；增加系统指标展示。
-6. 验证热更新后重启、撤销用户、超额用户与失败回退。
-
-验收：
-
-- 用户只能获得被授权节点，不能通过修改 URL 获取他人订阅。
-- token 撤销与轮换生效；管理员角色边界有效。
-- 额度和到期判断正确，流量汇总与小时桶一致。
-- 停用/到期/超额用户在一个 Cron 周期内从节点用户集合移除；已建立连接可能继续存在，此限制在 UI 与文档中明确。
-- Agent 重启后用户集合与配置不丢失。
-
-## 3. P2：远程配置
+## 2. P2：远程配置
 
 实施顺序：
 

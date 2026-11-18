@@ -26,6 +26,18 @@ const routes: RouteRecordRaw[] = [
 		meta: { title: '节点详情' },
 	},
 	{
+		path: '/subscribers',
+		name: 'subscribers',
+		component: () => import('../views/SubscriberListView.vue'),
+		meta: { title: '订阅用户' },
+	},
+	{
+		path: '/subscribers/:subscriberId',
+		name: 'subscriber-detail',
+		component: () => import('../views/SubscriberDetailView.vue'),
+		meta: { title: '订阅用户详情' },
+	},
+	{
 		path: '/profiles',
 		name: 'profiles',
 		component: () => import('../views/ProfileListView.vue'),
@@ -42,6 +54,12 @@ const routes: RouteRecordRaw[] = [
 		name: 'traffic',
 		component: () => import('../views/TrafficView.vue'),
 		meta: { title: '流量' },
+	},
+	{
+		path: '/admins',
+		name: 'admins',
+		component: () => import('../views/AdminListView.vue'),
+		meta: { title: '管理员' },
 	},
 	{
 		path: '/:pathMatch(.*)*',

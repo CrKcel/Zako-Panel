@@ -261,9 +261,15 @@ func TestHeartbeatAcknowledgesTrafficAndAppliesResponse(t *testing.T) {
 	if outboxLen, _ := fixture.store.OutboxLen(); outboxLen != 0 {
 		t.Errorf("outbox = %d reports after ACK, want 0", outboxLen)
 	}
+	// The response advertises users_ver 13, but a report cannot prove the user
+	// set was applied: the applied version stays at 12 until the syncer writes it.
 	usersVersion, _, _ := fixture.store.MetaInt64(state.KeyUsersVersion)
-	if usersVersion != 13 {
-		t.Errorf("stored users_ver = %d, want 13", usersVersion)
+	if usersVersion != 12 {
+		t.Errorf("stored applied users_ver = %d, want 12", usersVersion)
+	}
+	desiredUsersVersion, _, _ := fixture.store.MetaInt64(state.KeyDesiredUsersVersion)
+	if desiredUsersVersion != 13 {
+		t.Errorf("stored desired users_ver = %d, want 13", desiredUsersVersion)
 	}
 	desiredVersion, _, _ := fixture.store.MetaInt64(state.KeyDesiredConfigVersion)
 	if desiredVersion != 3 {
@@ -274,6 +280,38 @@ func TestHeartbeatAcknowledgesTrafficAndAppliesResponse(t *testing.T) {
 	}
 	if got, want := fixture.loop.trafficInterval, 1800*time.Second; got != want {
 		t.Errorf("traffic interval = %s, want %s", got, want)
+	}
+}
+
+func TestResponseCallbackRunsAfterVersionsAreStored(t *testing.T) {
+	cp, client := newControlPlane(t)
+	fixture := newLoopFixture(t, client)
+	if err := fixture.store.SetMetaInt64(state.KeyUsersVersion, 12); err != nil {
+		t.Fatalf("SetMetaInt64: %v", err)
+	}
+	cp.respond = func(_ int, request *Report, w http.ResponseWriter) {
+		writeSuccess(w, request.Traffic, 300, 900, 13, 3)
+	}
+
+	type snapshot struct {
+		applied int64
+		desired int64
+		calls   int
+	}
+	var seen snapshot
+	fixture.loop.onResponse = func(*Response) {
+		seen.calls++
+		seen.applied, _, _ = fixture.store.MetaInt64(state.KeyUsersVersion)
+		seen.desired, _, _ = fixture.store.MetaInt64(state.KeyDesiredUsersVersion)
+	}
+
+	fixture.loop.step(context.Background())
+
+	if seen.calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", seen.calls)
+	}
+	if seen.applied != 12 || seen.desired != 13 {
+		t.Errorf("state during callback = applied %d desired %d, want 12 and 13", seen.applied, seen.desired)
 	}
 }
 

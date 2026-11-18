@@ -10,6 +10,7 @@ import { AppError } from '../lib/errors';
 import { sha256Hex } from '../lib/hash';
 import { newId } from '../lib/ids';
 import { isHeartbeatFresh, nowSeconds } from '../lib/node-status';
+import { cycleUsage } from '../lib/subscriber-status';
 import { generateToken } from '../lib/token';
 import { vlessRealityAdapter, vlessRealityParamsSchema } from '../protocols/vless-reality';
 import type { ProxyEndpoint } from '../protocols/types';
@@ -110,11 +111,6 @@ function unavailable(): AppError {
 	return new AppError('SUBSCRIPTION_UNAVAILABLE', 'No distributable nodes are available', 503);
 }
 
-function effectiveUsage(usage: SubscriberUsageRow | null, cycleStart: number): { uplink: number; downlink: number } {
-	if (!usage || usage.cycle_start < cycleStart) return { uplink: 0, downlink: 0 };
-	return { uplink: usage.uplink_bytes, downlink: usage.downlink_bytes };
-}
-
 interface DistributionContext {
 	subscription: SubscriptionLookupRow;
 	profile: ProfileRow;
@@ -134,15 +130,15 @@ interface SubscriberEntitlement {
 /**
  * One predicate decides whether a subscriber may receive a subscription. It is
  * shared with the profile preview so the preview reports the same reason a real
- * request would be refused with.
+ * request would be refused with. Entitlement is checked live from the stored
+ * expiry and usage instead of trusting the cron-materialised status, so a quota
+ * reset or a renewed expiry takes effect on the next request.
  */
 function subscriberBlockReason(subscriber: SubscriberEntitlement, now: number): SubscriberBlockReason | null {
-	if (subscriber.status !== 'active') return 'inactive';
+	if (subscriber.status === 'disabled') return 'inactive';
 	if (subscriber.expires_at !== null && subscriber.expires_at <= now) return 'expired';
-	const used = effectiveUsage(subscriber.usage, subscriber.usage_cycle_start);
-	if (subscriber.traffic_limit_bytes !== null && used.uplink + used.downlink >= subscriber.traffic_limit_bytes) {
-		return 'over_quota';
-	}
+	const used = cycleUsage(subscriber.usage, subscriber.usage_cycle_start);
+	if (subscriber.traffic_limit_bytes !== null && used.total >= subscriber.traffic_limit_bytes) return 'over_quota';
 	return null;
 }
 
@@ -322,7 +318,7 @@ async function loadNodesAndEndpoints(db: D1Database, context: DistributionContex
 }
 
 function subscriptionHeaders(context: DistributionContext, fileName: string): Record<string, string> {
-	const used = effectiveUsage(context.usage, context.subscription.subscriber_usage_cycle_start);
+	const used = cycleUsage(context.usage, context.subscription.subscriber_usage_cycle_start);
 	const total = context.subscription.subscriber_traffic_limit_bytes ?? 0;
 	const expire = context.subscription.subscriber_expires_at ?? 0;
 	return {

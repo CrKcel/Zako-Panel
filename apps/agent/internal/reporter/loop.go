@@ -56,6 +56,10 @@ type LoopOptions struct {
 	Clock             func() time.Time
 	Sleep             func(ctx context.Context, delay time.Duration) error
 	Jitter            func(delay time.Duration) time.Duration
+	// OnResponse runs after a response was accepted and its versions stored. It
+	// is called on the reporting goroutine, so it must not block; the agent uses
+	// it to wake the user syncer.
+	OnResponse func(response *Response)
 }
 
 // Loop sends heartbeats and the oldest unacknowledged traffic report on the
@@ -72,6 +76,7 @@ type Loop struct {
 	clock        func() time.Time
 	sleep        func(ctx context.Context, delay time.Duration) error
 	jitter       func(delay time.Duration) time.Duration
+	onResponse   func(response *Response)
 
 	heartbeatInterval time.Duration
 	trafficInterval   time.Duration
@@ -121,6 +126,7 @@ func NewLoop(opts LoopOptions) (*Loop, error) {
 		clock:             opts.Clock,
 		sleep:             opts.Sleep,
 		jitter:            opts.Jitter,
+		onResponse:        opts.OnResponse,
 		heartbeatInterval: heartbeat,
 		trafficInterval:   traffic,
 	}
@@ -219,6 +225,9 @@ func (l *Loop) send(ctx context.Context, now time.Time, report state.TrafficRepo
 	}
 
 	l.applyResponse(now, response)
+	if l.onResponse != nil {
+		l.onResponse(response)
+	}
 
 	if hasReport {
 		switch {
@@ -325,8 +334,11 @@ func (l *Loop) applyResponse(now time.Time, response *Response) {
 		}
 	}
 
-	if err := l.store.SetMetaInt64(state.KeyUsersVersion, response.UsersVer); err != nil {
-		l.logger.Warn("store users version failed", "error", err)
+	// response.users_ver is the Worker's expectation, not proof that the node
+	// applied it. Persisting it as users_version would make the next report claim
+	// a set the node may not serve; the syncer owns that key.
+	if err := l.store.SetMetaInt64(state.KeyDesiredUsersVersion, response.UsersVer); err != nil {
+		l.logger.Warn("store desired users version failed", "error", err)
 	}
 	if err := l.store.SetMetaInt64(state.KeyDesiredConfigVersion, response.DesiredConfigVersion); err != nil {
 		l.logger.Warn("store desired config version failed", "error", err)

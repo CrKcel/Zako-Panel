@@ -118,10 +118,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List credentials the node must configure locally
-         * @description P0 configures node-local users by hand, so an operator needs the
-         *     xray_email and UUID that the statistics keys and the inbound client
-         *     entry must share. P1 replaces this manual step with user sync.
+         * List node credential grants
+         * @description Returns every node_client row, including disabled grants, so an operator
+         *     can match statistics keys and inbound clients. The agent's user sync is the
+         *     authority for the running inbound; this endpoint is for inspection and
+         *     troubleshooting.
          */
         get: operations["listNodeClients"];
         put?: never;
@@ -664,6 +665,8 @@ export interface components {
             expires_at?: number | null;
             usage_cycle_start: number;
             usage_cycle_end: number;
+            /** @description Number of nodes this subscriber currently holds an enabled credential for. */
+            node_count: number;
             usage?: components["schemas"]["SubscriberUsage"] | null;
             created_at: number;
             updated_at: number;
@@ -844,7 +847,11 @@ export interface components {
         UpdateSubscriberRequest: {
             name?: string;
             email?: string | null;
-            status?: components["schemas"]["SubscriberStatus"];
+            /**
+             * @description Explicit suspension switch; `limited` and `expired` are derived from quota and expiry.
+             * @enum {string}
+             */
+            status?: "active" | "disabled";
             traffic_limit_bytes?: number | null;
             expires_at?: number | null;
         };
@@ -1884,6 +1891,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNodeConfigs: {

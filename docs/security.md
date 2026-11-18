@@ -31,11 +31,19 @@
 - Agent 通过 systemd 限制写路径，仅允许写 `/var/lib/zako-agent` 与 `/etc/xray`；Xray 校验与重启使用固定命令。
 - 配置错误不能破坏最近已知可用版本；P2 不提供任意命令执行。
 
+### 3.1 Agent 运行权限
+
+- Agent 以 `zako-agent` 系统用户运行，systemd 单元保持 `NoNewPrivileges=true`，不授予 capability，也不需要 root。
+- 重启权限来自 polkit 规则 `/etc/polkit-1/rules.d/50-zako-agent-xray.rules`：仅当发起用户为 `zako-agent`、目标单元为 `xray.service`、动作为 `restart` 时返回允许；其他单元与 `stop` 等动作不受该规则授权。
+- `/etc/xray` 目录为 `root:zako-agent`、`0770`。Agent 以同目录临时文件加 rename 替换 `config.json`，因此需要目录写权限而非文件写权限。
+- `/etc/xray/config.json` 为 `0640`、属组 `zako-agent`；`/etc/xray/reality.key` 与 `/etc/zako-agent/token` 为 `0600`；用户集合文件 `/var/lib/zako-agent/users.json` 为 `0600`。
+- 安装脚本负责创建目录权限与 polkit 规则，权限被手工改动后热更新回退路径会失败。
+
 ## 4. Agent 分发
 
 - `/dl/*` 公开只读，不经过 Access。Agent 二进制不包含 token、私钥或面板地址；节点接入控制面仍依赖本地 Agent token 与配置。
 - Downloads Worker 为 assets-only，没有 Worker 脚本与 D1 binding；静态资产由 Cloudflare 直接返回。
-- 发布产物只包含二进制、示例配置、systemd unit、安装脚本与 Xray 模板。打包测试检查 `token`、`state.db`、`reality.key` 与 `.dev.vars` 不在归档中。
+- 发布产物只包含二进制、示例配置、systemd unit、安装脚本、polkit 规则与 Xray 模板。打包测试检查 `token`、`state.db`、`reality.key` 与 `.dev.vars` 不在归档中。
 - 稳定下载 URL 使用 `Cache-Control: public, max-age=0, must-revalidate` 与 ETag；不使用 immutable。
 - `/dl/*` 配置 WAF 限流；下载日志不包含凭据。
 - 发布 tag 不可移动；回滚使用 Downloads Worker 的 Cloudflare 版本回滚，或重跑上一个 tag。

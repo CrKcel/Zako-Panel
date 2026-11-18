@@ -3,6 +3,7 @@ import { log } from '../lib/log';
 import { nowSeconds } from '../lib/node-status';
 import { deleteOldAuditEvents } from '../repositories/audit-events';
 import { deleteOldNodeBuckets, deleteOldReports, deleteOldSiteBuckets, deleteOldUserBuckets } from '../repositories/traffic';
+import { reconcileSubscriberCycles } from './subscriber-cycle-service';
 
 const DAY_SECONDS = 86_400;
 const HOUR_BUCKET_RETENTION_DAYS = 90;
@@ -47,17 +48,20 @@ async function runDailyCleanup(env: Env): Promise<void> {
 }
 
 async function runQuarterHourlyJob(env: Env, scheduledTime: number): Promise<void> {
-	// P1 advances subscriber usage cycles here; P0 only records the tick.
+	const now = nowSeconds();
+	const subscribers = await reconcileSubscriberCycles(env.DB, now);
 	log('info', {
 		job: 'quarter-hourly',
 		scheduled_time: scheduledTime,
 		environment: env.ENVIRONMENT ?? null,
+		advanced_cycles: subscribers.advanced,
+		changed_statuses: subscribers.status_changed,
 	});
 }
 
 /**
  * Cron entry point. The daily trigger owns retention cleanup; the quarter-hour
- * trigger is reserved for P1 usage-cycle advancement.
+ * trigger advances usage cycles and materialises subscriber status.
  */
 export async function runScheduledJob(env: Env, cron: string, scheduledTime: number): Promise<void> {
 	if (cron.trim().startsWith('*/15')) {

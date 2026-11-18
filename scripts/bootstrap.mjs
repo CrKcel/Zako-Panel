@@ -48,11 +48,14 @@ function sha256Hex(value) {
 	return createHash('sha256').update(value).digest('hex');
 }
 
+/**
+ * Calendar-month cycle in UTC, matching the Worker's `initialUsageCycle`: the
+ * cycle starts on the first day of the current month and ends on the first day
+ * of the next.
+ */
 function monthCycle(date) {
 	const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-	const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
-	const lastDay = new Date(target.getTime() - 86_400_000).getUTCDate();
-	const end = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(date.getUTCDate(), lastDay)));
+	const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
 	return {
 		start: Math.floor(start.getTime() / 1000),
 		end: Math.floor(end.getTime() / 1000),

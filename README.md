@@ -1,70 +1,85 @@
 # Zako Panel
 
-轻量代理节点管理面板。Cloudflare Worker 承担控制面，D1 保存数据，Vue SPA 提供管理界面，Debian 上的 Go Agent 负责采集 Xray 统计并上报心跳与流量。Worker 不转发代理流量，不执行 Xray，不主动连接节点。
+轻量级代理节点管理面板：Cloudflare Worker + D1 做控制面，Vue 3 做管理后台，Debian 上的 Go Agent 负责管 Xray 用户和上报流量。Worker 本身不转发代理流量，不运行 Xray，也不主动连节点。
 
-## 能力
+## 核心能力
 
-- 节点、endpoint 与订阅档案管理，支持 VLESS + REALITY
-- 订阅用户、额度、周期与到期管理，按节点授权
-- Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
-- Agent 心跳、Xray 统计采样、流量上报与按小时幂等入账
-- 用户集合下发与 Xray 热更新，失败自动回退为配置重启
-- Agent 静态资产滚动分发，节点通过面板域名一条命令安装
-- 派生节点状态、系统指标、站点/节点/用户流量汇总与保留期清理
+- 节点、接入端点（Endpoint）与订阅档案管理，支持 VLESS + REALITY
+- 订阅用户、月度流量配额、有效期与按节点授权
+- 自动生成 Clash.Meta YAML 与通用 URI 订阅链接，支持自定义代理组和分流规则
+- 节点 Agent 定时心跳、Xray 流量采样与按小时幂等入账
+- 节点用户列表热更新（通过 Xray gRPC 增量增删，失败时自动回退到安全重启）
+- 节点一键安装脚本与 Agent 二进制滚动分发（独立 Downloads Worker）
 
 ## 技术栈
 
-- Worker：Hono、D1、Cloudflare Access JWT、Zod
-- Web：Vue 3、Vite、Vue Router、Element Plus、ECharts
-- Agent：Go、BoltDB、systemd
-- 契约：OpenAPI 3.1（`packages/contracts`），生成的类型供 Worker 与 Web 使用
+- **控制面 Worker**：Hono、Cloudflare D1、Cloudflare Access JWT、Zod
+- **管理后台 Web**：Vue 3、Vite、Vue Router、Element Plus、ECharts
+- **节点 Agent**：Go、BoltDB、systemd
+- **接口契约**：OpenAPI 3.1（`packages/contracts/openapi.yaml`），自动生成 Worker 与 Web 的 TypeScript 类型
 
 ## 目录
 
 ```text
-apps/worker/        Cloudflare Worker：路由、服务、D1 仓储、中间件
-apps/web/           Vue 3 管理界面，挂载在 /admin/
+apps/worker/        Cloudflare Worker：routes / services / repositories / protocols / renderers
+apps/web/           Vue 3 管理后台，挂载在 /admin/
 apps/agent/         Debian 节点 Agent（Go）
-apps/downloads/     Agent 下载 Worker 的静态资产与响应头
-packages/contracts/ OpenAPI 契约、生成类型与跨语言 fixtures
-migrations/         D1 迁移
-deploy/             systemd unit、安装脚本与发布打包
-scripts/            一次性初始化脚本
+apps/downloads/     Agent 安装包与脚本的静态分发配置
+packages/contracts/ OpenAPI 契约、生成的 TS 类型与跨语言测试 fixtures
+migrations/         D1 数据库迁移脚本
+deploy/             systemd unit、节点安装脚本与发布打包脚本
+scripts/            本地初始化与容量压测脚本
 docs/               项目文档
 ```
 
 ## 快速开始
 
-要求 Node.js 22+；构建 Agent 另需 Go 1.24+。
+环境要求：Node.js 22+；如果要编译或测试 Go Agent，另需 Go 1.24+。
+
+### 1. 安装依赖并初始化本地数据库
 
 ```bash
 npm install
-npm run db:migrate:local        # 本地 D1 建表
-npm run bootstrap               # 初始化默认档案、默认用户与订阅
+npm run db:migrate:local
 ```
 
-`bootstrap` 生成的 `bootstrap.sql` 需按输出提示导入 D1；订阅 token 只在终端输出一次。
+### 2. 配置本地开发鉴权
 
-修改 `packages/contracts/openapi.yaml` 后运行 `npm run contracts:generate` 重新生成类型。
-
-本地启动 Worker 与 Web 开发服务器（两个终端）：
+管理接口默认要求 Cloudflare Access JWT，本地没有 Access 网关时直接请求会返回 `401`。复制一份本地环境变量文件：
 
 ```bash
-npm run dev                     # Wrangler，http://127.0.0.1:8787
-npm run dev:web                 # Vite，http://127.0.0.1:5173/admin/
+cp .dev.vars.example .dev.vars
 ```
 
-Vite 将 `/api` 与 `/sub` 代理到 Wrangler。本地 Access 配置写入 `.dev.vars`，参考 `.dev.vars.example`。
+在 `.dev.vars` 中设置 `ENVIRONMENT=development` 和 `DEV_ADMIN_EMAIL=<任意邮箱>`，Worker 就会在本地开发模式下用这个邮箱直接通过鉴权（线上部署务必保持 `ENVIRONMENT=production` 且不要设置 `DEV_ADMIN_EMAIL`）。
 
-本地没有 Access 代理，管理 API 默认返回 `401 Missing Access token`。复制 `.dev.vars.example` 为 `.dev.vars`，设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL=<任意开发邮箱>` 后，Worker 在缺少 Access JWT 时按该邮箱通过鉴权。如需默认订阅数据，可在本地 D1 导入 `bootstrap` 生成的 SQL：
+### 3. （可选）生成初始测试数据
+
+如果想快速体验订阅功能，可以生成并导入一份默认数据（包含默认订阅档案、默认用户和一条订阅链接）：
 
 ```bash
+npm run bootstrap
 npx wrangler d1 execute zako-panel --local --file=bootstrap.sql
 ```
 
-这两个变量只用于本地开发，部署配置保持 `ENVIRONMENT=production` 且不设置 `DEV_ADMIN_EMAIL`。
+> 订阅 Token 只在终端打印这一次，注意保存；导入后可删掉 `bootstrap.sql`。
+
+### 4. 启动开发服务器
+
+开两个终端分别启动后端和前端：
+
+```bash
+npm run dev       # Worker（Wrangler），默认 http://127.0.0.1:8787
+npm run dev:web   # Web（Vite），默认 http://127.0.0.1:5173/admin/
+```
+
+Vite 会自动把 `/api` 和 `/sub` 请求代理到 Wrangler。
+
+> 如果修改了 `packages/contracts/openapi.yaml`，记得运行 `npm run contracts:generate` 重新生成类型。
 
 ## 校验
+
+提交或发布前运行以下检查：
 
 ```bash
 npm run typecheck
@@ -74,11 +89,11 @@ npm run test:downloads
 npm run format:check
 ```
 
-`npm run test:all` 依次执行 Worker、Agent 与 downloads 测试；`npm run build` 校验类型并构建 Web 静态资源。
+也可以直接运行 `npm run test:all` 依次执行 Worker、Agent 与 downloads 测试，用 `npm run build` 检查类型并构建前端静态资源。
 
 ## 部署
 
-面板与节点的完整步骤见 [docs/deployment.md](docs/deployment.md)。Agent 二进制通过独立 Downloads Worker 滚动发布，节点安装命令为：
+面板上线与节点一键安装的完整步骤见 [docs/deployment.md](docs/deployment.md)。节点一键安装命令：
 
 ```bash
 curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
@@ -86,4 +101,4 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 
 ## 文档
 
-完整文档索引见 [docs/README.md](docs/README.md)。
+完整文档目录与阅读指南见 [docs/README.md](docs/README.md)。

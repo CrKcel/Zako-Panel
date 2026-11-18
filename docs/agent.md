@@ -1,98 +1,94 @@
-# 节点 Agent 架构与运行规范
+# 节点 Agent 工作原理
 
-Agent 作为独立静态 Go 二进制运行在节点（Debian 12/13）上，由 systemd 托管。Agent 仅通过出站 HTTPS 与控制面通信，并通过环回 gRPC 与本地 Xray-core 交互。安装与分发流程详见 [deployment.md](deployment.md)，指标采样与入账算法详见 [traffic.md](traffic.md)。
+Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd` 托管。它只做两件事：**向控制面报平安/报流量**，以及**按控制面的指令更新本地 Xray 用户和配置**。
 
-## 1. 运行模型与设计准则
+安装和上线步骤见 [deployment.md](deployment.md)，流量采样细节见 [traffic.md](traffic.md)。
 
-- 单向通信：Agent 主动向控制面发起出站 HTTPS 请求，不对公网开放任何监听端口。
-- 本地状态隔离：采用嵌入式 BoltDB 维护计数器采样基线、离线发送队列及版本状态，保障节点重启后数据连续。
-- 私钥本地驻留：REALITY 私钥生成后永久驻留在节点本地，控制面仅保存公钥与入站配置定义。
-- 变更最小化影响：优先通过 gRPC 执行客户端账号热更新；仅在热更新失败或接收到全局配置变更时触发进程安全重启。
+---
 
-## 2. 运行时配置项
+## 1. 运行原则
 
-配置文件默认位于 `/etc/zako-agent/config.yaml`，核心参数如下：
+- **只出不进**：Agent 只主动向控制面发 HTTPS 请求，不在节点上开任何公网监听端口；和 Xray 的 gRPC 通信只走 `127.0.0.1`。
+- **私钥不出节点**：REALITY 私钥在安装时生成并留在 `/etc/xray/reality.key`，控制面只存公钥，永远拿不到私钥。
+- **本地有账本**：采样基线、未发出去的流量报表、当前版本号都存在 BoltDB（`/var/lib/zako-agent/state.db`），节点重启不会丢账。
+- **能热更新就不重启**：增删用户优先走 Xray gRPC 热更新，不断掉现有代理连接；只有热更新失败或整份配置改了才重启 Xray。
 
-| 配置项 | 说明 | 默认值 |
+---
+
+## 2. 常用路径与配置项
+
+主配置文件默认在 `/etc/zako-agent/config.yaml`：
+
+| 配置项 | 作用 | 默认值 |
 | --- | --- | --- |
-| `control_plane_url` | 控制面服务 HTTPS 根地址 | 必填 |
-| `node_id` | 当前节点在控制面的唯一标识符 | 必填 |
-| `agent_token_file` | 存放节点认证 Bearer Token 的文件路径 | `/etc/zako-agent/token` |
-| `state_path` | 本地 BoltDB 状态库路径 | `/var/lib/zako-agent/state.db` |
-| `users_path` | 本地已生效凭据快照文件路径 | `/var/lib/zako-agent/users.json` |
-| `xray_config_path` | Xray 核心运行配置文件路径 | `/etc/xray/config.json` |
-| `xray_binary_path` | Xray 可执行文件路径 | `/usr/local/bin/xray` |
-| `reality_private_key_path` | 本地 REALITY 私钥存放路径 | `/etc/xray/reality.key` |
-| `xray_api_address` | Xray 环回 gRPC 监听地址 | `127.0.0.1:10085` |
-| `xray_inbound_tag` | 承载业务代理流量的入站 Tag | `vless-reality` |
-| `heartbeat_interval` | 默认心跳周期（服务端响应可动态调整） | `5m` |
-| `collector.sample_interval` | Xray 统计采样间隔 | `30s` |
-| `collector.report_interval` | 流量增量出站结算间隔 | `15m` |
+| `control_plane_url` | 控制面域名 | 必填 |
+| `node_id` | 节点 ID | 必填 |
+| `agent_token_file` | 节点认证 Token 文件 | `/etc/zako-agent/token` |
+| `state_path` | BoltDB 本地状态库 | `/var/lib/zako-agent/state.db` |
+| `users_path` | 上次成功生效的用户快照 | `/var/lib/zako-agent/users.json` |
+| `xray_config_path` | Xray 配置文件 | `/etc/xray/config.json` |
+| `xray_binary_path` | Xray 可执行文件 | `/usr/local/bin/xray` |
+| `reality_private_key_path` | 本地 REALITY 私钥 | `/etc/xray/reality.key` |
+| `xray_api_address` | Xray gRPC 地址 | `127.0.0.1:10085` |
+| `xray_inbound_tag` | 代理入站 Tag | `vless-reality` |
+| `heartbeat_interval` | 心跳间隔（服务端可动态下发覆盖） | `5m` |
+| `collector.sample_interval` | 采集 Xray 流量间隔 | `30s` |
+| `collector.report_interval` | 上报流量间隔 | `15m` |
 
-## 3. 用户凭据同步与热更新
+---
 
-### 3.1 版本通知与增量拉取
+## 3. 用户名单怎么同步（热更新与回退）
 
-1. 控制面在凭据产生变更（用户增删、状态改变、额度超限或节点授权变动）时递增全局版本号 `users_ver`。
-2. Agent 在心跳上报的响应中获取期望版本号 `desired_users_version` 并触发同步循环。
-3. 同步模块使用已生效版本号作为 `If-None-Match` 标头向控制面发起 `GET /api/v1/agent/users` 请求。若版本一致，服务端返回 `304 Not Modified`，终止本轮处理。
-4. 响应包含新凭据列表时，数据进入差异比对与生效阶段。
+1. **发现变化**：控制面每次修改用户授权、配额超限或到期，都会把全局版本号 `users_ver` 加 1。Agent 心跳时看到服务端返回的 `users_ver` 和自己手里不一样，就触发一次同步。
+2. **省流拉取**：Agent 带上本地版本号作为 `If-None-Match` 请求 `GET /api/v1/agent/users`。如果版本其实没变，服务端直接返回 `304 Not Modified`。
+3. **算差集并热更新**：对比新名单和本地 `users.json`，算出要新增、删除的用户（UUID 变了就先删后加），调用 Xray gRPC `HandlerService.AlterInbound`（`RemoveUser` / `AddUser`）动态修改，然后原子更新 `users.json` 和版本号。
+4. **万一热更新失败（安全回退）**：
+   如果 gRPC 调用失败，Agent 会自动切到“改文件 + 重启”模式：
+   - 把新用户列表和本地私钥拼进完整的 Xray 配置；
+   - 先跑 `xray run -test -config` 确认语法没问题；
+   - 原子替换 `/etc/xray/config.json` 并执行 `systemctl restart xray.service`；
+   - 检查 `StatsService` 是否健康；如果重启失败或健康检查没过，立刻还原旧配置再重启一次。
 
-### 3.2 差集应用与降级回退
+> 整个同步和改配置过程都受全局互斥锁保护，同步期间如果又来了新触发，会合并成一次后续执行，不会并发打架。
 
-1. 差集计算：对比期望凭据列表与本地 `users.json` 记录，梳理出新增凭据集与待移除凭据集。凭据 UUID 变动转换为先删除后添加。
-2. 运行时热更新：调用 Xray `HandlerService.AlterInbound` 接口，依次执行 `RemoveUser` 与 `AddUser` 指令。
-3. 快照更新：热更新成功后，将最新用户集合原子写入 `users.json`，并持久化已生效版本号 `users_version`。
-4. 降级回退：若热更新接口调用失败，Agent 自动切换至安全重启模式：
-   - 将最新凭据与本地私钥合入完整配置模板。
-   - 调用 `xray run -test -config` 进行配置语法与完整性校验。
-   - 校验通过后原子替换 `/etc/xray/config.json`。
-   - 调用 `systemctl restart xray.service` 重启服务。
-   - 检查 StatsService 健康状态；若重启或健康检查失败，立即使用备份配置回滚并重新启动。
-5. 并发保护：凭据同步与配置应用全程在 Agent 内部全局互斥锁保护下执行，同步期间产生的新触发信号自动合并为一次后续执行。
+---
 
-## 4. 远程配置下发与状态机
+## 4. 远程下发 Xray 配置
 
-控制面支持下发不可变 Xray 全局配置定义，由 Agent 在本地编排合入与安全应用。
-
-### 4.1 配置下发流程
+除了增删用户，管理员还可以在面板给节点下发新的 Xray 全局配置版本（只包含网络、路由、策略等通用 JSON，不含私钥和用户）。
 
 ```mermaid
 sequenceDiagram
     participant W as 控制面 Worker
     participant A as 节点 Agent
-    participant X as Xray 核心
+    participant X as Xray-core
 
-    A->>W: 心跳上报(applied_config_version)
+    A->>W: 心跳上报 (applied_config_version)
     W-->>A: 返回 desired_config_version
-    A->>W: 拉取目标配置定义(GET /config)
-    W-->>A: 返回规范化 JSON 与 SHA-256 哈希
-    A->>A: 校验哈希并注入本地私钥与当前用户凭据
-    A->>X: 执行测试(xray run -test)
-    X-->>A: 语法校验通过
-    A->>A: 原子替换 config.json 并保留备份
-    A->>X: 重启服务并执行健康检查
-    A->>W: 上报最终状态(POST /config/result)
+    A->>W: GET /api/v1/agent/config
+    W-->>A: 返回规范化 JSON + SHA-256 哈希
+    A->>A: 校验哈希 → 注入本地私钥与当前用户
+    A->>X: xray run -test 校验语法
+    X-->>A: 校验通过
+    A->>A: 备份旧配置并原子替换 config.json
+    A->>X: 重启 Xray 并做健康检查
+    A->>W: POST /api/v1/agent/config/result (applied / failed)
 ```
 
-### 4.2 状态转换与回滚策略
+Agent 内部按以下状态流转：`IDLE → DOWNLOADING → VERIFYING → RENDERING → TESTING → APPLYING → OBSERVING → APPLIED / FAILED`：
 
-Agent 内部状态机按以下顺序流转：
-`IDLE → DOWNLOADING → VERIFYING → RENDERING → TESTING → APPLYING → OBSERVING → APPLIED / FAILED`。
+- **防篡改**：下载完先比对 SHA-256 哈希，对不上直接中止，不会往 Xray 里塞。
+- **防失联**：替换前会留一份已知健康的旧配置备份。不管是 `xray run -test` 报错、重启超时，还是重启后观察期健康检查失败，都会自动还原旧配置并把错误信息报回面板。
+- **结果幂等**：同一版本无论成功还是失败，都会带着版本号上报；旧版本的延迟结果不会覆盖控制面较新的状态。
 
-- 内容完整性：配置下载后首先比对控制面提供的 SHA-256 哈希，哈希失配立即终止流程。
-- 凭据装配：配置定义中只包含通用网络、协议、策略与路由参数；Agent 本地负责读取 `reality.key` 与 `users.json` 注入入站块。
-- 失败自愈：在配置切换前保留已知健康的旧配置文件。测试未通过、重启超时或观察期健康检查异常时，系统自动复原旧配置并再次重启服务。
-- 幂等上报：无论执行成功或失败，Agent 均向控制面上报带版本标识的结构化结果。重复上报或已废弃旧版本的结果不会覆盖服务端较新的状态。
+---
 
-## 5. 节点安全权限模型
+## 5. 节点权限隔离（最小特权）
 
-Agent 遵循最小特权原则运行在受限环境内：
+Agent 不以 `root` 运行，而是用专用低权限用户 `zako-agent` 启动（`NoNewPrivileges=true`）：
 
-- 运行身份：以独立的非特权系统用户 `zako-agent` 运行，启用 `NoNewPrivileges=true`，无 root 提权权限。
-- 目录访问控制：
-  - `/etc/xray` 目录所有权设为 `root:zako-agent`、权限 `0770`，允许 Agent 执行临时文件写入与原子替换（rename）。
-  - `/etc/xray/config.json` 权限为 `0640`，属组为 `zako-agent`。
-  - `/etc/xray/reality.key` 权限设为 `0600`，所有者为 `zako-agent`。
-  - 运行时凭据 `/var/lib/zako-agent/users.json` 权限设为 `0600`。
-- 服务管理授权：通过专用 polkit 规则（`/etc/polkit-1/rules.d/50-zako-agent-xray.rules`）仅授予 `zako-agent` 用户针对 `xray.service` 执行 `restart` 操作的权限。
+- `/etc/xray` 目录属主为 `root:zako-agent`（权限 `0770`），允许 Agent 通过写临时文件 + rename 原子替换 `config.json`（`0640`）。
+- 私钥 `/etc/xray/reality.key` 和用户快照 `/var/lib/zako-agent/users.json` 权限都是 `0600`，仅 `zako-agent` 可读。
+- 重启 Xray 不靠 `sudo`，而是通过一条专用 polkit 规则（`/etc/polkit-1/rules.d/50-zako-agent-xray.rules`），只允许 `zako-agent` 执行 `systemctl restart xray.service`。
+
+> 节点上排查问题时，主要看 `journalctl -u zako-agent -f` 和 `journalctl -u xray -f`。

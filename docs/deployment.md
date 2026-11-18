@@ -1,73 +1,47 @@
-# 系统部署、分发与上线验证
+# 部署指南与上线检查
 
-系统部署包含三个独立组成部分：控制面板（Cloudflare Worker + D1 + Web 静态资产）、分发节点（静态资产 Downloads Worker）与节点端服务（Debian + Xray + Go Agent）。架构边界详见 [architecture.md](architecture.md)，安全策略详见 [security.md](security.md)。
+整套系统部署包含三部分：**控制面板**（Cloudflare Worker + D1 + Web 静态页）、**Agent 下载分发**（独立 Downloads Worker）和**代理节点**（Debian 12/13 + Xray + Go Agent）。
 
-## 1. 控制面板部署
+---
 
-### 1.1 配置准备
+## 1. 部署控制面板（Cloudflare）
 
-控制面通过 `wrangler.jsonc` 进行定义：
-- 入口文件配置为 `apps/worker/src/index.ts`。
-- 前端静态资产目录指向 `apps/web/dist`，单页应用路由未找到策略设为 `single-page-application`。
-- 仅将 `/api/*` 与 `/sub/*` 规则加入 `assets.run_worker_first`，前端路由直接由边缘直接响应。
-- 绑定 D1 数据库资源 `zako-panel` 并填写真实 `database_id`。
-- 声明两个定时触发器：`*/15 * * * *`（执行周期推进与状态判定）与 `17 3 * * *`（每日执行保留期物理清理）。
+### 1.1 检查 `wrangler.jsonc`
 
-环境变量与访问控制要求：
-- 生产环境配置 `ENVIRONMENT=production`，以及 Cloudflare Access 相关配置项 `ACCESS_TEAM_DOMAIN` 与 `ACCESS_AUD`。
-- Cloudflare Access 保护路径设定为 `/admin/*` 与 `/api/v1/admin/*`。
-- 订阅端点（`/sub/*`）、Agent 端点（`/api/v1/agent/*`）及分发端点（`/dl/*`）必须排除在 Access 拦截范围之外。
+- 入口为 `apps/worker/src/index.ts`，静态资源目录指向 `apps/web/dist`（`single-page-application` 模式）。
+- `assets.run_worker_first` 仅包含 `/api/*` 和 `/sub/*`，前端页面直接由边缘静态返回。
+- 已配置两个定时触发器：`*/15 * * * *`（月度周期推进）和 `17 3 * * *`（每日清理过期数据）。
+- 生产环境变量需配置 `ENVIRONMENT=production`、`ACCESS_TEAM_DOMAIN` 和 `ACCESS_AUD`。
 
-### 1.2 部署与初始化流程
+> **Cloudflare Access 路径配置**：只保护 `/admin/*` 和 `/api/v1/admin/*`；**千万不要**把 `/sub/*`、`/api/v1/agent/*` 和 `/dl/*` 拦进 Access，否则客户端和节点会连不上。
 
-执行数据库创建、迁移及应用部署：
+### 1.2 创建数据库并部署
 
 ```bash
 npx wrangler d1 create zako-panel
-# 将控制台输出的 database_id 填入 wrangler.jsonc
+# 把控制台输出的 database_id 填进 wrangler.jsonc
+
 npx wrangler d1 migrations apply zako-panel --remote
 npm run deploy
 ```
 
-部署完成后运行系统初始化脚本，创建默认订阅档案、默认订阅用户与基础元数据：
+### 1.3 导入初始数据
 
 ```bash
 npm run bootstrap
 npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 ```
 
-终端将打印订阅 Token 明文一次，请妥善保存。生成的 `bootstrap.sql` 随后应及时清理。
+终端会打印一次默认订阅 Token，注意保存；导入完成后记得删掉本地生成的 `bootstrap.sql`。
 
-## 2. Agent 分发与 Downloads Worker
+---
 
-Agent 安装包采用独立轻量化的 Downloads Worker 托管在 `/dl/agent/*` 路径下，通过稳定 URL 实现滚动版本分发。
+## 2. 节点一键安装（推荐）
 
-### 2.1 分发资产与端点规划
+节点支持 **Debian 12 / 13**，只需预先有 `curl`（或 `wget`）、`tar` 和 CA 证书。脚本会自动下载缺失的 Xray-core（支持 `--xray-mirror` 指定镜像）、生成 REALITY 私钥、创建低权限用户 `zako-agent` 并注册节点。
 
-稳定分发端点清单：
-- `/dl/agent/install.sh`：一键网络安装引导脚本。
-- `/dl/agent/SHA256SUMS`：安装脚本与安装包的 SHA-256 哈希校验清单。
-- `/dl/agent/version`：当前稳定发布版本号纯文本。
-- `/dl/agent/zako-agent-linux-amd64.tar.gz`：适用于 x86_64 架构的安装归档。
-- `/dl/agent/zako-agent-linux-arm64.tar.gz`：适用于 aarch64 架构的安装归档。
-
-### 2.2 发布流水线与版本管理
-
-1. 由代码仓库 `agent-v*` 格式的 Git 标签触发自动化发布流水线。
-2. 流水线执行跨平台静态交叉编译（`CGO_ENABLED=0`，目标 `linux/amd64` 与 `linux/arm64`），注入版本号并打包示例模板、服务单元及 polkit 规则。
-3. 生成 `SHA256SUMS` 校验清单并更新静态分发目录。
-4. 使用 `wrangler deploy --config wrangler.downloads.jsonc` 发布 Downloads Worker。
-5. 缓存控制：所有稳定文件声明 `Cache-Control: public, max-age=0, must-revalidate` 与 `ETag`，确保版本更新即刻生效。
-6. 回滚操作：在新版本出现异常时，可通过 Cloudflare 控制台或运行 `npx wrangler rollback --config wrangler.downloads.jsonc` 快速回退分发版本。
-
-## 3. 节点安装与配置维护
-
-节点运行环境支持 Debian 12 与 Debian 13，基础依赖仅需 `curl`（或 `wget`）、`tar` 与 CA 证书。若节点尚未安装 Xray-core，安装脚本会自动从 GitHub Releases（`XTLS/Xray-core`，可通过 `--xray-mirror` 覆盖源）下载对应架构二进制并校验 `.dgst` SHA-256 哈希，同时安装 `xray.service`。
-
-### 3.1 面板一键部署（推荐）
-
-1. 在管理面板「节点列表」点击 **「一键部署节点」**，按需填写名称前缀、默认 SNI、端口与 Fingerprint，生成一次性注册 Token（默认 24 小时有效、单次使用后立即失效）。
-2. 复制面板生成的一键部署命令在节点执行：
+1. 在管理后台 **「节点列表」** 点击 **「一键部署节点」**，填好名称前缀、默认 SNI、端口和 Fingerprint，拿到一次性注册 Token（24 小时有效，用完即失效）。
+2. 在节点上执行后台生成的命令：
 
 ```bash
 curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
@@ -75,51 +49,56 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   --token <ONE_TIME_ENROLLMENT_TOKEN>
 ```
 
-可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--port <端口>`、`--sni <SNI>`、`--xray-mirror <镜像地址>`。
+常用可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--port <端口>`、`--sni <SNI>`、`--xray-mirror <镜像地址>`。
 
-安装脚本会自动完成以下流程：
-- 安装缺失的 Xray-core 至 `/usr/local/bin/xray` 与 `xray.service`。
-- 安装 `/usr/local/bin/zako-agent`、低权限系统用户 `zako-agent`、systemd 单元及 polkit 规则。
-- 生成 REALITY 私钥保存至 `/etc/xray/reality.key`（权限 `0600`）与随机 `short_id`。
-- 调用 `zako-agent init` 携带一次性 Token 向控制面 `POST /api/v1/agent/enroll` 注册节点，自动创建节点与 Endpoint 记录并获取永久 `agent_token`。
-- 写入 `/etc/zako-agent/token`（`0600`）与 `/etc/zako-agent/config.yaml`（`0640`），渲染 `/etc/xray/config.json`。
-- 启动 `xray.service` 与 `zako-agent.service`，节点自动上线。
+执行完后，`xray.service` 和 `zako-agent.service` 会自动拉起，节点几十秒内就会在面板显示为 `online`。
 
-### 3.2 手动安装与升级
+### 手动安装与升级
 
-若不传入 `--panel` 与 `--token`，仍可执行纯安装模式：
+- **纯安装模式**（不带 `--panel` 和 `--token`）：适合手工建节点、手填 `/etc/zako-agent/token` 和 `config.yaml`：
+  ```bash
+  curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
+  ```
+  脚本会在终端打印生成的公钥和 `short_id`。
+- **升级 Agent**：直接重跑一次不带 `--token` 的安装命令，然后重启服务即可：
+  ```bash
+  sudo systemctl restart zako-agent
+  ```
+
+---
+
+## 3. Agent 分发（Downloads Worker）
+
+节点安装脚本和二进制包通过独立的静态 Downloads Worker 挂载在 `/dl/agent/*` 下，走边缘 CDN 缓存，不占用主面板 Worker 的请求额度：
+
+- `/dl/agent/install.sh`：一键安装脚本
+- `/dl/agent/SHA256SUMS`：脚本与压缩包的 SHA-256 校验清单
+- `/dl/agent/version`：当前最新版本号
+- `/dl/agent/zako-agent-linux-amd64.tar.gz` / `arm64.tar.gz`：静态编译归档
+
+发布流程由 `agent-v*` Git 标签自动触发（`CGO_ENABLED=0` 交叉编译并生成 `SHA256SUMS`），通过 `wrangler deploy --config wrangler.downloads.jsonc` 发布；如果新版本有问题，可直接回滚：
 
 ```bash
-curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
+npx wrangler rollback --config wrangler.downloads.jsonc
 ```
 
-该模式同样会自动安装缺失的 Xray、生成 REALITY 密钥与模板配置，并在终端输出公钥与 `short_id`，随后按需手动创建节点、写入 `/etc/zako-agent/token` 与 `/etc/zako-agent/config.yaml` 并启动 `zako-agent`。
+---
 
-节点升级直接重新执行不带 `--token` 的安装命令，随后执行 `sudo systemctl restart zako-agent`。
+## 4. 上线前检查清单
 
-## 4. 上线验证清单
+**控制面与鉴权**
+- [ ] D1 迁移执行完成，`bootstrap` 初始数据已导入
+- [ ] 访问 `/admin/` 能正常跳到 Cloudflare Access 登录；未带凭证请求 `/api/v1/admin/nodes` 返回 `401`
+- [ ] `/sub/*` 和 `/dl/*` 没有被 Access 拦截
+- [ ] Cron Triggers（`*/15 * * * *` 与 `17 3 * * *`）已在 Cloudflare 后台激活
 
-在将服务正式提供给用户使用前，按照以下清单逐项验证：
+**节点与同步**
+- [ ] 节点执行 `zako-agent --version` 与 `/dl/agent/version` 一致
+- [ ] 面板上节点状态为 `online`
+- [ ] 给默认用户授权节点后，节点上 `/var/lib/zako-agent/users.json` 已出现对应 `xray_email`
+- [ ] `127.0.0.1:10085` 仅监听本地环回，不对外暴露
 
-### 4.1 控制面与身份验证
-
-- [ ] D1 迁移执行完整，`bootstrap` 初始数据导入完成。
-- [ ] 访问管理界面（`/admin/`）正常重定向至 Cloudflare Access 登录认证。
-- [ ] 未经 Access 认证访问管理 API（`/api/v1/admin/nodes`）返回 `401 Unauthorized`。
-- [ ] 订阅端点（`/sub/*`）与分发端点（`/dl/*`）未受 Access 拦截阻断。
-- [ ] 定时触发器（每 15 分钟与每日）注册成功。
-
-### 4.2 节点通信与凭据同步
-
-- [ ] 节点一键安装脚本执行成功，`zako-agent --version` 与远端分发版本一致。
-- [ ] Agent 启动后正常完成心跳上报，控制面板节点状态显示为 `online`。
-- [ ] 在控制面板为用户授权节点后，Agent 用户同步循环成功更新 `/var/lib/zako-agent/users.json`。
-- [ ] Xray 运行配置中已包含该用户的 `xray_email`，StatsService 仅监听 `127.0.0.1:10085`。
-
-### 4.3 订阅生成与流量闭环
-
-- [ ] 请求 Clash 订阅端点（`/sub/{token}/clash.yaml`）成功获取包含可用节点的 YAML 文档。
-- [ ] 响应标头 `subscription-userinfo` 包含正确的用量与到期时间指标。
-- [ ] 客户端导入订阅配置后能够成功建立代理连接。
-- [ ] 客户端产生流量后，等待一个结算周期，控制面板与流量图表显示用量正常递增。
-- [ ] 停用节点或用户停用后，下一次订阅请求与节点入站同步均及时阻断失效凭据。
+**订阅与计费闭环**
+- [ ] 请求 `/sub/{token}/clash.yaml` 能拿到 YAML，响应头带有 `subscription-userinfo`
+- [ ] 客户端导入能正常连通代理，等一个上报周期（默认 15 分钟）后后台流量图表有增长
+- [ ] 停用用户或节点后，新订阅不再包含该节点，节点上也会移除对应用户凭据

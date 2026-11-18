@@ -1,59 +1,60 @@
-# D1 数据模型与存储设计
+# D1 数据库设计
 
-控制面数据持久化采用 Cloudflare D1。数据库表结构与索引定义由 `migrations/` 目录下的 SQL 文件管理，本文件概括核心实体关系、设计权衡与保留策略。业务逻辑详见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
+控制面使用 Cloudflare D1（SQLite），表结构变更以 `migrations/` 目录下的递增 SQL 脚本为准。本篇说明表之间的关系，以及为什么把流量拆成几张表来存。
 
-## 1. 通用设计约定
+---
 
-- 标识符格式：业务主键统一采用 ULID 字符串；节点客户端 `xray_email` 采用 `u_<ULID>` 命名，避免泄露用户个人信息。
-- 邮箱规范化：邮箱入库前均经过小写化与首尾空白清除处理，并建立唯一约束。
-- 时间表示：时间字段统一存储为 Unix 秒整数，列名以 `_at` 结尾。
-- 计量单位：流量字节数以非负整数存储。配额与有效期字段使用 `NULL` 表达无限制。
-- 数据保护：存在历史用量记录的节点和用户采用状态停用机制，避免物理级联删除导致历史审计断层。
-- 迁移规范：数据库结构变更仅通过追加迁移脚本实施。
+## 1. 通用约定
 
-## 2. 核心实体模型
+- **主键**：业务主键统一用 ULID 字符串；`node_clients.xray_email` 固定写成 `u_<ULID>`，不把真实邮箱写进 Xray 配置。
+- **时间与数字**：所有时间字段存 Unix 秒整数（列名以 `_at` 结尾）；流量字节数存非负整数；配额和过期时间用 `NULL` 表示“无限制”。
+- **软停用**：已有历史流量记录的节点和用户不做物理删除，避免历史账单和统计断层。
+- **邮箱规范**：入库前统一转小写并去首尾空格。
 
-### 2.1 节点与接入端点
+---
 
-- 节点信息（`nodes`）：维护节点展示名、通信 Token 哈希、心跳周期配置（60–900 秒）、最后活跃时间、健康状态、组件版本及配置同步版本号。
-- 一次性注册令牌（`node_enrollment_tokens`）：维护节点自动化初始化用的一次性注册 Token 哈希、默认端点参数（SNI、端口、Fingerprint）、24 小时过期时间、单次核销时间戳及关联节点 ID。
-- 端点定义（`endpoints`）：单节点支持多个网络接入端点，绑定协议类型、主机域名、监听端口及协议参数（`params_json`）。各端点独立记录启用状态。
+## 2. 核心实体关系
 
-### 2.2 订阅用户与节点凭据
+```mermaid
+erDiagram
+    nodes ||--o{ endpoints : "1 对多接入端点"
+    nodes ||--o{ node_clients : "授权用户凭据"
+    nodes ||--o{ node_configs : "配置版本历史"
+    subscribers ||--o{ node_clients : "节点权限"
+    subscribers ||--|| subscriber_usage : "当月累计用量"
+    subscribers ||--o{ subscriptions : "订阅链接"
+    subscription_profiles ||--o{ subscriptions : "套用档案模板"
+    subscription_profiles ||--o{ profile_nodes : "指定节点(可选)"
+    nodes ||--o{ profile_nodes : "关联"
+```
 
-- 订阅用户（`subscribers`）：维护用户展示名、邮箱、物化状态（`active`、`limited`、`expired`、`disabled`）、流量限额、有效期时间戳及当前计费周期的起止时间。
-- 节点授权凭据（`node_clients`）：连接用户与节点的授权实体。维护入站唯一的 `xray_email` 与 `vless_uuid`。同一节点下的多个 endpoint 复用相同的客户端凭据。当管理员撤销用户在某节点的授权时，记录标记为 `enabled=0` 并保留历史用量关联。
+- **节点与注册**：`nodes` 存节点名称、Token 哈希、心跳周期、最后活跃时间、健康状态、版本号；`node_enrollment_tokens` 存一键部署用的一次性注册令牌哈希、默认参数与 24 小时过期时间；`endpoints` 存公网地址、端口和协议参数（`params_json`）。
+- **用户与凭据**：`subscribers` 存用户状态（`active` / `limited` / `expired` / `disabled`）、月度限额和到期时间；`node_clients` 存用户在某节点上的 `xray_email` 和 `vless_uuid`（取消授权时把 `enabled` 设为 `0`，保留历史统计关联）。
+- **订阅与档案**：`subscription_profiles` 存节点筛选策略（全量或指定列表）、`online_only` 开关以及 Clash 模板 JSON；`subscriptions` 存订阅 Token 的 SHA-256 哈希和过期/撤销状态。
+- **配置与元数据**：`node_configs` 按 `(node_id, version)` 存不可变配置 JSON 与哈希，回滚时基于旧版本生成递增新版本；`meta` 存全局键值（如 `users_ver`、`default_subscriber_id`）；`audit_events` 记录关键管理操作。
 
-### 2.3 订阅档案与访问令牌
+---
 
-- 订阅档案（`subscription_profiles`）：定义客户端规则模板，包含节点筛选策略（全量或指定列表）、在线节点强制过滤开关，以及结构化存储的 Clash 基础配置、代理组和规则集。
-- 档案关联节点（`profile_nodes`）：当档案采用指定节点策略时，记录档案与节点的映射关系。
-- 订阅凭据（`subscriptions`）：用户在特定档案下的访问令牌实体，存储访问 Token 的 SHA-256 哈希值、创建时间、过期时间及撤销状态。
+## 3. 为什么把流量拆成 5 张表
 
-## 3. 流量计量模型
+为了同时满足**写入防重**、**图表快查**和**常数时间判超额**，流量数据按用途拆成了五张表：
 
-流量表专为高吞吐入账和低开销查询进行了针对性聚合分层设计：
-
-- 原始报表（`traffic_reports`）：以 `(node_id, report_id)` 为主键，记录每次上报的时段、条目数、异常断层标记及载荷哈希，提供幂等校验支撑。
-- 节点小时聚合（`node_traffic_hourly`）：按 `(node_id, bucket_start)` 维护节点每小时的上行与下行字节数。
-- 全站小时聚合（`site_traffic_hourly`）：以 `bucket_start` 为主键维护全站每小时用量。该表消除了对节点流量表跨节点时间扫描的需求，使仪表盘聚合查询的时间复杂度保持在常数级。
-- 用户节点小时聚合（`user_traffic_hourly`）：按 `(subscriber_id, node_id, bucket_start)` 归档每个用户在各节点的小时消耗，支撑用户明细及排行榜检索。
-- 用户周期用量（`subscriber_usage`）：以 `subscriber_id` 为主键，维护用户在当前计费周期内的累计上行与下行总量，实现常数时间的配额检查与订阅响应头装配。
-
-## 4. 配置与系统元数据
-
-- 节点配置历史（`node_configs`）：以 `(node_id, version)` 归档不可变配置定义（规范化 JSON 与 SHA-256 哈希），记录配置发布者、下发时间、应用确认时间及错误详情。配置回滚通过基于旧版本定义生成递增新版本实现。
-- 系统全局元数据（`meta`）：以键值对管理全局状态，核心键包含控制凭据拉取的全局版本号 `users_ver` 与默认订阅用户标识 `default_subscriber_id`。
-- 审计记录（`audit_events`）：记录关键管理操作的触发人员、动作类型与变更载荷。
-
-## 5. 数据生命周期与清理策略
-
-为确保系统运行在免费额度存储与读写预算内，系统通过定时触发器定期清理过期数据：
-
-| 数据类型 | 保留期限 | 清理方式 |
+| 表名 | 主键 / 粒度 | 干什么用的 |
 | --- | --- | --- |
-| 小时聚合记录（节点、站点、用户） | 90 天 | 基于 `bucket_start` 分批物理删除 |
-| 上报凭证记录（`traffic_reports`） | 30 天 | 基于 `received_at` 分批物理删除 |
-| 审计日志（`audit_events`） | 180 天 | 基于 `created_at` 分批物理删除 |
+| `traffic_reports` | `(node_id, report_id)` | 存每次上报的凭证和载荷哈希，用来防重放和排查冲突 |
+| `node_traffic_hourly` | `(node_id, bucket_start)` | 单节点每小时上下行总量，用于节点详情流量图 |
+| `site_traffic_hourly` | `bucket_start` | 全站每小时总量，看全站趋势时只需扫这一张表，不用跨节点聚合 |
+| `user_traffic_hourly` | `(subscriber_id, node_id, bucket_start)` | 每个用户在各节点的小时消耗，支撑用户明细与排行 |
+| `subscriber_usage` | `subscriber_id` | 每个用户**当前自然月**的累计上下行总量，拉订阅和判超额时直接读这一行 |
 
-清理任务单批次上限控制在 1,000 行，避免长事务阻塞数据库并平摊 D1 写入配额开销。
+---
+
+## 4. 数据保留与自动清理
+
+每天凌晨（Cron `17 3 * * *`）自动分批清理过期数据，单批最多删 **1,000 行**，避免长事务卡死或瞬间打满 D1 每日写入额度：
+
+| 数据 | 保留时间 | 清理依据 |
+| --- | --- | --- |
+| 小时聚合桶（节点 / 全站 / 用户） | 90 天 | 按 `bucket_start` 清理 |
+| 上报收据（`traffic_reports`） | 30 天 | 按 `received_at` 清理 |
+| 审计日志（`audit_events`） | 180 天 | 按 `created_at` 清理 |

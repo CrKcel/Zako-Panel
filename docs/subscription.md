@@ -1,61 +1,58 @@
-# 订阅生成与分发
+# 节点状态与订阅生成
 
-控制面根据订阅档案规则、节点运行状态与用户授权凭据，动态生成适用于 Clash.Meta 的 YAML 配置或通用 URI 文本。API 路径定义详见 [api.md](api.md)，数据库存储结构详见 [database.md](database.md)，配额判定规则详见 [traffic.md](traffic.md)。
+客户端请求 `/sub/{token}/clash.yaml` 或 `/sub/{token}/uri` 时，控制面会实时检查用户权限、筛选可用节点，并把结果渲染成对应格式返回，全程不依赖外部订阅转换服务。
 
-## 1. 节点状态派生与分发条件
+接口说明见 [api.md](api.md)，数据表见 [database.md](database.md)，配额与超额规则见 [traffic.md](traffic.md)。
 
-系统采用无冗余持久化设计，节点展示状态与分发资格统一在查询时动态派生：
+---
 
-### 1.1 节点运行状态定义
+## 1. 节点状态怎么算出来的
 
-| 状态 | 判定规则 | 说明 |
+数据库里**不直接存节点是 `online` 还是 `offline`**，而是在查询节点或生成订阅时，根据 `nodes` 表里的最后心跳时间实时算出来（省掉定时扫表写库）。
+
+判定顺序如下：
+
+| 状态 | 判定条件 | 含义 |
 | --- | --- | --- |
-| `disabled` | `nodes.enabled = 0` | 节点被管理员手动停用 |
-| `offline` | 无心跳记录，或当前时间超出 `last_seen_at + 3 × heartbeat_interval_seconds` | 节点失去心跳连接 |
-| `degraded` | 心跳保持新鲜，但 `xray_healthy = 0` 或 `stats_healthy = 0` | 节点通信正常，核心组件报告异常 |
-| `online` | 心跳保持新鲜，且 `xray_healthy = 1` 与 `stats_healthy = 1` | 节点运行健康 |
+| `disabled` | `nodes.enabled = 0` | 管理员手动停用了这台节点 |
+| `offline` | 从未收到心跳，或当前时间 > `last_seen_at + 3 × heartbeat_interval_seconds` | 连续超过 3 个心跳周期没联系（比如默认 5 分钟心跳，超过 15 分钟就算离线） |
+| `degraded` | 心跳正常，但 `xray_healthy = 0` 或 `stats_healthy = 0` | 节点还活着，但 Xray 代理或统计接口异常 |
+| `online` | 心跳正常，且 `xray_healthy = 1`、`stats_healthy = 1` | 一切正常 |
 
-### 1.2 节点分发过滤准则
+---
 
-只有同时满足下列所有条件的节点，才会装配至客户端订阅文档中：
+## 2. 哪些节点能放进订阅里
 
-- 节点与网络端点均处于启用状态（`nodes.enabled = 1` 且 `endpoints.enabled = 1`）。
-- 节点心跳保持有效新鲜度。
-- Xray 代理进程报告健康（`xray_healthy = 1`）。若仅统计接口异常（`stats_healthy = 0`），节点仍保留分发资格。
-- 订阅用户状态处于 `active`，且在有效期内未超出流量配额。
-- 用户在该节点持有有效的授权凭据（`node_clients.enabled = 1`）。
-- 节点包含在目标档案的节点选择范围内（全选或列表白名单）。
-- 当档案开启 `online_only` 时，节点必须满足心跳新鲜度；未开启时允许处于离线状态的节点进入配置。
+一个节点（及其下的 Endpoint）必须**同时满足**以下所有条件，才会出现在用户的订阅里：
 
-当所有节点均被过滤导致分发集合为空时，端点返回 `503 SUBSCRIPTION_UNAVAILABLE`，禁止下发空配置。
+1. **节点和 Endpoint 都没停用**（`nodes.enabled = 1` 且 `endpoints.enabled = 1`）。
+2. **Xray 代理进程健康**（`xray_healthy = 1`）。注意：如果只是统计端口坏了（`stats_healthy = 0`，节点状态显示 `degraded`），代理本身还能通，所以依然会下发。
+3. **心跳达标**（当订阅档案开启了 `online_only` 时，必须没超时离线；如果关闭了 `online_only`，允许把离线节点也放进去）。
+4. **用户本身可用**（`subscribers.status = 'active'`，且订阅链接没被撤销或过期）。
+5. **用户有该节点的权限**（`node_clients.enabled = 1`）。
+6. **节点在档案的筛选范围内**（档案配置了“全部节点”或“指定节点列表”）。
 
-## 2. 订阅请求处理流程
+> 如果过滤完一个可用节点都不剩，正式订阅接口会返回 `503 SUBSCRIPTION_UNAVAILABLE`，不会下发空配置把客户端覆盖掉。而管理后台的档案预览接口（`/preview`）则会正常返回空列表，并列出每个节点被跳过的原因（如 `offline`、`unhealthy`、`disabled`、`not_selected`）。
 
-客户端发起订阅请求后，Worker 执行以下装配步骤：
+---
 
-1. 凭据检索：提取 URL 中的 Token 进行 SHA-256 哈希计算，检索匹配的订阅与用户记录。
-2. 权限校验：确认订阅凭据未撤销且未到期，依序验证用户停用、到期与超额状态。
-3. 批量聚合：单次批处理查询档案规则、关联节点集、用户授权集合以及当前计费周期的汇总用量。
-4. 集合求交：将档案限定的节点与用户授权的节点集合求交集，剔除已停用、不健康或超时离线的端点。
-5. 名称去重：为入选节点生成稳定唯一的标识符。单端点使用节点名，多端点组合“节点名-端点名”。
-6. 文档序列化：按请求类型渲染为 Clash.Meta YAML 或通用 URI，不调用外部转换服务。
+## 3. 一次订阅请求的处理步骤
 
-## 3. 订阅格式规范
+1. **识别订阅**：从 URL 取出 `{token}`，算 SHA-256 哈希查 `subscriptions` 表。找不到或已撤销/过期 → 返回 `401` 或 `403`。
+2. **检查用户**：确认对应 `subscriber` 没被停用、没过期、当月没超流量 → 不满足返回 `403`。
+3. **批量取数据**：一次查出订阅档案（Profile）的模板规则、关联节点、用户授权节点以及当月已用流量。
+4. **筛选与重名处理**：按第 2 节的条件过滤出最终 Endpoint 列表。如果一个节点只有一个 Endpoint，节点显示名直接用节点名；有多个 Endpoint，则拼接成 `节点名-端点名`，保证不重名。
+5. **渲染输出**：
+   - **Clash.Meta YAML**（`/clash.yaml`）：把筛选后的节点转成 VLESS + REALITY 的 `proxies`，再结合档案里存的 `clash_base_json`、`proxy_groups_json`、`rules_json` 拼成完整 YAML（所有敏感凭据会做唯一性校验）。
+   - **通用 URI**（`/uri`）：生成标准 `vless://` 链接，换行拼接后默认做 Base64 编码；带 `?encoding=plain` 则直接返回明文。
 
-### 3.1 Clash.Meta YAML 规范
+---
 
-- 协议支持：完整映射 VLESS + REALITY 协议字段（包括传输类型、流控 `xtls-rprx-vision`、REALITY 公钥与 short-id、客户端指纹）。
-- 结构化注入：由档案中结构化存储的 `clash_base_json`、`proxy_groups_json` 与 `rules_json` 装配 proxies、proxy-groups 与 rules 配置块。
-- 标识符防护：节点名称、策略组名称与规则指向做全局唯一性校验，避免同名冲突。
+## 4. 响应头约定
 
-### 3.2 通用 URI 规范
-
-- 标准链接：组装规范的 `vless://` 链接，主机、端口、UUID、公钥、流控与指纹等参数均由服务端记录填充。
-- 格式编码：默认采用换行符分隔多个节点链接，并进行标准 Base64 编码输出；通过参数 `encoding=plain` 可输出明文连接串。
-
-## 4. 响应标头与缓存规范
-
-- 文档内容类型：Clash 响应声明 `Content-Type: application/yaml; charset=utf-8`；URI 响应声明 `Content-Type: text/plain; charset=utf-8`。
-- 用量指示头：携带 `subscription-userinfo: upload=...; download=...; total=...; expire=...`，向客户端展示当期消耗量与配额上限（0 表示无限制）。
-- 客户端更新周期：携带 `profile-update-interval: 6`（小时），指示推荐同步频率。
-- 缓存控制：采用 `Cache-Control: private, no-store`，禁止边缘及共享代理节点持久化含有用户凭据的订阅文档。
+| 响应头 | 值 / 用途 |
+| --- | --- |
+| `Content-Type` | Clash 返回 `application/yaml; charset=utf-8`；URI 返回 `text/plain; charset=utf-8` |
+| `subscription-userinfo` | `upload=...; download=...; total=...; expire=...`，让客户端直接显示已用流量、总配额（`0` 表示不限）和到期时间 |
+| `profile-update-interval` | `6`，建议客户端每 6 小时自动更新一次订阅 |
+| `Cache-Control` | `private, no-store`，禁止 CDN 或代理缓存带有用户 UUID 的订阅内容 |

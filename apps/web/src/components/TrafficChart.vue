@@ -9,6 +9,8 @@ import { formatBytes } from '../utils/format';
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
+const PALETTE = ['#2563eb', '#16a34a', '#0ea5e9', '#d97706', '#7c3aed', '#e11d48'];
+
 const props = defineProps<{
 	categories: string[];
 	series: TrafficSeries[];
@@ -20,22 +22,48 @@ let observer: ResizeObserver | null = null;
 
 function render(): void {
 	chart?.setOption({
+		color: PALETTE,
 		tooltip: {
 			trigger: 'axis',
+			backgroundColor: '#ffffff',
+			borderColor: '#e2e8f0',
+			borderWidth: 1,
+			textStyle: { color: '#0f172a', fontSize: 12 },
 			valueFormatter: (value: unknown) => formatBytes(Number(value)),
 		},
-		legend: { data: props.series.map((item) => item.name) },
-		grid: { left: 72, right: 24, top: 40, bottom: 32 },
-		xAxis: { type: 'category', boundaryGap: false, data: props.categories },
+		legend: {
+			top: 0,
+			right: 0,
+			icon: 'roundRect',
+			itemWidth: 10,
+			itemHeight: 3,
+			textStyle: { color: '#475569', fontSize: 12 },
+			data: props.series.map((item) => item.name),
+		},
+		grid: { left: 72, right: 20, top: 36, bottom: 28 },
+		xAxis: {
+			type: 'category',
+			boundaryGap: false,
+			data: props.categories,
+			axisLine: { lineStyle: { color: '#e2e8f0' } },
+			axisTick: { show: false },
+			axisLabel: { color: '#64748b', fontSize: 11 },
+		},
 		yAxis: {
 			type: 'value',
-			axisLabel: { formatter: (value: number | string) => formatBytes(Number(value)) },
+			splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+			axisLabel: {
+				color: '#64748b',
+				fontSize: 11,
+				formatter: (value: number | string) => formatBytes(Number(value)),
+			},
 		},
 		series: props.series.map((item) => ({
 			name: item.name,
 			type: 'line',
 			showSymbol: false,
-			smooth: true,
+			smooth: 0.25,
+			lineStyle: { width: 2 },
 			data: item.values,
 		})),
 	});
@@ -65,6 +93,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .traffic-chart {
 	width: 100%;
-	height: 320px;
+	height: 300px;
 }
 </style>

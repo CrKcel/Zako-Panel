@@ -2,10 +2,12 @@
 import type { CreateSubscriptionRequest, Profile, Subscriber, Subscription } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import { profilesApi } from '../api/profiles';
 import { subscribersApi } from '../api/subscribers';
 import { subscriptionsApi } from '../api/subscriptions';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -27,6 +29,7 @@ function emptySubscriptionForm(): SubscriptionForm {
 	return { name: '', subscriber_id: '', profile_id: '', expires_at: null };
 }
 
+const search = ref('');
 const form = ref<SubscriptionForm>(emptySubscriptionForm());
 const formRef = ref<FormInstance>();
 const token = ref('');
@@ -74,6 +77,21 @@ const {
 function profileName(profileId: string): string {
 	return profiles.value.find((profile) => profile.id === profileId)?.name ?? profileId;
 }
+
+function subscriberName(subscriberId: string): string {
+	return subscribers.value.find((subscriber) => subscriber.id === subscriberId)?.name ?? subscriberId;
+}
+
+const filteredSubscriptions = computed(() => {
+	const q = search.value.trim().toLowerCase();
+	if (!q) return subscriptions.value;
+	return subscriptions.value.filter(
+		(row) =>
+			row.name.toLowerCase().includes(q) ||
+			subscriberName(row.subscriber_id).toLowerCase().includes(q) ||
+			profileName(row.profile_id).toLowerCase().includes(q),
+	);
+});
 
 async function submit(): Promise<void> {
 	if (!(await formRef.value?.validate().catch(() => false))) return;
@@ -129,32 +147,46 @@ async function revoke(row: Subscription): Promise<void> {
 
 <template>
 	<el-card shadow="never">
-		<PageToolbar>
+		<PageToolbar spread>
+			<template #left>
+				<el-input v-model="search" placeholder="搜索订阅名称、用户或档案…" clearable class="search-input" />
+			</template>
 			<el-button :loading="loading" @click="reload">刷新</el-button>
 			<el-button type="primary" @click="openCreate">创建订阅</el-button>
 		</PageToolbar>
-		<el-table v-loading="loading" :data="subscriptions" empty-text="暂无数据">
+		<el-table v-loading="loading" :data="filteredSubscriptions" empty-text="暂无数据">
 			<el-table-column prop="name" label="名称" min-width="160" />
-			<el-table-column prop="subscriber_id" label="订阅用户" min-width="240" />
+			<el-table-column label="订阅用户" min-width="160">
+				<template #default="{ row }">
+					<RouterLink :to="`/subscribers/${row.subscriber_id}`" class="ui-link">
+						{{ subscriberName(row.subscriber_id) }}
+					</RouterLink>
+				</template>
+			</el-table-column>
 			<el-table-column label="档案" min-width="160">
 				<template #default="{ row }">{{ profileName(row.profile_id) }}</template>
 			</el-table-column>
-			<el-table-column label="状态" width="100">
+			<el-table-column label="状态" width="105">
 				<template #default="{ row }">
-					<el-tag :type="subscriptionStatusDescriptor(row as Subscription).tag" disable-transitions>
-						{{ subscriptionStatusDescriptor(row as Subscription).label }}
-					</el-tag>
+					<StatusBadge
+						:label="subscriptionStatusDescriptor(row as Subscription).label"
+						:type="subscriptionStatusDescriptor(row as Subscription).tag"
+					/>
 				</template>
 			</el-table-column>
-			<el-table-column label="到期" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.expires_at) }}</template>
+			<el-table-column label="到期" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
+				</template>
 			</el-table-column>
-			<el-table-column label="创建时间" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.created_at) }}</template>
+			<el-table-column label="创建时间" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.created_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="操作" width="150" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" :loading="rotateAction.isRunning(row.id)" @click="rotate(row as Subscription)"> 轮换 </el-button>
+					<el-button link type="primary" :loading="rotateAction.isRunning(row.id)" @click="rotate(row as Subscription)">轮换</el-button>
 					<el-button link type="danger" :disabled="row.revoked_at !== null" @click="revoke(row as Subscription)">撤销</el-button>
 				</template>
 			</el-table-column>
@@ -190,7 +222,7 @@ async function revoke(row: Subscription): Promise<void> {
 		<div class="link-list">
 			<div class="link-row">
 				<span class="link-label">Token</span>
-				<el-input :model-value="token" readonly>
+				<el-input :model-value="token" readonly class="mono">
 					<template #append>
 						<el-button @click="copyText(token)">复制</el-button>
 					</template>
@@ -198,7 +230,7 @@ async function revoke(row: Subscription): Promise<void> {
 			</div>
 			<div v-for="link in links" :key="link.label" class="link-row">
 				<span class="link-label">{{ link.label }}</span>
-				<el-input :model-value="link.url" readonly>
+				<el-input :model-value="link.url" readonly class="mono">
 					<template #append>
 						<el-button @click="copyText(link.url)">复制</el-button>
 					</template>
@@ -209,6 +241,10 @@ async function revoke(row: Subscription): Promise<void> {
 </template>
 
 <style scoped>
+.search-input {
+	width: 240px;
+}
+
 .full-width {
 	width: 100%;
 }
@@ -216,7 +252,7 @@ async function revoke(row: Subscription): Promise<void> {
 .link-list {
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 14px;
 }
 
 .link-row {
@@ -229,6 +265,7 @@ async function revoke(row: Subscription): Promise<void> {
 	width: 96px;
 	flex: none;
 	font-size: 13px;
-	color: #6b7280;
+	font-weight: 500;
+	color: var(--text-secondary);
 }
 </style>

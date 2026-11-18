@@ -6,6 +6,7 @@ import { useAsyncAction } from '../composables/useAsyncAction';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
+import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps<{
 	nodeId: string;
@@ -245,9 +246,7 @@ defineExpose({ reload: loadConfigs });
 			</el-table-column>
 			<el-table-column label="状态" width="110">
 				<template #default="{ row }">
-					<el-tag :type="versionTag(row as ConfigVersion).type" disable-transitions>
-						{{ versionTag(row as ConfigVersion).label }}
-					</el-tag>
+					<StatusBadge :label="versionTag(row as ConfigVersion).label" :type="versionTag(row as ConfigVersion).type" />
 				</template>
 			</el-table-column>
 			<el-table-column label="SHA-256" min-width="180">

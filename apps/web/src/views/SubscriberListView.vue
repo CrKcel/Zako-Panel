@@ -7,9 +7,18 @@ import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
-import { LIMIT_UNITS, limitBytes, limitParts, usageCycleLabel, usageLabel, type LimitUnit } from '../domain/subscriber';
+import {
+	LIMIT_UNITS,
+	limitBytes,
+	limitParts,
+	subscriberUsedBytes,
+	usageCycleLabel,
+	usageLabel,
+	type LimitUnit,
+} from '../domain/subscriber';
 import { subscriberStatusDescriptor } from '../domain/status';
 import { showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
@@ -27,6 +36,9 @@ interface SubscriberForm {
 function emptySubscriberForm(): SubscriberForm {
 	return { name: '', email: '', limit_value: undefined, limit_unit: 'GB', expires_at: null, suspended: false };
 }
+
+const search = ref('');
+const statusFilter = ref<'all' | Subscriber['status']>('all');
 
 const form = ref<SubscriberForm>(emptySubscriberForm());
 const formRef = ref<FormInstance>();
@@ -46,6 +58,26 @@ const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((pag
 	initialValue: [],
 	onError: (error) => showError(error, '节点加载失败'),
 });
+
+const filteredSubscribers = computed(() => {
+	const q = search.value.trim().toLowerCase();
+	return subscribers.value.filter((row) => {
+		if (statusFilter.value !== 'all' && row.status !== statusFilter.value) return false;
+		if (q && !row.name.toLowerCase().includes(q) && !(row.email ?? '').toLowerCase().includes(q)) return false;
+		return true;
+	});
+});
+
+function usageRatio(row: Subscriber): number | null {
+	if (!row.traffic_limit_bytes || row.traffic_limit_bytes <= 0) return null;
+	return Math.min(100, Math.round((subscriberUsedBytes(row) / row.traffic_limit_bytes) * 100));
+}
+
+function usageTone(ratio: number): string {
+	if (ratio >= 95) return 'is-danger';
+	if (ratio >= 80) return 'is-warning';
+	return 'is-primary';
+}
 
 const rules: FormRules = {
 	name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
@@ -116,39 +148,69 @@ function openGrant(row: Subscriber): void {
 
 <template>
 	<el-card shadow="never">
-		<PageToolbar>
+		<PageToolbar spread>
+			<template #left>
+				<div class="filters">
+					<el-input v-model="search" placeholder="搜索名称或邮箱…" clearable class="search-input" />
+					<el-select v-model="statusFilter" class="status-select">
+						<el-option label="全部状态" value="all" />
+						<el-option label="正常" value="active" />
+						<el-option label="超限" value="limited" />
+						<el-option label="已到期" value="expired" />
+						<el-option label="停用" value="disabled" />
+					</el-select>
+				</div>
+			</template>
 			<el-button :loading="loading" @click="reload">刷新</el-button>
 			<el-button type="primary" @click="openCreate">创建订阅用户</el-button>
 		</PageToolbar>
-		<el-table v-loading="loading" :data="subscribers" empty-text="暂无数据">
-			<el-table-column prop="name" label="名称" min-width="160" />
-			<el-table-column label="邮箱" min-width="200">
-				<template #default="{ row }">{{ row.email ?? '—' }}</template>
-			</el-table-column>
-			<el-table-column label="状态" width="100">
+
+		<el-table v-loading="loading" :data="filteredSubscribers" empty-text="暂无数据">
+			<el-table-column prop="name" label="名称" min-width="150">
 				<template #default="{ row }">
-					<el-tag :type="subscriberStatusDescriptor(row.status).tag" disable-transitions>
-						{{ subscriberStatusDescriptor(row.status).label }}
-					</el-tag>
+					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="已用 / 额度" min-width="190">
-				<template #default="{ row }">{{ usageLabel(row as Subscriber) }}</template>
+			<el-table-column label="邮箱" min-width="190">
+				<template #default="{ row }">{{ row.email ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column label="周期" min-width="330">
-				<template #default="{ row }">{{ usageCycleLabel(row as Subscriber) }}</template>
-			</el-table-column>
-			<el-table-column label="到期" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.expires_at) }}</template>
-			</el-table-column>
-			<el-table-column label="授权节点" width="110">
+			<el-table-column label="状态" width="105">
 				<template #default="{ row }">
-					<RouterLink :to="`/subscribers/${row.id}`" class="subscriber-link">
+					<StatusBadge :label="subscriberStatusDescriptor(row.status).label" :type="subscriberStatusDescriptor(row.status).tag" />
+				</template>
+			</el-table-column>
+			<el-table-column label="已用 / 额度" min-width="200">
+				<template #default="{ row }">
+					<div class="usage-cell">
+						<span class="tnum">{{ usageLabel(row as Subscriber) }}</span>
+						<div v-if="usageRatio(row as Subscriber) !== null" class="usage-bar">
+							<div
+								class="usage-bar-fill"
+								:class="usageTone(usageRatio(row as Subscriber)!)"
+								:style="{ width: `${usageRatio(row as Subscriber)}%` }"
+							/>
+						</div>
+					</div>
+				</template>
+			</el-table-column>
+			<el-table-column label="周期" min-width="310">
+				<template #default="{ row }">
+					<span class="tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="到期" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="授权节点" width="100">
+				<template #default="{ row }">
+					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
 						{{ row.node_count }}
 					</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="210" fixed="right">
+			<el-table-column label="操作" width="200" fixed="right">
 				<template #default="{ row }">
 					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
 					<el-button link type="primary" @click="openGrant(row as Subscriber)">节点授权</el-button>
@@ -199,6 +261,54 @@ function openGrant(row: Subscriber): void {
 </template>
 
 <style scoped>
+.filters {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.search-input {
+	width: 220px;
+}
+
+.status-select {
+	width: 120px;
+}
+
+.usage-cell {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.usage-bar {
+	width: 100%;
+	max-width: 160px;
+	height: 5px;
+	background: var(--bg-subtle);
+	border-radius: 9999px;
+	overflow: hidden;
+}
+
+.usage-bar-fill {
+	height: 100%;
+	border-radius: 9999px;
+	transition: width 0.2s ease;
+}
+
+.usage-bar-fill.is-primary {
+	background: var(--accent-primary);
+}
+
+.usage-bar-fill.is-warning {
+	background: var(--tone-warning);
+}
+
+.usage-bar-fill.is-danger {
+	background: var(--tone-danger);
+}
+
 .full-width {
 	width: 100%;
 }
@@ -216,14 +326,5 @@ function openGrant(row: Subscriber): void {
 .limit-unit {
 	width: 90px;
 	flex: none;
-}
-
-.subscriber-link {
-	color: #2563eb;
-	text-decoration: none;
-}
-
-.subscriber-link:hover {
-	text-decoration: underline;
 }
 </style>

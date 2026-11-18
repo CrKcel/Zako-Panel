@@ -6,6 +6,7 @@ import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import EndpointFormFields from '../components/EndpointFormFields.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -35,6 +36,9 @@ function emptyCreateForm(): CreateForm {
 		endpoint: emptyEndpointFormValue(),
 	};
 }
+
+const search = ref('');
+const statusFilter = ref<'all' | Node['status']>('all');
 
 const createForm = ref<CreateForm>(emptyCreateForm());
 const editForm = ref<EditForm>({ name: '', heartbeat_interval_seconds: 300, enabled: true });
@@ -76,6 +80,15 @@ const {
 	immediate: false,
 	initialValue: [],
 	onError: (error) => showError(error, '节点加载失败'),
+});
+
+const filteredNodes = computed(() => {
+	const q = search.value.trim().toLowerCase();
+	return nodes.value.filter((node) => {
+		if (statusFilter.value !== 'all' && node.status !== statusFilter.value) return false;
+		if (q && !node.name.toLowerCase().includes(q)) return false;
+		return true;
+	});
 });
 
 const { refresh } = usePolling(reload, 30_000);
@@ -296,54 +309,80 @@ async function submitDeleteNode(): Promise<void> {
 
 <template>
 	<el-card shadow="never">
-		<PageToolbar>
+		<PageToolbar spread>
+			<template #left>
+				<div class="filters">
+					<el-input v-model="search" placeholder="搜索节点名称…" clearable class="search-input" />
+					<el-select v-model="statusFilter" class="status-select">
+						<el-option label="全部状态" value="all" />
+						<el-option label="在线" value="online" />
+						<el-option label="异常" value="degraded" />
+						<el-option label="离线" value="offline" />
+						<el-option label="停用" value="disabled" />
+					</el-select>
+				</div>
+			</template>
 			<el-button :loading="loading" @click="refresh">刷新</el-button>
 			<el-button @click="openEnrollList">部署 Token</el-button>
-			<el-button type="primary" @click="openEnrollCreate">一键部署节点</el-button>
 			<el-button @click="openCreate">手动创建节点</el-button>
+			<el-button type="primary" @click="openEnrollCreate">一键部署节点</el-button>
 		</PageToolbar>
-		<el-table v-loading="loading" :data="nodes" empty-text="暂无数据">
-			<el-table-column label="名称" min-width="180">
+
+		<el-table v-loading="loading" :data="filteredNodes" empty-text="暂无节点">
+			<el-table-column label="名称" min-width="170">
 				<template #default="{ row }">
-					<RouterLink :to="`/nodes/${row.id}`" class="node-link">{{ row.name }}</RouterLink>
+					<RouterLink :to="`/nodes/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="状态" width="100">
+			<el-table-column label="状态" width="110">
 				<template #default="{ row }">
-					<el-tag :type="nodeStatusDescriptor(row.status as Node['status']).tag" disable-transitions>
-						{{ nodeStatusDescriptor(row.status as Node['status']).label }}
-					</el-tag>
+					<StatusBadge
+						:label="nodeStatusDescriptor(row.status as Node['status']).label"
+						:type="nodeStatusDescriptor(row.status as Node['status']).tag"
+					/>
 				</template>
 			</el-table-column>
-			<el-table-column label="心跳间隔" width="110">
-				<template #default="{ row }">{{ row.heartbeat_interval_seconds }}s</template>
-			</el-table-column>
-			<el-table-column label="最近心跳" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.last_seen_at) }}</template>
-			</el-table-column>
-			<el-table-column label="Agent 版本" width="130">
-				<template #default="{ row }">{{ row.agent_version ?? '—' }}</template>
-			</el-table-column>
-			<el-table-column label="Xray 版本" width="130">
-				<template #default="{ row }">{{ row.xray_version ?? '—' }}</template>
-			</el-table-column>
-			<el-table-column label="CPU" width="90">
-				<template #default="{ row }">{{ formatPercent(row.sys?.cpu) }}</template>
-			</el-table-column>
-			<el-table-column label="内存" width="90">
-				<template #default="{ row }">{{ formatPercent(row.sys?.mem) }}</template>
-			</el-table-column>
-			<el-table-column label="负载" width="90">
-				<template #default="{ row }">{{ row.sys ? row.sys.load.toFixed(2) : '—' }}</template>
-			</el-table-column>
-			<el-table-column label="启用" width="90">
+			<el-table-column label="心跳间隔" width="100">
 				<template #default="{ row }">
-					<el-tag :type="row.enabled ? 'success' : 'info'" disable-transitions>
-						{{ row.enabled ? '启用' : '停用' }}
-					</el-tag>
+					<span class="tnum">{{ row.heartbeat_interval_seconds }}s</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="290" fixed="right">
+			<el-table-column label="最近心跳" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.last_seen_at) }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="Agent" width="120">
+				<template #default="{ row }">
+					<span class="mono">{{ row.agent_version ?? '—' }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="Xray" width="120">
+				<template #default="{ row }">
+					<span class="mono">{{ row.xray_version ?? '—' }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="CPU" width="85">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatPercent(row.sys?.cpu) }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="内存" width="85">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatPercent(row.sys?.mem) }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="负载" width="85">
+				<template #default="{ row }">
+					<span class="tnum">{{ row.sys ? row.sys.load.toFixed(2) : '—' }}</span>
+				</template>
+			</el-table-column>
+			<el-table-column label="启用" width="95">
+				<template #default="{ row }">
+					<StatusBadge :label="row.enabled ? '启用' : '停用'" :type="row.enabled ? 'success' : 'info'" />
+				</template>
+			</el-table-column>
+			<el-table-column label="操作" width="260" fixed="right">
 				<template #default="{ row }">
 					<RouterLink :to="`/nodes/${row.id}`" custom v-slot="{ navigate }">
 						<el-button link type="primary" @click="navigate">详情</el-button>
@@ -407,7 +446,7 @@ async function submitDeleteNode(): Promise<void> {
 	</el-dialog>
 
 	<el-dialog v-model="tokenVisible" title="Agent Token" width="560px" :close-on-click-modal="false" destroy-on-close>
-		<el-input :model-value="agentToken" readonly>
+		<el-input :model-value="agentToken" readonly class="mono">
 			<template #append>
 				<el-button @click="copyText(agentToken)">复制</el-button>
 			</template>
@@ -436,39 +475,42 @@ async function submitDeleteNode(): Promise<void> {
 		</el-form>
 		<template #footer>
 			<el-button @click="enrollCreateVisible = false">取消</el-button>
-			<el-button type="primary" :loading="createEnrollAction.isRunning('create')" @click="createEnrollAction.runFor('create')"
-				>生成部署命令</el-button
-			>
+			<el-button type="primary" :loading="createEnrollAction.isRunning('create')" @click="createEnrollAction.runFor('create')">
+				生成部署命令
+			</el-button>
 		</template>
 	</el-dialog>
 
 	<el-dialog v-model="enrollResultVisible" title="节点一键部署命令" width="680px" :close-on-click-modal="false" destroy-on-close>
-		<el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+		<el-alert type="info" :closable="false" show-icon class="dialog-alert">
 			该一次性 Token 仅展示一次，默认 24 小时有效且使用一次后立即失效。执行后将自动安装缺失的 Xray、生成 REALITY 密钥并注册上线。
 		</el-alert>
-		<el-input :model-value="enrollCommand" type="textarea" :rows="3" readonly />
-		<div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px">
+		<pre class="command-box mono">{{ enrollCommand }}</pre>
+		<template #footer>
+			<el-button @click="enrollResultVisible = false">关闭</el-button>
 			<el-button type="primary" @click="copyText(enrollCommand)">复制命令</el-button>
-		</div>
+		</template>
 	</el-dialog>
 
 	<el-dialog v-model="enrollListVisible" title="一次性部署 Token" width="760px" destroy-on-close>
 		<el-table v-loading="enrollTokensLoading" :data="enrollTokens" empty-text="暂无部署 Token">
-			<el-table-column label="状态" width="90">
+			<el-table-column label="状态" width="100">
 				<template #default="{ row }">
-					<el-tag :type="enrollStatusTag(row.status).type" disable-transitions>
-						{{ enrollStatusTag(row.status).label }}
-					</el-tag>
+					<StatusBadge :label="enrollStatusTag(row.status).label" :type="enrollStatusTag(row.status).type" />
 				</template>
 			</el-table-column>
 			<el-table-column label="名称前缀" width="110">
 				<template #default="{ row }">{{ row.name_prefix ?? '—' }}</template>
 			</el-table-column>
 			<el-table-column label="默认 SNI / 端口" min-width="180">
-				<template #default="{ row }">{{ row.default_sni }}:{{ row.default_port }}</template>
+				<template #default="{ row }">
+					<span class="mono">{{ row.default_sni }}:{{ row.default_port }}</span>
+				</template>
 			</el-table-column>
-			<el-table-column label="过期时间" width="170">
-				<template #default="{ row }">{{ formatTimestamp(row.expires_at) }}</template>
+			<el-table-column label="过期时间" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="操作" width="90" fixed="right">
 				<template #default="{ row }">
@@ -488,11 +530,11 @@ async function submitDeleteNode(): Promise<void> {
 	</el-dialog>
 
 	<el-dialog v-model="deleteDialogVisible" title="删除节点" width="480px" destroy-on-close>
-		<p>
+		<p class="delete-confirm">
 			确认删除节点「<strong>{{ deletingNode?.name }}</strong
 			>」？该操作不可恢复。
 		</p>
-		<el-form label-width="180px" style="margin-top: 16px">
+		<el-form label-width="180px" class="delete-form">
 			<el-form-item v-if="deletingNode?.last_seen_at !== null && deletingNode?.status !== 'uninstalling'" label="仅从面板强制删除">
 				<el-switch v-model="deleteForce" />
 			</el-form-item>
@@ -518,12 +560,44 @@ async function submitDeleteNode(): Promise<void> {
 </template>
 
 <style scoped>
-.node-link {
-	color: #2563eb;
-	text-decoration: none;
+.filters {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
 }
 
-.node-link:hover {
-	text-decoration: underline;
+.search-input {
+	width: 220px;
+}
+
+.status-select {
+	width: 120px;
+}
+
+.dialog-alert {
+	margin-bottom: 12px;
+}
+
+.command-box {
+	margin: 0;
+	padding: 14px 16px;
+	background: var(--bg-muted);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	font-size: 12.5px;
+	line-height: 1.6;
+	color: var(--text-primary);
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.delete-confirm {
+	margin: 0;
+	color: var(--text-primary);
+}
+
+.delete-form {
+	margin-top: 16px;
 }
 </style>

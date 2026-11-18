@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { Node, SubscriberDetail, TrafficSummary } from '@zako/contracts';
 import { computed, defineAsyncComponent, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
 import { trafficApi } from '../api/traffic';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { trafficLimitLabel, usageCycleLabel } from '../domain/subscriber';
@@ -91,40 +92,61 @@ async function refresh(): Promise<void> {
 <template>
 	<div v-loading="loading">
 		<PageToolbar spread>
-			<el-button @click="backToList">返回列表</el-button>
+			<template #left>
+				<el-button @click="backToList">返回列表</el-button>
+			</template>
 			<el-button :loading="loading" @click="refresh">刷新</el-button>
 		</PageToolbar>
 
-		<el-card shadow="never" class="section">
+		<el-card shadow="never" class="ui-section">
 			<template #header>
-				<span class="card-title">{{ subscriber?.name ?? '—' }}</span>
+				<div class="ui-card-header">
+					<span class="ui-card-title">{{ subscriber?.name ?? '—' }}</span>
+					<StatusBadge
+						v-if="subscriber"
+						:label="subscriberStatusDescriptor(subscriber.status).label"
+						:type="subscriberStatusDescriptor(subscriber.status).tag"
+					/>
+				</div>
 			</template>
 			<el-descriptions :column="3" border>
 				<el-descriptions-item label="状态">
-					<el-tag v-if="subscriber" :type="subscriberStatusDescriptor(subscriber.status).tag" disable-transitions>
-						{{ subscriberStatusDescriptor(subscriber.status).label }}
-					</el-tag>
+					<StatusBadge
+						v-if="subscriber"
+						:label="subscriberStatusDescriptor(subscriber.status).label"
+						:type="subscriberStatusDescriptor(subscriber.status).tag"
+					/>
 					<span v-else>—</span>
 				</el-descriptions-item>
 				<el-descriptions-item label="邮箱">{{ subscriber?.email ?? '—' }}</el-descriptions-item>
-				<el-descriptions-item label="额度">{{ limitLabel }}</el-descriptions-item>
-				<el-descriptions-item label="周期">{{ cycleLabel }}</el-descriptions-item>
-				<el-descriptions-item label="到期">{{ formatTimestamp(subscriber?.expires_at) }}</el-descriptions-item>
-				<el-descriptions-item label="创建时间">{{ formatTimestamp(subscriber?.created_at) }}</el-descriptions-item>
+				<el-descriptions-item label="额度">
+					<span class="tnum">{{ limitLabel }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="周期">
+					<span class="tnum">{{ cycleLabel }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="到期">
+					<span class="tnum">{{ formatTimestamp(subscriber?.expires_at) }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="创建时间">
+					<span class="tnum">{{ formatTimestamp(subscriber?.created_at) }}</span>
+				</el-descriptions-item>
 			</el-descriptions>
 		</el-card>
 
-		<el-card shadow="never" class="section">
+		<el-card shadow="never" class="ui-section">
 			<template #header>
-				<div class="card-header">
-					<span class="card-title">授权节点</span>
+				<div class="ui-card-header">
+					<span class="ui-card-title">授权节点</span>
 					<el-button type="primary" @click="openGrant">编辑</el-button>
 				</div>
 			</template>
 			<div v-if="grantedNodes.length > 0" class="node-tags">
-				<el-tag v-for="node in grantedNodes" :key="node.id" disable-transitions>{{ node.name }}</el-tag>
+				<RouterLink v-for="node in grantedNodes" :key="node.id" :to="`/nodes/${node.id}`" class="node-pill">
+					{{ node.name }}
+				</RouterLink>
 			</div>
-			<span v-else>—</span>
+			<span v-else class="empty-muted">暂无授权节点</span>
 		</el-card>
 
 		<TrafficTotalsCard :summary="traffic?.totals ?? null" :loading="trafficLoading" title="近 24 小时流量">
@@ -142,21 +164,6 @@ async function refresh(): Promise<void> {
 </template>
 
 <style scoped>
-.section {
-	margin-bottom: 16px;
-}
-
-.card-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-}
-
-.card-title {
-	font-size: 14px;
-	font-weight: 600;
-}
-
 .chart {
 	margin-top: 16px;
 }
@@ -165,5 +172,33 @@ async function refresh(): Promise<void> {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
+}
+
+.node-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 4px 11px;
+	border-radius: 9999px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-muted);
+	color: var(--text-primary);
+	font-size: 13px;
+	font-weight: 500;
+	text-decoration: none;
+	transition:
+		background-color 0.15s ease,
+		border-color 0.15s ease,
+		color 0.15s ease;
+}
+
+.node-pill:hover {
+	background: var(--accent-primary-soft);
+	border-color: #bfdbfe;
+	color: var(--accent-primary);
+}
+
+.empty-muted {
+	font-size: 13px;
+	color: var(--text-muted);
 }
 </style>

@@ -4,11 +4,13 @@ import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
+import StatCard, { type StatTone } from '../components/StatCard.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { usePolling } from '../composables/usePolling';
-import { DAY_SECONDS, trafficWindow } from '../domain/traffic';
 import { nodeStatusDescriptor } from '../domain/status';
+import { DAY_SECONDS, trafficWindow } from '../domain/traffic';
 import { showError } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
@@ -32,13 +34,13 @@ const {
 	onError: (error) => showError(error, '流量加载失败'),
 });
 
-const stats = computed(() => {
+const stats = computed<Array<{ label: string; value: number; tone: StatTone }>>(() => {
 	const count = (status: Node['status']): number => nodes.value.filter((node) => node.status === status).length;
 	return [
-		{ label: '节点总数', value: nodes.value.length },
-		{ label: '在线节点', value: count('online') },
-		{ label: '异常节点', value: count('degraded') },
-		{ label: '离线节点', value: count('offline') },
+		{ label: '节点总数', value: nodes.value.length, tone: 'primary' },
+		{ label: '在线节点', value: count('online'), tone: 'success' },
+		{ label: '异常节点', value: count('degraded'), tone: 'warning' },
+		{ label: '离线节点', value: count('offline'), tone: 'danger' },
 	];
 });
 
@@ -57,86 +59,56 @@ const { refresh } = usePolling(async () => {
 </script>
 
 <template>
-	<div v-loading="nodeLoading" class="stats">
-		<el-card v-for="stat in stats" :key="stat.label" shadow="never" class="stat-card">
-			<div class="stat-label">{{ stat.label }}</div>
-			<div class="stat-value">{{ stat.value }}</div>
-		</el-card>
+	<div v-loading="nodeLoading" class="stats-grid ui-section">
+		<StatCard v-for="stat in stats" :key="stat.label" :label="stat.label" :value="stat.value" :tone="stat.tone" />
 	</div>
 
 	<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" title="近 24 小时流量" />
 
 	<el-card shadow="never">
 		<template #header>
-			<div class="card-header">
-				<span class="card-title">最近异常</span>
-				<el-button link type="primary" @click="refresh">刷新</el-button>
+			<div class="ui-card-header">
+				<span class="ui-card-title">最近异常</span>
+				<el-button size="small" :loading="nodeLoading || trafficLoading" @click="refresh">刷新</el-button>
 			</div>
 		</template>
-		<el-table v-loading="nodeLoading" :data="anomalies" empty-text="暂无数据">
+		<el-table v-loading="nodeLoading" :data="anomalies" empty-text="所有节点运行正常">
 			<el-table-column label="节点" min-width="180">
 				<template #default="{ row }">
-					<RouterLink :to="`/nodes/${row.id}`" class="node-link">{{ row.name }}</RouterLink>
+					<RouterLink :to="`/nodes/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="状态" width="100">
+			<el-table-column label="状态" width="110">
 				<template #default="{ row }">
-					<el-tag :type="nodeStatusDescriptor(row.status as Node['status']).tag" disable-transitions>
-						{{ nodeStatusDescriptor(row.status as Node['status']).label }}
-					</el-tag>
+					<StatusBadge
+						:label="nodeStatusDescriptor(row.status as Node['status']).label"
+						:type="nodeStatusDescriptor(row.status as Node['status']).tag"
+					/>
 				</template>
 			</el-table-column>
 			<el-table-column label="最近心跳" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.last_seen_at) }}</template>
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.last_seen_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="错误" min-width="260">
-				<template #default="{ row }">{{ row.last_config_error ?? '—' }}</template>
+				<template #default="{ row }">
+					<span :class="{ 'error-text': Boolean(row.last_config_error) }">{{ row.last_config_error ?? '—' }}</span>
+				</template>
 			</el-table-column>
 		</el-table>
 	</el-card>
 </template>
 
 <style scoped>
-.stats {
+.stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 16px;
-	margin-bottom: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+	gap: 14px;
 }
 
-.stat-card {
-	min-height: 96px;
-}
-
-.stat-label {
+.error-text {
+	color: var(--tone-danger);
 	font-size: 13px;
-	color: #6b7280;
-}
-
-.stat-value {
-	margin-top: 8px;
-	font-size: 26px;
-	font-weight: 600;
-	color: #111827;
-}
-
-.card-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-}
-
-.card-title {
-	font-size: 14px;
-	font-weight: 600;
-}
-
-.node-link {
-	color: #2563eb;
-	text-decoration: none;
-}
-
-.node-link:hover {
-	text-decoration: underline;
 }
 </style>

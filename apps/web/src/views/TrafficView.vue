@@ -2,6 +2,8 @@
 import type { TrafficGroupBy, TrafficItem } from '@zako/contracts';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { trafficApi } from '../api/traffic';
+import PageToolbar from '../components/PageToolbar.vue';
+import StatCard from '../components/StatCard.vue';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import {
 	sumTrafficItems,
@@ -39,92 +41,84 @@ watch([range, groupBy], () => {
 </script>
 
 <template>
-	<el-card shadow="never" class="toolbar-card">
-		<div class="toolbar">
-			<el-radio-group v-model="range">
-				<el-radio-button value="24h">24 小时</el-radio-button>
-				<el-radio-button value="7d">7 天</el-radio-button>
-				<el-radio-button value="30d">30 天</el-radio-button>
-			</el-radio-group>
-			<el-radio-group v-model="groupBy">
-				<el-radio-button value="node">节点</el-radio-button>
-				<el-radio-button value="subscriber">订阅用户</el-radio-button>
-				<el-radio-button value="site">全站</el-radio-button>
-			</el-radio-group>
-			<el-button :loading="loading" @click="reload">刷新</el-button>
-		</div>
-	</el-card>
+	<PageToolbar spread>
+		<template #left>
+			<div class="filters">
+				<el-radio-group v-model="range">
+					<el-radio-button value="24h">24 小时</el-radio-button>
+					<el-radio-button value="7d">7 天</el-radio-button>
+					<el-radio-button value="30d">30 天</el-radio-button>
+				</el-radio-group>
+				<el-radio-group v-model="groupBy">
+					<el-radio-button value="node">节点</el-radio-button>
+					<el-radio-button value="subscriber">订阅用户</el-radio-button>
+					<el-radio-button value="site">全站</el-radio-button>
+				</el-radio-group>
+			</div>
+		</template>
+		<el-button :loading="loading" @click="reload">刷新</el-button>
+	</PageToolbar>
 
-	<div v-loading="loading" class="stats">
-		<el-card
-			v-for="stat in [
-				{ label: '上行', value: formatBytes(totals.uplink) },
-				{ label: '下行', value: formatBytes(totals.downlink) },
-				{ label: '总计', value: formatBytes(totals.total) },
-			]"
-			:key="stat.label"
-			shadow="never"
-			class="stat-card"
-		>
-			<div class="stat-label">{{ stat.label }}</div>
-			<div class="stat-value">{{ stat.value }}</div>
-		</el-card>
+	<div v-loading="loading" class="stats-grid ui-section">
+		<StatCard label="上行" :value="formatBytes(totals.uplink)" icon="arrow-up" tone="primary" />
+		<StatCard label="下行" :value="formatBytes(totals.downlink)" icon="arrow-down" tone="success" />
+		<StatCard label="总计" :value="formatBytes(totals.total)" icon="activity" />
 	</div>
 
-	<el-card v-if="items.length > 0" shadow="never" class="chart-card">
+	<el-card v-if="items.length > 0" shadow="never" class="ui-section">
+		<template #header>
+			<div class="ui-card-header">
+				<span class="ui-card-title">流量趋势</span>
+			</div>
+		</template>
 		<TrafficChart :categories="chart.categories" :series="chart.series" />
 	</el-card>
 
 	<el-card shadow="never">
+		<template #header>
+			<div class="ui-card-header">
+				<span class="ui-card-title">流量明细</span>
+			</div>
+		</template>
 		<el-table :data="items" empty-text="暂无数据">
 			<el-table-column label="维度" min-width="200">
 				<template #default="{ row }">{{ trafficItemLabel(row as TrafficItem) }}</template>
 			</el-table-column>
 			<el-table-column label="上行" width="160">
-				<template #default="{ row }">{{ formatBytes(row.uplink_bytes) }}</template>
+				<template #default="{ row }">
+					<span class="tnum">{{ formatBytes(row.uplink_bytes) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="下行" width="160">
-				<template #default="{ row }">{{ formatBytes(row.downlink_bytes) }}</template>
+				<template #default="{ row }">
+					<span class="tnum">{{ formatBytes(row.downlink_bytes) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="合计" width="160">
-				<template #default="{ row }">{{ formatBytes(trafficItemTotal(row as TrafficItem)) }}</template>
+				<template #default="{ row }">
+					<span class="tnum total-cell">{{ formatBytes(trafficItemTotal(row as TrafficItem)) }}</span>
+				</template>
 			</el-table-column>
 		</el-table>
 	</el-card>
 </template>
 
 <style scoped>
-.toolbar-card {
-	margin-bottom: 16px;
-}
-
-.toolbar {
+.filters {
 	display: flex;
 	align-items: center;
-	gap: 16px;
+	gap: 12px;
 	flex-wrap: wrap;
 }
 
-.stats {
+.stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 16px;
-	margin-bottom: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+	gap: 14px;
 }
 
-.stat-label {
-	font-size: 13px;
-	color: #6b7280;
-}
-
-.stat-value {
-	margin-top: 8px;
-	font-size: 24px;
+.total-cell {
 	font-weight: 600;
-	color: #111827;
-}
-
-.chart-card {
-	margin-bottom: 16px;
+	color: var(--text-primary);
 }
 </style>

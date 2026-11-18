@@ -4,20 +4,32 @@ defineProps<{ spread?: boolean }>();
 
 <template>
 	<div class="page-toolbar" :class="{ 'is-spread': spread }">
-		<slot />
+		<slot name="left" />
+		<div class="toolbar-right">
+			<slot />
+		</div>
 	</div>
 </template>
 
 <style scoped>
 .page-toolbar {
 	display: flex;
-	gap: 8px;
-	justify-content: flex-end;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
 	margin-bottom: 16px;
 }
 
-.is-spread {
-	gap: 0;
-	justify-content: space-between;
+.toolbar-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-left: auto;
+}
+
+.is-spread .toolbar-right {
+	margin-left: 0;
 }
 </style>

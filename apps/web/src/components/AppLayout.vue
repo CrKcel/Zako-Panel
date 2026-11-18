@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { RouterView, useRoute } from 'vue-router';
+import { computed, ref, watch } from 'vue';
+import { RouterLink, RouterView, useRoute } from 'vue-router';
+import AppIcon, { type IconName } from './AppIcon.vue';
 
 const route = useRoute();
+const mobileOpen = ref(false);
 
-const items = [
-	{ path: '/', label: '总览' },
-	{ path: '/nodes', label: '节点' },
-	{ path: '/subscribers', label: '订阅用户' },
-	{ path: '/profiles', label: '订阅档案' },
-	{ path: '/subscriptions', label: '订阅' },
-	{ path: '/traffic', label: '流量' },
+const items: Array<{ path: string; label: string; icon: IconName }> = [
+	{ path: '/', label: '总览', icon: 'overview' },
+	{ path: '/nodes', label: '节点', icon: 'nodes' },
+	{ path: '/subscribers', label: '订阅用户', icon: 'subscribers' },
+	{ path: '/profiles', label: '订阅档案', icon: 'profiles' },
+	{ path: '/subscriptions', label: '订阅', icon: 'subscriptions' },
+	{ path: '/traffic', label: '流量', icon: 'traffic' },
 ];
 
 const activeMenu = computed(() => {
@@ -18,78 +20,267 @@ const activeMenu = computed(() => {
 	if (route.path.startsWith('/subscribers')) return '/subscribers';
 	return route.path;
 });
+
 const title = computed(() => route.meta.title ?? '');
+
+watch(
+	() => route.path,
+	() => {
+		mobileOpen.value = false;
+	},
+);
 </script>
 
 <template>
-	<el-container class="shell">
-		<el-aside width="216px" class="aside">
-			<div class="brand">ZAKO<span>PANEL</span></div>
-			<el-menu :default-active="activeMenu" router class="nav" background-color="#111827" text-color="#9ca3af" active-text-color="#ffffff">
-				<el-menu-item v-for="item in items" :key="item.path" :index="item.path">
-					{{ item.label }}
-				</el-menu-item>
-			</el-menu>
-		</el-aside>
-		<el-container>
-			<el-header height="56px" class="header">
-				<span class="title">{{ title }}</span>
-			</el-header>
-			<el-main class="main">
-				<RouterView />
-			</el-main>
-		</el-container>
-	</el-container>
+	<div class="shell">
+		<div v-if="mobileOpen" class="mobile-backdrop" @click="mobileOpen = false" />
+
+		<aside class="aside" :class="{ 'is-open': mobileOpen }">
+			<div class="brand">
+				<span class="brand-mark" aria-hidden="true">Z</span>
+				<span class="brand-name">Zako Panel</span>
+			</div>
+
+			<nav class="nav" aria-label="主导航">
+				<RouterLink
+					v-for="item in items"
+					:key="item.path"
+					:to="item.path"
+					class="nav-item"
+					:class="{ 'is-active': activeMenu === item.path }"
+				>
+					<AppIcon :name="item.icon" :size="16" />
+					<span>{{ item.label }}</span>
+				</RouterLink>
+			</nav>
+
+			<div class="aside-footer">
+				<span class="aside-meta">控制面板</span>
+			</div>
+		</aside>
+
+		<div class="workspace">
+			<header class="header">
+				<div class="header-inner">
+					<div class="header-left">
+						<button type="button" class="menu-trigger" aria-label="打开导航" @click="mobileOpen = !mobileOpen">
+							<AppIcon name="menu" :size="18" />
+						</button>
+						<h1 class="page-title">{{ title }}</h1>
+					</div>
+				</div>
+			</header>
+
+			<main class="main">
+				<div class="main-inner">
+					<RouterView />
+				</div>
+			</main>
+		</div>
+	</div>
 </template>
 
 <style scoped>
 .shell {
 	min-height: 100vh;
+	display: flex;
+	background: var(--bg-canvas);
 }
 
 .aside {
-	background: #111827;
+	width: 232px;
+	flex: none;
+	background: var(--bg-surface);
+	border-right: 1px solid var(--border-color);
 	display: flex;
 	flex-direction: column;
+	position: sticky;
+	top: 0;
+	height: 100vh;
+	z-index: 30;
 }
 
 .brand {
 	height: 56px;
 	display: flex;
 	align-items: center;
-	gap: 4px;
-	padding: 0 20px;
-	color: #f9fafb;
-	font-size: 15px;
-	font-weight: 600;
-	letter-spacing: 0.08em;
+	gap: 10px;
+	padding: 0 18px;
+	border-bottom: 1px solid var(--border-subtle);
 }
 
-.brand span {
-	color: #6b7280;
-	font-weight: 400;
+.brand-mark {
+	width: 26px;
+	height: 26px;
+	border-radius: 7px;
+	background: var(--text-primary);
+	color: #ffffff;
+	font-size: 13px;
+	font-weight: 700;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	letter-spacing: 0.02em;
+}
+
+.brand-name {
+	font-size: 14.5px;
+	font-weight: 600;
+	color: var(--text-primary);
+	letter-spacing: -0.01em;
 }
 
 .nav {
-	border-right: none;
 	flex: 1;
+	padding: 14px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	overflow-y: auto;
+}
+
+.nav-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+	border-radius: 8px;
+	color: var(--text-secondary);
+	text-decoration: none;
+	font-size: 13.5px;
+	font-weight: 500;
+	transition:
+		background-color 0.15s ease,
+		color 0.15s ease;
+}
+
+.nav-item:hover {
+	background: var(--bg-subtle);
+	color: var(--text-primary);
+}
+
+.nav-item.is-active {
+	background: var(--accent-primary-soft);
+	color: var(--accent-primary);
+	font-weight: 600;
+}
+
+.aside-footer {
+	padding: 12px 18px;
+	border-top: 1px solid var(--border-subtle);
+}
+
+.aside-meta {
+	font-size: 12px;
+	color: var(--text-placeholder);
+}
+
+.workspace {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 .header {
+	height: 56px;
+	background: var(--bg-surface);
+	border-bottom: 1px solid var(--border-color);
+	position: sticky;
+	top: 0;
+	z-index: 20;
 	display: flex;
 	align-items: center;
-	background: #ffffff;
-	border-bottom: 1px solid #e5e7eb;
 }
 
-.title {
+.header-inner {
+	width: 100%;
+	max-width: 1320px;
+	margin: 0 auto;
+	padding: 0 24px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.header-left {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.menu-trigger {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--border-color);
+	border-radius: 7px;
+	background: var(--bg-surface);
+	color: var(--text-secondary);
+	cursor: pointer;
+}
+
+.menu-trigger:hover {
+	background: var(--bg-subtle);
+	color: var(--text-primary);
+}
+
+.page-title {
+	margin: 0;
 	font-size: 16px;
 	font-weight: 600;
-	color: #111827;
+	color: var(--text-primary);
+	letter-spacing: -0.01em;
 }
 
 .main {
+	flex: 1;
 	padding: 24px;
-	background: #f5f7fa;
+}
+
+.main-inner {
+	max-width: 1272px;
+	margin: 0 auto;
+}
+
+.mobile-backdrop {
+	display: none;
+}
+
+@media (max-width: 900px) {
+	.aside {
+		position: fixed;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		transform: translateX(-100%);
+		transition: transform 0.2s ease;
+	}
+
+	.aside.is-open {
+		transform: translateX(0);
+	}
+
+	.mobile-backdrop {
+		display: block;
+		position: fixed;
+		inset: 0;
+		background: rgba(15, 23, 42, 0.35);
+		z-index: 25;
+	}
+
+	.menu-trigger {
+		display: inline-flex;
+	}
+
+	.header-inner {
+		padding: 0 16px;
+	}
+
+	.main {
+		padding: 16px;
+	}
 }
 </style>

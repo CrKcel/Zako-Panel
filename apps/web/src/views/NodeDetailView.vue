@@ -8,6 +8,8 @@ import { trafficApi } from '../api/traffic';
 import EndpointFormFields from '../components/EndpointFormFields.vue';
 import NodeConfigPanel from '../components/NodeConfigPanel.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatCard from '../components/StatCard.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
@@ -179,74 +181,66 @@ async function submitDeleteNode(): Promise<void> {
 <template>
 	<div v-loading="loading">
 		<PageToolbar spread>
-			<el-button @click="backToList">返回列表</el-button>
-			<div>
-				<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
-					{{ node.status === 'uninstalling' ? '强制删除节点' : '删除节点' }}
-				</el-button>
-				<el-button :loading="loading" @click="refresh">刷新</el-button>
-			</div>
+			<template #left>
+				<el-button @click="backToList">返回列表</el-button>
+			</template>
+			<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
+				{{ node.status === 'uninstalling' ? '强制删除节点' : '删除节点' }}
+			</el-button>
+			<el-button :loading="loading" @click="refresh">刷新</el-button>
 		</PageToolbar>
 
-		<el-card shadow="never" class="section">
+		<el-card shadow="never" class="ui-section">
 			<template #header>
-				<span class="card-title">{{ node?.name ?? '—' }}</span>
+				<div class="ui-card-header">
+					<span class="ui-card-title">{{ node?.name ?? '—' }}</span>
+					<StatusBadge v-if="node" :label="nodeStatusDescriptor(node.status).label" :type="nodeStatusDescriptor(node.status).tag" />
+				</div>
 			</template>
 			<el-descriptions :column="3" border>
 				<el-descriptions-item label="状态">
-					<el-tag v-if="node" :type="nodeStatusDescriptor(node.status).tag" disable-transitions>
-						{{ nodeStatusDescriptor(node.status).label }}
-					</el-tag>
+					<StatusBadge v-if="node" :label="nodeStatusDescriptor(node.status).label" :type="nodeStatusDescriptor(node.status).tag" />
 					<span v-else>—</span>
 				</el-descriptions-item>
-				<el-descriptions-item label="心跳间隔">{{ node ? `${node.heartbeat_interval_seconds}s` : '—' }}</el-descriptions-item>
-				<el-descriptions-item label="最近心跳">{{ formatTimestamp(node?.last_seen_at) }}</el-descriptions-item>
-				<el-descriptions-item label="Agent 版本">{{ node?.agent_version ?? '—' }}</el-descriptions-item>
-				<el-descriptions-item label="Xray 版本">{{ node?.xray_version ?? '—' }}</el-descriptions-item>
+				<el-descriptions-item label="心跳间隔">
+					<span class="tnum">{{ node ? `${node.heartbeat_interval_seconds}s` : '—' }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="最近心跳">
+					<span class="tnum">{{ formatTimestamp(node?.last_seen_at) }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="Agent 版本">
+					<span class="mono">{{ node?.agent_version ?? '—' }}</span>
+				</el-descriptions-item>
+				<el-descriptions-item label="Xray 版本">
+					<span class="mono">{{ node?.xray_version ?? '—' }}</span>
+				</el-descriptions-item>
 				<el-descriptions-item label="配置版本">
-					{{ node ? `${node.applied_config_version} / ${node.desired_config_version}` : '—' }}
+					<span class="tnum">{{ node ? `${node.applied_config_version} / ${node.desired_config_version}` : '—' }}</span>
 				</el-descriptions-item>
 				<el-descriptions-item label="Xray 健康">
-					<el-tag :type="healthDescriptor(node?.xray_healthy).tag" disable-transitions>
-						{{ healthDescriptor(node?.xray_healthy).label }}
-					</el-tag>
+					<StatusBadge :label="healthDescriptor(node?.xray_healthy).label" :type="healthDescriptor(node?.xray_healthy).tag" />
 				</el-descriptions-item>
 				<el-descriptions-item label="统计健康">
-					<el-tag :type="healthDescriptor(node?.stats_healthy).tag" disable-transitions>
-						{{ healthDescriptor(node?.stats_healthy).label }}
-					</el-tag>
+					<StatusBadge :label="healthDescriptor(node?.stats_healthy).label" :type="healthDescriptor(node?.stats_healthy).tag" />
 				</el-descriptions-item>
-				<el-descriptions-item label="配置错误">{{ node?.last_config_error ?? '—' }}</el-descriptions-item>
+				<el-descriptions-item label="配置错误">
+					<span :class="{ 'error-text': Boolean(node?.last_config_error) }">{{ node?.last_config_error ?? '—' }}</span>
+				</el-descriptions-item>
 			</el-descriptions>
 		</el-card>
 
-		<el-card shadow="never" class="section">
-			<template #header>
-				<span class="card-title">系统指标</span>
-			</template>
-			<div class="metric-grid">
-				<div class="metric">
-					<div class="metric-label">CPU</div>
-					<div class="metric-value">{{ formatPercent(sys?.cpu) }}</div>
-				</div>
-				<div class="metric">
-					<div class="metric-label">内存</div>
-					<div class="metric-value">{{ formatPercent(sys?.mem) }}</div>
-				</div>
-				<div class="metric">
-					<div class="metric-label">负载</div>
-					<div class="metric-value">{{ sys ? sys.load.toFixed(2) : '—' }}</div>
-				</div>
-				<div class="metric">
-					<div class="metric-label">Uptime</div>
-					<div class="metric-value">{{ formatDuration(sys?.uptime) }}</div>
-				</div>
-			</div>
-		</el-card>
+		<div class="stats-grid ui-section">
+			<StatCard label="CPU" :value="formatPercent(sys?.cpu)" />
+			<StatCard label="内存" :value="formatPercent(sys?.mem)" />
+			<StatCard label="负载" :value="sys ? sys.load.toFixed(2) : '—'" />
+			<StatCard label="Uptime" :value="formatDuration(sys?.uptime)" />
+		</div>
 
-		<el-card shadow="never" class="section">
+		<el-card shadow="never" class="ui-section">
 			<template #header>
-				<span class="card-title">用户凭据</span>
+				<div class="ui-card-header">
+					<span class="ui-card-title">用户凭据</span>
+				</div>
 			</template>
 			<el-table :data="clients" empty-text="暂无数据">
 				<el-table-column prop="subscriber_name" label="订阅用户" min-width="140" />
@@ -262,45 +256,61 @@ async function submitDeleteNode(): Promise<void> {
 						<el-button link type="primary" @click="copyText(row.vless_uuid)">复制</el-button>
 					</template>
 				</el-table-column>
-				<el-table-column label="状态" width="90">
+				<el-table-column label="状态" width="95">
 					<template #default="{ row }">
-						<el-tag :type="row.enabled ? 'success' : 'info'" disable-transitions>
-							{{ row.enabled ? '启用' : '停用' }}
-						</el-tag>
+						<StatusBadge :label="row.enabled ? '启用' : '停用'" :type="row.enabled ? 'success' : 'info'" />
 					</template>
 				</el-table-column>
 			</el-table>
 		</el-card>
 
-		<el-card shadow="never" class="section">
+		<el-card shadow="never" class="ui-section">
 			<template #header>
-				<div class="card-header">
-					<span class="card-title">端点</span>
+				<div class="ui-card-header">
+					<span class="ui-card-title">端点</span>
 					<el-button type="primary" @click="openCreateEndpoint">新增端点</el-button>
 				</div>
 			</template>
 			<el-table v-loading="loading" :data="endpoints" empty-text="暂无数据">
 				<el-table-column prop="name" label="名称" min-width="140" />
-				<el-table-column prop="protocol" label="协议" width="140" />
-				<el-table-column prop="host" label="地址" min-width="180" />
-				<el-table-column prop="port" label="端口" width="90" />
+				<el-table-column prop="protocol" label="协议" width="130">
+					<template #default="{ row }">
+						<span class="mono">{{ row.protocol }}</span>
+					</template>
+				</el-table-column>
+				<el-table-column prop="host" label="地址" min-width="180">
+					<template #default="{ row }">
+						<span class="mono">{{ row.host }}</span>
+					</template>
+				</el-table-column>
+				<el-table-column prop="port" label="端口" width="90">
+					<template #default="{ row }">
+						<span class="tnum">{{ row.port }}</span>
+					</template>
+				</el-table-column>
 				<el-table-column label="SNI" min-width="160">
-					<template #default="{ row }">{{ row.params.sni }}</template>
+					<template #default="{ row }">
+						<span class="mono">{{ row.params.sni }}</span>
+					</template>
 				</el-table-column>
 				<el-table-column label="Public Key" min-width="180">
-					<template #default="{ row }">{{ row.params.public_key }}</template>
+					<template #default="{ row }">
+						<span class="mono">{{ row.params.public_key }}</span>
+					</template>
 				</el-table-column>
 				<el-table-column label="Short ID" width="120">
-					<template #default="{ row }">{{ row.params.short_id || '—' }}</template>
+					<template #default="{ row }">
+						<span class="mono">{{ row.params.short_id || '—' }}</span>
+					</template>
 				</el-table-column>
 				<el-table-column label="Fingerprint" width="120">
-					<template #default="{ row }">{{ row.params.fingerprint }}</template>
-				</el-table-column>
-				<el-table-column label="状态" width="90">
 					<template #default="{ row }">
-						<el-tag :type="row.enabled ? 'success' : 'info'" disable-transitions>
-							{{ row.enabled ? '启用' : '停用' }}
-						</el-tag>
+						<span class="mono">{{ row.params.fingerprint }}</span>
+					</template>
+				</el-table-column>
+				<el-table-column label="状态" width="95">
+					<template #default="{ row }">
+						<StatusBadge :label="row.enabled ? '启用' : '停用'" :type="row.enabled ? 'success' : 'info'" />
 					</template>
 				</el-table-column>
 				<el-table-column label="操作" width="150" fixed="right">
@@ -336,11 +346,11 @@ async function submitDeleteNode(): Promise<void> {
 	</div>
 
 	<el-dialog v-model="deleteDialogVisible" title="删除节点" width="480px" destroy-on-close>
-		<p>
+		<p class="delete-confirm">
 			确认删除节点「<strong>{{ node?.name }}</strong
 			>」？该操作不可恢复。
 		</p>
-		<el-form label-width="180px" style="margin-top: 16px">
+		<el-form label-width="180px" class="delete-form">
 			<el-form-item v-if="node?.last_seen_at !== null && node?.status !== 'uninstalling'" label="仅从面板强制删除">
 				<el-switch v-model="deleteForce" />
 			</el-form-item>
@@ -382,42 +392,29 @@ async function submitDeleteNode(): Promise<void> {
 </template>
 
 <style scoped>
-.section {
-	margin-bottom: 16px;
-}
-
-.card-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-}
-
-.card-title {
-	font-size: 14px;
-	font-weight: 600;
-}
-
-.metric-grid {
+.stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-	gap: 16px;
-}
-
-.metric-label {
-	font-size: 13px;
-	color: #6b7280;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 14px;
 }
 
 .credential {
 	margin-right: 8px;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--font-mono);
 	font-size: 12px;
+	color: var(--text-primary);
 }
 
-.metric-value {
-	margin-top: 8px;
-	font-size: 22px;
-	font-weight: 600;
-	color: #111827;
+.error-text {
+	color: var(--tone-danger);
+}
+
+.delete-confirm {
+	margin: 0;
+	color: var(--text-primary);
+}
+
+.delete-form {
+	margin-top: 16px;
 }
 </style>

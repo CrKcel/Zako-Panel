@@ -5,6 +5,7 @@ import { ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
 import PageToolbar from '../components/PageToolbar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -136,22 +137,34 @@ async function remove(profile: Profile): Promise<void> {
 				<template #default="{ row }">{{ row.description ?? '—' }}</template>
 			</el-table-column>
 			<el-table-column label="节点选择" width="110">
-				<template #default="{ row }">{{ row.node_selection === 'all' ? '全部' : '指定' }}</template>
+				<template #default="{ row }">
+					<StatusBadge :label="row.node_selection === 'all' ? '全部' : '指定'" :type="row.node_selection === 'all' ? 'primary' : 'info'" />
+				</template>
 			</el-table-column>
-			<el-table-column label="在线过滤" width="100">
-				<template #default="{ row }">{{ row.online_only ? '启用' : '关闭' }}</template>
+			<el-table-column label="在线过滤" width="105">
+				<template #default="{ row }">
+					<StatusBadge :label="row.online_only ? '启用' : '关闭'" :type="row.online_only ? 'success' : 'info'" />
+				</template>
 			</el-table-column>
-			<el-table-column label="代理组" width="90">
-				<template #default="{ row }">{{ row.proxy_groups.length }}</template>
+			<el-table-column label="代理组" width="85">
+				<template #default="{ row }">
+					<span class="tnum">{{ row.proxy_groups.length }}</span>
+				</template>
 			</el-table-column>
-			<el-table-column label="规则数" width="90">
-				<template #default="{ row }">{{ row.rules.length }}</template>
+			<el-table-column label="规则数" width="85">
+				<template #default="{ row }">
+					<span class="tnum">{{ row.rules.length }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="修订" width="80">
-				<template #default="{ row }">{{ row.revision }}</template>
+				<template #default="{ row }">
+					<span class="tnum">v{{ row.revision }}</span>
+				</template>
 			</el-table-column>
-			<el-table-column label="更新时间" width="180">
-				<template #default="{ row }">{{ formatTimestamp(row.updated_at) }}</template>
+			<el-table-column label="更新时间" width="175">
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.updated_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column label="操作" width="190" fixed="right">
 				<template #default="{ row }">
@@ -192,13 +205,13 @@ async function remove(profile: Profile): Promise<void> {
 				<el-switch v-model="form.online_only" />
 			</el-form-item>
 			<el-form-item label="clash_base" prop="clash_base">
-				<el-input v-model="form.clash_base" type="textarea" :rows="5" />
+				<el-input v-model="form.clash_base" type="textarea" :rows="5" class="code-input" />
 			</el-form-item>
 			<el-form-item label="proxy_groups" prop="proxy_groups">
-				<el-input v-model="form.proxy_groups" type="textarea" :rows="6" />
+				<el-input v-model="form.proxy_groups" type="textarea" :rows="6" class="code-input" />
 			</el-form-item>
 			<el-form-item label="rules" prop="rules">
-				<el-input v-model="form.rules" type="textarea" :rows="6" />
+				<el-input v-model="form.rules" type="textarea" :rows="6" class="code-input" />
 			</el-form-item>
 		</el-form>
 		<template #footer>
@@ -220,10 +233,14 @@ async function remove(profile: Profile): Promise<void> {
 				/>
 				<el-descriptions :column="3" border size="small">
 					<el-descriptions-item label="订阅用户">{{ preview.subscriber.name }}</el-descriptions-item>
-					<el-descriptions-item label="节点数">{{ preview.proxies.length }}</el-descriptions-item>
-					<el-descriptions-item label="跳过节点">{{ preview.skipped.length }}</el-descriptions-item>
+					<el-descriptions-item label="节点数">
+						<span class="tnum">{{ preview.proxies.length }}</span>
+					</el-descriptions-item>
+					<el-descriptions-item label="跳过节点">
+						<span class="tnum">{{ preview.skipped.length }}</span>
+					</el-descriptions-item>
 				</el-descriptions>
-				<el-input class="preview-document" type="textarea" :model-value="preview.document" :rows="16" readonly />
+				<el-input class="preview-document code-input" type="textarea" :model-value="preview.document" :rows="16" readonly />
 				<el-table v-if="preview.skipped.length > 0" :data="preview.skipped" size="small" class="preview-skipped">
 					<el-table-column prop="node_name" label="节点" min-width="160" />
 					<el-table-column label="原因" min-width="160">
@@ -236,6 +253,16 @@ async function remove(profile: Profile): Promise<void> {
 </template>
 
 <style scoped>
+.full-width {
+	width: 100%;
+}
+
+.code-input :deep(textarea) {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
 .preview-alert {
 	margin-bottom: 12px;
 }
@@ -246,9 +273,5 @@ async function remove(profile: Profile): Promise<void> {
 
 .preview-skipped {
 	margin-top: 4px;
-}
-
-.full-width {
-	width: 100%;
 }
 </style>

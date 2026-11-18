@@ -15,11 +15,11 @@ polkit.addRule(function (action, subject) {
     if (!subject.user || subject.user !== "zako-agent") {
         return null;
     }
-    if (action.lookup("unit") !== "xray.service") {
-        return null;
+    if (action.lookup("unit") === "xray.service" && action.lookup("verb") === "restart") {
+        return polkit.Result.YES;
     }
-    if (action.lookup("verb") !== "restart") {
-        return null;
+    if (action.lookup("unit") === "zako-agent-uninstall.service" && action.lookup("verb") === "start") {
+        return polkit.Result.YES;
     }
-    return polkit.Result.YES;
+    return null;
 });

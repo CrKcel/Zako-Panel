@@ -159,6 +159,47 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteNode
+      tags: [admin]
+      summary: Delete a node or request remote agent uninstall
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: remove_xray
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '202':
+          description: Node marked as uninstalling; waiting for agent acknowledgement
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '204':
+          description: Node deleted immediately
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/nodes/{nodeId}/agent-token/rotate:
     post:
       operationId: rotateAgentToken
@@ -1310,6 +1351,26 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/agent/uninstall:
+    post:
+      operationId: reportAgentUninstall
+      tags: [agent]
+      summary: Acknowledge panel-initiated uninstall or initiate node-side self-uninstall
+      security:
+        - AgentToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentUninstallRequest'
+      responses:
+        '204':
+          description: Node removed from control plane
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /sub/{token}/clash.yaml:
     get:
       operationId: getClashSubscription
@@ -1550,7 +1611,7 @@ components:
               type: string
     NodeStatus:
       type: string
-      enum: [online, degraded, offline, disabled]
+      enum: [online, degraded, offline, disabled, uninstalling]
     NodeStatusDetail:
       type: object
       required:
@@ -1621,6 +1682,10 @@ components:
           type: [string, 'null']
         last_config_at:
           type: [integer, 'null']
+        uninstall_requested_at:
+          type: [integer, 'null']
+        uninstall_remove_xray:
+          type: boolean
         created_at:
           type: integer
         updated_at:
@@ -2030,6 +2095,12 @@ components:
         payload:
           type: object
           additionalProperties: true
+    AgentUninstallRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum: [panel_directive, node_cli]
     AgentReportResponse:
       type: object
       required:

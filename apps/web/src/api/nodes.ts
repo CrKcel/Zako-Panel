@@ -62,6 +62,15 @@ export const nodesApi = {
 	update(nodeId: string, input: UpdateNodeRequest): Promise<Node> {
 		return apiRequest<Node>(`/api/v1/admin/nodes/${nodeId}`, { method: 'PATCH', body: input });
 	},
+	remove(nodeId: string, options: { force?: boolean; removeXray?: boolean } = {}): Promise<Node | void> {
+		return apiRequest<Node | void>(`/api/v1/admin/nodes/${nodeId}`, {
+			method: 'DELETE',
+			query: {
+				force: options.force ? 'true' : 'false',
+				remove_xray: options.removeXray ? 'true' : 'false',
+			},
+		});
+	},
 	rotateAgentToken(nodeId: string): Promise<{ agent_token: string }> {
 		return apiRequest<{ agent_token: string }>(`/api/v1/admin/nodes/${nodeId}/agent-token/rotate`, {
 			method: 'POST',

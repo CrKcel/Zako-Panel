@@ -26,6 +26,7 @@ const (
 	usersPath        = "/api/v1/agent/users"
 	configPath       = "/api/v1/agent/config"
 	configResultPath = "/api/v1/agent/config/result"
+	uninstallPath    = "/api/v1/agent/uninstall"
 	maxResponseSize  = 1 << 20
 )
 
@@ -77,6 +78,20 @@ type TrafficUser struct {
 type Directive struct {
 	Type    string                     `json:"type"`
 	Payload map[string]json.RawMessage `json:"payload,omitempty"`
+}
+
+// UninstallDirectivePayload is the payload for Directive{Type: "uninstall"}.
+type UninstallDirectivePayload struct {
+	RemoveXray bool `json:"remove_xray"`
+}
+
+const (
+	UninstallReasonPanelDirective = "panel_directive"
+	UninstallReasonNodeCLI        = "node_cli"
+)
+
+type uninstallRequest struct {
+	Reason string `json:"reason"`
 }
 
 // Response is the data object returned by POST /api/v1/agent/report. The Worker's
@@ -301,6 +316,21 @@ func (r *Reporter) FetchUsers(ctx context.Context, etag string) (users *UsersRes
 		return nil, false, errors.New("fetch users: response missing data")
 	}
 	return body.Data, false, nil
+}
+
+// NotifyUninstall notifies the control plane that this node is uninstalling.
+func (r *Reporter) NotifyUninstall(ctx context.Context, reason string) error {
+	if reason == "" {
+		reason = UninstallReasonNodeCLI
+	}
+	result, err := r.do(ctx, http.MethodPost, uninstallPath, &uninstallRequest{Reason: reason}, nil)
+	if err != nil {
+		return fmt.Errorf("notify uninstall: %w", err)
+	}
+	if err := result.httpError(); err != nil {
+		return fmt.Errorf("notify uninstall: %w", err)
+	}
+	return nil
 }
 
 // FetchConfig returns the node's desired static configuration definition.

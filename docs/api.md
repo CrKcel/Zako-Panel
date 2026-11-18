@@ -34,7 +34,7 @@
 
 由 Cloudflare Access 保护，仅接受同源请求，通过 JWT 里的邮箱识别管理员身份（用于审计记录）。资源按功能拆分为：
 
-- **节点与端点**：`/nodes`、`/nodes/{nodeId}/endpoints`、`/nodes/{nodeId}/status`、`/nodes/{nodeId}/clients`、`/nodes/{nodeId}/agent-token/rotate`
+- **节点与端点**：`/nodes`（含 `DELETE /nodes/{nodeId}` 优雅卸载或强制删除）、`/nodes/{nodeId}/endpoints`、`/nodes/{nodeId}/status`、`/nodes/{nodeId}/clients`、`/nodes/{nodeId}/agent-token/rotate`
 - **一次性节点注册令牌**：`/node-enrollment-tokens`（默认 24 小时有效，用完即作废）
 - **节点配置版本**：`/nodes/{nodeId}/configs`（下发、查看 diff、基于历史版本生成新版本回滚）
 - **订阅档案与预览**：`/profiles`、`/profiles/{profileId}/preview`
@@ -61,6 +61,7 @@
 | `GET /agent/users` | 拉取当前节点有效用户 | 支持 `ETag` / `If-None-Match`，版本没变直接返回 `304 Not Modified` |
 | `GET /agent/config` | 拉取目标 Xray 配置 | 返回规范化 JSON 与 SHA-256 哈希；已是目标版本则返回 `204 No Content` |
 | `POST /agent/config/result` | 上报配置应用结果 | 汇报 `applied` 或 `failed` 及结构化错误信息 |
+| `POST /agent/uninstall` | 节点卸载确认 / 主动注销 | 节点确认面板下发的 `uninstall` 指令或执行 `zako-agent uninstall` 时调用，从控制面删除节点记录 |
 
 ---
 

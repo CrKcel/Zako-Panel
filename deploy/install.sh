@@ -17,6 +17,7 @@ readonly BIN_PATH="/usr/local/bin/zako-agent"
 readonly CONFIG_DIR="/etc/zako-agent"
 readonly STATE_DIR="/var/lib/zako-agent"
 readonly UNIT_PATH="/etc/systemd/system/zako-agent.service"
+readonly UNINSTALL_UNIT_PATH="/etc/systemd/system/zako-agent-uninstall.service"
 readonly POLKIT_RULE="/etc/polkit-1/rules.d/50-zako-agent-xray.rules"
 readonly TOKEN_PATH="${CONFIG_DIR}/token"
 readonly CONFIG_PATH="${CONFIG_DIR}/config.yaml"
@@ -241,6 +242,9 @@ if [[ ! -f "${SCRIPT_DIR}/systemd/zako-agent.service" ]]; then
 	die "systemd unit not found at ${SCRIPT_DIR}/systemd/zako-agent.service"
 fi
 install -m 0644 -o root -g root "${SCRIPT_DIR}/systemd/zako-agent.service" "${UNIT_PATH}"
+if [[ -f "${SCRIPT_DIR}/systemd/zako-agent-uninstall.service" ]]; then
+	install -m 0644 -o root -g root "${SCRIPT_DIR}/systemd/zako-agent-uninstall.service" "${UNINSTALL_UNIT_PATH}"
+fi
 
 # The agent applies user sets through HandlerService and restarts xray.service only
 # when a hot update fails. The unit runs unprivileged, so the restart is authorized

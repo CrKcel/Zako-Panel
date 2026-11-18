@@ -12,7 +12,8 @@ export const agentAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	if (!parsed) throw new AppError('UNAUTHORIZED', 'Invalid agent token', 401);
 
 	const node = await findAgentAuthById(c.env.DB, parsed.nodeId);
-	if (!node || node.enabled !== 1) {
+	const uninstalling = node !== null && node.uninstall_requested_at !== null;
+	if (!node || (node.enabled !== 1 && !uninstalling)) {
 		throw new AppError('UNAUTHORIZED', 'Invalid agent token', 401);
 	}
 
@@ -21,6 +22,10 @@ export const agentAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 		throw new AppError('UNAUTHORIZED', 'Invalid agent token', 401);
 	}
 
-	c.set('agent', { nodeId: node.id });
+	if (uninstalling && !c.req.path.endsWith('/report') && !c.req.path.endsWith('/uninstall')) {
+		throw new AppError('CONFLICT', 'Node is uninstalling', 409);
+	}
+
+	c.set('agent', { nodeId: node.id, uninstalling });
 	await next();
 };

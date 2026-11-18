@@ -151,6 +151,21 @@ export const publishConfigSchema = z.object({
 	definition: z.record(z.string(), z.unknown()),
 });
 
+const queryBooleanSchema = z.preprocess((value) => {
+	if (value === 'true' || value === '1') return true;
+	if (value === 'false' || value === '0' || value === undefined || value === '') return false;
+	return value;
+}, z.boolean());
+
+export const deleteNodeQuerySchema = z.object({
+	force: queryBooleanSchema.default(false),
+	remove_xray: queryBooleanSchema.default(false),
+});
+
+export const agentUninstallSchema = z.object({
+	reason: z.enum(['panel_directive', 'node_cli']).default('node_cli'),
+});
+
 const trafficBytesSchema = z.number().int().nonnegative();
 
 export const agentReportSchema = z.object({

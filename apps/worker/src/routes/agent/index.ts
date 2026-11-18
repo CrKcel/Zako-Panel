@@ -4,6 +4,7 @@ import type { AppEnv } from '../../types';
 import { configRoutes } from './config';
 import { enrollRoutes } from './enroll';
 import { reportRoutes } from './report';
+import { uninstallRoutes } from './uninstall';
 import { usersRoutes } from './users';
 
 export const agentRoutes = new Hono<AppEnv>();
@@ -15,3 +16,4 @@ agentRoutes.use('*', agentAuth);
 agentRoutes.route('/report', reportRoutes);
 agentRoutes.route('/users', usersRoutes);
 agentRoutes.route('/config', configRoutes);
+agentRoutes.route('/uninstall', uninstallRoutes);

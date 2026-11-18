@@ -33,7 +33,8 @@ export interface paths {
         get: operations["getNode"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a node or request remote agent uninstall */
+        delete: operations["deleteNode"];
         options?: never;
         head?: never;
         /** Update node settings */
@@ -481,6 +482,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge panel-initiated uninstall or initiate node-side self-uninstall */
+        post: operations["reportAgentUninstall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}/clash.yaml": {
         parameters: {
             query?: never;
@@ -534,7 +552,7 @@ export interface components {
             };
         };
         /** @enum {string} */
-        NodeStatus: "online" | "degraded" | "offline" | "disabled";
+        NodeStatus: "online" | "degraded" | "offline" | "disabled" | "uninstalling";
         NodeStatusDetail: {
             node_id: string;
             status: components["schemas"]["NodeStatus"];
@@ -562,6 +580,8 @@ export interface components {
             applied_config_version: number;
             last_config_error?: string | null;
             last_config_at?: number | null;
+            uninstall_requested_at?: number | null;
+            uninstall_remove_xray?: boolean;
             created_at: number;
             updated_at: number;
         };
@@ -750,6 +770,10 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             };
+        };
+        AgentUninstallRequest: {
+            /** @enum {string} */
+            reason?: "panel_directive" | "node_cli";
         };
         AgentReportResponse: {
             ack_report_id: string | null;
@@ -1126,6 +1150,44 @@ export interface operations {
                         meta: components["schemas"]["Meta"];
                     };
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteNode: {
+        parameters: {
+            query?: {
+                force?: boolean;
+                remove_xray?: boolean;
+            };
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node marked as uninstalling; waiting for agent acknowledgement */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Node"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            /** @description Node deleted immediately */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -2224,6 +2286,30 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    reportAgentUninstall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AgentUninstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Node removed from control plane */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     getClashSubscription: {

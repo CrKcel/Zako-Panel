@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/syncer"
 	"github.com/zako-panel/zako-agent/internal/sysinfo"
+	"github.com/zako-panel/zako-agent/internal/uninstall"
 	"github.com/zako-panel/zako-agent/internal/xrayapply"
 	"github.com/zako-panel/zako-agent/internal/xrayconfig"
 	"github.com/zako-panel/zako-agent/internal/xraycore"
@@ -48,6 +50,9 @@ func main() {
 func run(logger *slog.Logger) error {
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		return initcmd.Run(context.Background(), os.Args[2:], version, os.Stdout)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "uninstall" {
+		return uninstall.RunCLI(context.Background(), os.Args[2:], os.Stdout, os.Stderr)
 	}
 
 	configPath := flag.String("config", "/etc/zako-agent/config.yaml", "path to the agent configuration file")
@@ -185,6 +190,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(sigCtx)
+	defer cancel()
+
+	var uninstallOnce sync.Once
 	reporterLoop, err := reporter.NewLoop(reporter.LoopOptions{
 		Client:            reporterClient,
 		Store:             store,
@@ -198,7 +209,29 @@ func run(logger *slog.Logger) error {
 		// A response carries the Worker's users_ver and desired_config_version.
 		// It only wakes the syncers: the applied versions advance after the node
 		// actually converged, which keeps a failed apply visible in the next heartbeat.
-		OnResponse: func(*reporter.Response) {
+		OnResponse: func(resp *reporter.Response) {
+			if resp != nil {
+				if triggered, removeXray := uninstall.ParseUninstallDirective(resp.Directives); triggered {
+					uninstallOnce.Do(func() {
+						go func() {
+							logger.Info("uninstall directive received", "remove_xray", removeXray)
+							ackCtx, ackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+							if err := reporterClient.NotifyUninstall(ackCtx, reporter.UninstallReasonPanelDirective); err != nil {
+								logger.Warn("uninstall ack failed; continuing local cleanup", "error", err)
+							}
+							ackCancel()
+
+							trigCtx, trigCancel := context.WithTimeout(context.Background(), 15*time.Second)
+							if err := uninstall.TriggerFromDirective(trigCtx, removeXray, filepath.Dir(cfg.StatePath), nil, nil); err != nil {
+								logger.Error("trigger uninstall unit failed", "error", err)
+							}
+							trigCancel()
+							cancel()
+						}()
+					})
+					return
+				}
+			}
 			userSyncer.Trigger()
 			configSyncer.Trigger()
 		},
@@ -206,9 +239,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	logger.Info("agent started",
 		"control_plane_url", cfg.ControlPlaneURL,

@@ -140,13 +140,52 @@ async function enableEndpoint(endpoint: Endpoint): Promise<void> {
 function backToList(): void {
 	void router.push({ name: 'nodes' });
 }
+
+const deleteDialogVisible = ref(false);
+const deleteForce = ref(false);
+const deleteRemoveXray = ref(false);
+
+function openDeleteDialog(): void {
+	if (!node.value) return;
+	deleteForce.value = node.value.status === 'uninstalling' || node.value.last_seen_at === null;
+	deleteRemoveXray.value = false;
+	deleteDialogVisible.value = true;
+}
+
+const deleteNodeAction = useAsyncAction(
+	async () => {
+		if (!node.value) return;
+		const res = await nodesApi.remove(node.value.id, {
+			force: deleteForce.value,
+			removeXray: deleteRemoveXray.value,
+		});
+		deleteDialogVisible.value = false;
+		if (res) {
+			showSuccess('已下发远程卸载指令，等待节点确认');
+			await reloadNode();
+		} else {
+			showSuccess('节点已删除');
+			backToList();
+		}
+	},
+	{ onError: (error) => showError(error, '删除节点失败') },
+);
+
+async function submitDeleteNode(): Promise<void> {
+	await deleteNodeAction.runFor('delete');
+}
 </script>
 
 <template>
 	<div v-loading="loading">
 		<PageToolbar spread>
 			<el-button @click="backToList">返回列表</el-button>
-			<el-button :loading="loading" @click="refresh">刷新</el-button>
+			<div>
+				<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
+					{{ node.status === 'uninstalling' ? '强制删除节点' : '删除节点' }}
+				</el-button>
+				<el-button :loading="loading" @click="refresh">刷新</el-button>
+			</div>
 		</PageToolbar>
 
 		<el-card shadow="never" class="section">
@@ -295,6 +334,35 @@ function backToList(): void {
 
 		<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" title="近 24 小时流量" />
 	</div>
+
+	<el-dialog v-model="deleteDialogVisible" title="删除节点" width="480px" destroy-on-close>
+		<p>
+			确认删除节点「<strong>{{ node?.name }}</strong
+			>」？该操作不可恢复。
+		</p>
+		<el-form label-width="180px" style="margin-top: 16px">
+			<el-form-item v-if="node?.last_seen_at !== null && node?.status !== 'uninstalling'" label="仅从面板强制删除">
+				<el-switch v-model="deleteForce" />
+			</el-form-item>
+			<el-form-item v-if="!deleteForce" label="同时卸载 Xray-core">
+				<el-switch v-model="deleteRemoveXray" />
+			</el-form-item>
+		</el-form>
+		<el-alert
+			v-if="!deleteForce"
+			type="info"
+			:closable="false"
+			show-icon
+			title="节点将在下次心跳时收到卸载指令，自动停止并清理本机 Agent 后从面板移除。"
+		/>
+		<el-alert v-else type="warning" :closable="false" show-icon title="将立即从控制面板删除该节点记录，不会等待节点回传卸载确认。" />
+		<template #footer>
+			<el-button @click="deleteDialogVisible = false">取消</el-button>
+			<el-button type="danger" :loading="deleteNodeAction.isRunning('delete')" @click="submitDeleteNode">
+				{{ deleteForce ? '强制删除' : '确认卸载并删除' }}
+			</el-button>
+		</template>
+	</el-dialog>
 
 	<el-dialog
 		v-model="endpointVisible"

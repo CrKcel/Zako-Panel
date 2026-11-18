@@ -90,5 +90,6 @@ Agent 不以 `root` 运行，而是用专用低权限用户 `zako-agent` 启动�
 - `/etc/xray` 目录属主为 `root:zako-agent`（权限 `0770`），允许 Agent 通过写临时文件 + rename 原子替换 `config.json`（`0640`）。
 - 私钥 `/etc/xray/reality.key` 和用户快照 `/var/lib/zako-agent/users.json` 权限都是 `0600`，仅 `zako-agent` 可读。
 - 重启 Xray 不靠 `sudo`，而是通过一条专用 polkit 规则（`/etc/polkit-1/rules.d/50-zako-agent-xray.rules`），只允许 `zako-agent` 执行 `systemctl restart xray.service`。
+- 远程自卸载同样通过该 polkit 规则授权：收到控制面 `uninstall` 指令后，Agent 向 `/api/v1/agent/uninstall` 回传确认，再触发以 `root` 运行的 `zako-agent-uninstall.service` 完成系统目录、systemd 单元、polkit 规则与服务账号的清理。
 
 > 节点上排查问题时，主要看 `journalctl -u zako-agent -f` 和 `journalctl -u xray -f`。

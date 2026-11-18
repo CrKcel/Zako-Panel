@@ -256,6 +256,42 @@ function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string
 			return { label: '已作废', type: 'danger' };
 	}
 }
+
+const deleteDialogVisible = ref(false);
+const deletingNode = ref<Node | null>(null);
+const deleteForce = ref(false);
+const deleteRemoveXray = ref(false);
+
+function openDeleteDialog(node: Node): void {
+	deletingNode.value = node;
+	deleteForce.value = node.status === 'uninstalling' || node.last_seen_at === null;
+	deleteRemoveXray.value = false;
+	deleteDialogVisible.value = true;
+}
+
+const deleteAction = useAsyncAction(
+	async () => {
+		const target = deletingNode.value;
+		if (!target) return;
+		const res = await nodesApi.remove(target.id, {
+			force: deleteForce.value,
+			removeXray: deleteRemoveXray.value,
+		});
+		deleteDialogVisible.value = false;
+		if (res) {
+			showSuccess('已下发远程卸载指令，等待节点确认');
+		} else {
+			showSuccess('节点已删除');
+		}
+		await reload();
+	},
+	{ onError: (error) => showError(error, '删除节点失败') },
+);
+
+async function submitDeleteNode(): Promise<void> {
+	if (!deletingNode.value) return;
+	await deleteAction.runFor(deletingNode.value.id);
+}
 </script>
 
 <template>
@@ -307,14 +343,23 @@ function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string
 					</el-tag>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="240" fixed="right">
+			<el-table-column label="操作" width="290" fixed="right">
 				<template #default="{ row }">
 					<RouterLink :to="`/nodes/${row.id}`" custom v-slot="{ navigate }">
 						<el-button link type="primary" @click="navigate">详情</el-button>
 					</RouterLink>
 					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
-					<el-button link type="primary" :loading="rotateAction.isRunning(row.id)" @click="rotateAgentToken(row as Node)">
+					<el-button
+						link
+						type="primary"
+						:disabled="row.status === 'uninstalling'"
+						:loading="rotateAction.isRunning(row.id)"
+						@click="rotateAgentToken(row as Node)"
+					>
 						轮换 Token
+					</el-button>
+					<el-button link type="danger" :loading="deleteAction.isRunning(row.id)" @click="openDeleteDialog(row as Node)">
+						{{ row.status === 'uninstalling' ? '强制删除' : '删除' }}
 					</el-button>
 				</template>
 			</el-table-column>
@@ -440,6 +485,35 @@ function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string
 				</template>
 			</el-table-column>
 		</el-table>
+	</el-dialog>
+
+	<el-dialog v-model="deleteDialogVisible" title="删除节点" width="480px" destroy-on-close>
+		<p>
+			确认删除节点「<strong>{{ deletingNode?.name }}</strong
+			>」？该操作不可恢复。
+		</p>
+		<el-form label-width="180px" style="margin-top: 16px">
+			<el-form-item v-if="deletingNode?.last_seen_at !== null && deletingNode?.status !== 'uninstalling'" label="仅从面板强制删除">
+				<el-switch v-model="deleteForce" />
+			</el-form-item>
+			<el-form-item v-if="!deleteForce" label="同时卸载 Xray-core">
+				<el-switch v-model="deleteRemoveXray" />
+			</el-form-item>
+		</el-form>
+		<el-alert
+			v-if="!deleteForce"
+			type="info"
+			:closable="false"
+			show-icon
+			title="节点将在下次心跳时收到卸载指令，自动停止并清理本机 Agent 后从面板移除。"
+		/>
+		<el-alert v-else type="warning" :closable="false" show-icon title="将立即从控制面板删除该节点记录，不会等待节点回传卸载确认。" />
+		<template #footer>
+			<el-button @click="deleteDialogVisible = false">取消</el-button>
+			<el-button type="danger" :loading="deletingNode ? deleteAction.isRunning(deletingNode.id) : false" @click="submitDeleteNode">
+				{{ deleteForce ? '强制删除' : '确认卸载并删除' }}
+			</el-button>
+		</template>
 	</el-dialog>
 </template>
 

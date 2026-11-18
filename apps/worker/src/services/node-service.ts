@@ -26,13 +26,16 @@ import {
 } from '../repositories/endpoints';
 import { getMetaValue, META_KEYS } from '../repositories/meta';
 import {
+	deleteNodeById,
 	findNodeById,
 	insertNodeStatement,
 	listNodeRows,
+	markNodeUninstalling,
 	updateAgentTokenHash,
 	updateNode as updateNodeRow,
 	type NodeRow,
 } from '../repositories/nodes';
+import { insertAuditEvent } from '../repositories/audit-events';
 import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode } from '../repositories/subscribers';
 import type { ListQuery, Paginated } from '../types';
 import { bumpUsersVersionStatement } from './users-version';
@@ -85,6 +88,8 @@ export async function prepareNodeProvision(
 		applied_config_version: 0,
 		last_config_error: null,
 		last_config_at: null,
+		uninstall_requested_at: null,
+		uninstall_remove_xray: 0,
 		created_at: params.now,
 		updated_at: params.now,
 	};
@@ -176,6 +181,7 @@ function toNode(row: NodeRow, now: number): Node {
 		status: deriveNodeStatus(
 			{
 				enabled: row.enabled === 1,
+				uninstall_requested_at: row.uninstall_requested_at,
 				last_seen_at: row.last_seen_at,
 				heartbeat_interval_seconds: row.heartbeat_interval_seconds,
 				xray_healthy: optionalBoolean(row.xray_healthy),
@@ -194,6 +200,8 @@ function toNode(row: NodeRow, now: number): Node {
 		applied_config_version: row.applied_config_version,
 		last_config_error: row.last_config_error,
 		last_config_at: row.last_config_at,
+		uninstall_requested_at: row.uninstall_requested_at,
+		uninstall_remove_xray: row.uninstall_remove_xray === 1,
 		created_at: row.created_at,
 		updated_at: row.updated_at,
 	};
@@ -411,4 +419,72 @@ export async function disableEndpoint(db: D1Database, nodeId: string, endpointId
 	if (!node) throw nodeNotFound();
 	const changed = await disableEndpointRow(db, nodeId, endpointId, nowSeconds());
 	if (!changed) throw new AppError('NOT_FOUND', 'Endpoint not found', 404);
+}
+
+export interface DeleteNodeOptions {
+	force: boolean;
+	removeXray: boolean;
+	actorEmail: string | null;
+}
+
+/**
+ * Deletes a node immediately when forced or never seen, or marks it uninstalling
+ * so the agent receives the uninstall directive on its next heartbeat.
+ */
+export async function deleteOrUninstallNode(
+	db: D1Database,
+	nodeId: string,
+	options: DeleteNodeOptions,
+): Promise<{ deleted: true } | { deleted: false; node: Node }> {
+	const existing = await findNodeById(db, nodeId);
+	if (!existing) throw nodeNotFound();
+	const now = nowSeconds();
+
+	if (options.force || existing.last_seen_at === null) {
+		await deleteNodeById(db, nodeId);
+		await insertAuditEvent(db, {
+			id: newId(),
+			actor_email: options.actorEmail,
+			action: 'node.delete',
+			target_type: 'node',
+			target_id: nodeId,
+			detail_json: JSON.stringify({ force: options.force, name: existing.name }),
+			created_at: now,
+		});
+		return { deleted: true };
+	}
+
+	await markNodeUninstalling(db, nodeId, options.removeXray, now);
+	await insertAuditEvent(db, {
+		id: newId(),
+		actor_email: options.actorEmail,
+		action: 'node.uninstall_request',
+		target_type: 'node',
+		target_id: nodeId,
+		detail_json: JSON.stringify({ remove_xray: options.removeXray, name: existing.name }),
+		created_at: now,
+	});
+	const updated = await findNodeById(db, nodeId);
+	if (!updated) throw nodeNotFound();
+	return { deleted: false, node: toNode(updated, now) };
+}
+
+/**
+ * Removes a node when the agent acknowledges a panel-initiated uninstall or
+ * initiates self-uninstall from the node CLI.
+ */
+export async function completeAgentUninstall(db: D1Database, nodeId: string, reason: 'panel_directive' | 'node_cli'): Promise<void> {
+	const existing = await findNodeById(db, nodeId);
+	if (!existing) return;
+	const now = nowSeconds();
+	await deleteNodeById(db, nodeId);
+	await insertAuditEvent(db, {
+		id: newId(),
+		actor_email: null,
+		action: reason === 'panel_directive' ? 'node.uninstall_ack' : 'node.self_uninstall',
+		target_type: 'node',
+		target_id: nodeId,
+		detail_json: JSON.stringify({ reason, name: existing.name }),
+		created_at: now,
+	});
 }

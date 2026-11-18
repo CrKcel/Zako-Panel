@@ -4,6 +4,7 @@ import { readJson, readQuery } from '../../lib/validation';
 import {
 	createEndpoint,
 	createNode,
+	deleteOrUninstallNode,
 	disableEndpoint,
 	getNode,
 	getNodeStatus,
@@ -15,7 +16,15 @@ import {
 	updateNode,
 } from '../../services/node-service';
 import type { AppEnv } from '../../types';
-import { createEndpointSchema, createNodeSchema, listQuerySchema, pathId, updateEndpointSchema, updateNodeSchema } from '../schemas';
+import {
+	createEndpointSchema,
+	createNodeSchema,
+	deleteNodeQuerySchema,
+	listQuerySchema,
+	pathId,
+	updateEndpointSchema,
+	updateNodeSchema,
+} from '../schemas';
 
 export const nodeRoutes = new Hono<AppEnv>();
 
@@ -38,6 +47,20 @@ nodeRoutes.patch('/:nodeId', async (c) => {
 	const nodeId = pathId(c, 'nodeId');
 	const input = await readJson(c, updateNodeSchema);
 	return ok(c, await updateNode(c.env.DB, nodeId, input));
+});
+
+nodeRoutes.delete('/:nodeId', async (c) => {
+	const nodeId = pathId(c, 'nodeId');
+	const query = readQuery(c, deleteNodeQuerySchema);
+	const result = await deleteOrUninstallNode(c.env.DB, nodeId, {
+		force: query.force,
+		removeXray: query.remove_xray,
+		actorEmail: c.get('admin')?.email ?? null,
+	});
+	if (result.deleted) {
+		return noContent(c);
+	}
+	return ok(c, result.node, 202);
 });
 
 nodeRoutes.post('/:nodeId/agent-token/rotate', async (c) => {

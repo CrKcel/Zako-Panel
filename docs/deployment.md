@@ -64,6 +64,14 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   ```bash
   sudo systemctl restart zako-agent
   ```
+- **卸载节点**：
+  - **从面板远程卸载**：在后台节点列表或详情页点击 **「删除」**，默认会先将节点标记为「正在卸载」并在下次心跳下发 `uninstall` 指令，节点自动清理本机服务与文件后从面板删除（可选同时卸载 Xray-core）；若节点长期离线，可选择 **「强制删除」** 立即从面板移除。
+  - **从节点主动卸载**：在节点上以 root 执行内置命令（会自动通知面板删除节点并清理本机）：
+    ```bash
+    sudo zako-agent uninstall          # 仅卸载 Agent（保留 Xray）
+    sudo zako-agent uninstall --remove-xray  # 同时卸载 Xray-core 与 /etc/xray
+    ```
+    若二进制已损坏，也可使用安装包中的 `deploy/uninstall.sh`。
 
 ---
 

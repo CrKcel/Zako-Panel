@@ -41,6 +41,17 @@ async function responseFor(
 	ackReportId: string | null,
 	unknownUsers: number,
 ): Promise<AgentReportResponse> {
+	const directives =
+		runtime.uninstall_requested_at !== null
+			? [
+					{
+						type: 'uninstall',
+						payload: {
+							remove_xray: runtime.uninstall_remove_xray === 1,
+						},
+					},
+				]
+			: [];
 	return {
 		ack_report_id: ackReportId,
 		server_time: nowSeconds(),
@@ -49,7 +60,7 @@ async function responseFor(
 		users_ver: await getUsersVersion(db),
 		desired_config_version: runtime.desired_config_version,
 		unknown_users: unknownUsers,
-		directives: [],
+		directives,
 	};
 }
 

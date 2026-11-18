@@ -7,6 +7,7 @@ export interface AdminIdentity {
 
 export interface AgentIdentity {
 	nodeId: string;
+	uninstalling: boolean;
 }
 
 export interface Variables {

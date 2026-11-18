@@ -4,6 +4,7 @@ export const HEARTBEAT_STALE_MULTIPLIER = 3;
 
 export interface NodeHealthInput {
 	enabled: boolean;
+	uninstall_requested_at?: number | null;
 	last_seen_at: number | null;
 	heartbeat_interval_seconds: number;
 	xray_healthy: boolean | null;
@@ -27,6 +28,7 @@ export function isHeartbeatFresh(lastSeenAt: number | null, intervalSeconds: num
  * heartbeat becomes offline without a per-node cron.
  */
 export function deriveNodeStatus(node: NodeHealthInput, now: number = nowSeconds()): NodeStatus {
+	if (node.uninstall_requested_at !== null && node.uninstall_requested_at !== undefined) return 'uninstalling';
 	if (!node.enabled) return 'disabled';
 	if (!isHeartbeatFresh(node.last_seen_at, node.heartbeat_interval_seconds, now)) return 'offline';
 	if (node.xray_healthy === false || node.stats_healthy === false) return 'degraded';

@@ -12,6 +12,7 @@ const NODE_STATUS: Record<NodeStatus, StatusDescriptor> = {
 	degraded: { label: '异常', tag: 'warning' },
 	offline: { label: '离线', tag: 'info' },
 	disabled: { label: '停用', tag: 'danger' },
+	uninstalling: { label: '正在卸载', tag: 'warning' },
 };
 
 const SUBSCRIBER_STATUS: Record<SubscriberStatus, StatusDescriptor> = {

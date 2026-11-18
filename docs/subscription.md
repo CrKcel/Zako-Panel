@@ -1,108 +1,61 @@
-# 订阅生成
+# 订阅生成与分发
 
-订阅端点把档案配置、节点授权与流量数据组合成 Clash.Meta YAML 或通用 URI。请求路径与状态码见 [api.md](api.md)，表结构见 [database.md](database.md)，流量阈值语义见 [traffic.md](traffic.md)。
+控制面根据订阅档案规则、节点运行状态与用户授权凭据，动态生成适用于 Clash.Meta 的 YAML 配置或通用 URI 文本。API 路径定义详见 [api.md](api.md)，数据库存储结构详见 [database.md](database.md)，配额判定规则详见 [traffic.md](traffic.md)。
 
-## 1. 节点状态与分发条件
+## 1. 节点状态派生与分发条件
 
-不持久化冗余 `online` 字段，查询时统一派生：
+系统采用无冗余持久化设计，节点展示状态与分发资格统一在查询时动态派生：
 
-| 状态 | 条件 |
-| --- | --- |
-| `disabled` | `nodes.enabled = 0` |
-| `offline` | 从未心跳，或当前时间晚于 `last_seen_at + 3 × heartbeat_interval_seconds` |
-| `degraded` | 心跳新鲜，但 `xray_healthy = 0` 或 `stats_healthy = 0` |
-| `online` | 心跳新鲜且两者健康 |
+### 1.1 节点运行状态定义
 
-分发条件与展示状态略有区别：
+| 状态 | 判定规则 | 说明 |
+| --- | --- | --- |
+| `disabled` | `nodes.enabled = 0` | 节点被管理员手动停用 |
+| `offline` | 无心跳记录，或当前时间超出 `last_seen_at + 3 × heartbeat_interval_seconds` | 节点失去心跳连接 |
+| `degraded` | 心跳保持新鲜，但 `xray_healthy = 0` 或 `stats_healthy = 0` | 节点通信正常，核心组件报告异常 |
+| `online` | 心跳保持新鲜，且 `xray_healthy = 1` 与 `stats_healthy = 1` | 节点运行健康 |
 
-- `nodes.enabled = 1`，至少一个 `endpoints.enabled = 1`。
-- 心跳新鲜。
-- `xray_healthy = 1`；`stats_healthy = 0` 仍可分发，避免统计故障导致节点全部消失。
-- 订阅用户状态为 `active`，且在有效期内、未超额。
-- `node_clients.enabled = 1`。
-- 档案为 `selected` 时，节点在 `profile_nodes` 中。
-- `online_only = 1` 时按上述新鲜度过滤；`online_only = 0` 时允许离线节点进入配置。
+### 1.2 节点分发过滤准则
 
-没有任何可分发节点时返回 `503`，不下发空配置。
+只有同时满足下列所有条件的节点，才会装配至客户端订阅文档中：
 
-档案预览复用同一套筛选规则，但把被排除的节点及原因列在 `skipped` 中，且不下发 `503`；接口定义见 [api.md](api.md#21-档案预览)。
+- 节点与网络端点均处于启用状态（`nodes.enabled = 1` 且 `endpoints.enabled = 1`）。
+- 节点心跳保持有效新鲜度。
+- Xray 代理进程报告健康（`xray_healthy = 1`）。若仅统计接口异常（`stats_healthy = 0`），节点仍保留分发资格。
+- 订阅用户状态处于 `active`，且在有效期内未超出流量配额。
+- 用户在该节点持有有效的授权凭据（`node_clients.enabled = 1`）。
+- 节点包含在目标档案的节点选择范围内（全选或列表白名单）。
+- 当档案开启 `online_only` 时，节点必须满足心跳新鲜度；未开启时允许处于离线状态的节点进入配置。
 
-停用节点或 endpoint 只改变控制面分发，不改变节点的用户集合；用户集合由 Agent 按 `users_ver` 同步，节点静态配置的远程变更属于 P2。
+当所有节点均被过滤导致分发集合为空时，端点返回 `503 SUBSCRIPTION_UNAVAILABLE`，禁止下发空配置。
 
-## 2. 查询顺序
+## 2. 订阅请求处理流程
 
-1. 对 URL token 做 SHA-256，以唯一索引查询订阅与订阅用户。
-2. 校验订阅撤销、订阅到期，再按 `lib/subscriber-status.ts` 的同一优先级判定订阅用户资格。
-3. 一次 `batch` 读取：档案、`profile_nodes`、`node_clients`、节点、启用的 endpoints、`subscriber_usage`。
-4. 若 `subscriber_usage.cycle_start` 早于订阅用户当前周期，按 0 处理；再校验额度。
-5. 取档案节点集合与用户授权集合的交集。
-6. 过滤停用节点、停用 endpoint、离线节点（`online_only`）与不健康 Xray。
-7. 生成稳定且唯一的节点名称；单 endpoint 使用节点名，多 endpoint 使用“节点名-endpoint 名”。
-8. 序列化 Clash YAML 或 URI，不调用外部转换服务。
+客户端发起订阅请求后，Worker 执行以下装配步骤：
 
-查询使用 JOIN 与批量 `IN`，不逐节点查询。
+1. 凭据检索：提取 URL 中的 Token 进行 SHA-256 哈希计算，检索匹配的订阅与用户记录。
+2. 权限校验：确认订阅凭据未撤销且未到期，依序验证用户停用、到期与超额状态。
+3. 批量聚合：单次批处理查询档案规则、关联节点集、用户授权集合以及当前计费周期的汇总用量。
+4. 集合求交：将档案限定的节点与用户授权的节点集合求交集，剔除已停用、不健康或超时离线的端点。
+5. 名称去重：为入选节点生成稳定唯一的标识符。单端点使用节点名，多端点组合“节点名-端点名”。
+6. 文档序列化：按请求类型渲染为 Clash.Meta YAML 或通用 URI，不调用外部转换服务。
 
-## 3. Clash.Meta YAML
+## 3. 订阅格式规范
 
-```yaml
-mixed-port: 7890
-allow-lan: false
-mode: rule
-log-level: info
-proxies:
-  - name: Tokyo-01
-    type: vless
-    server: 203.0.113.10
-    port: 443
-    uuid: 00000000-0000-0000-0000-000000000000
-    network: tcp
-    tls: true
-    udp: true
-    flow: xtls-rprx-vision
-    servername: www.example.com
-    reality-opts:
-      public-key: <reality-public-key>
-      short-id: <short-id>
-    client-fingerprint: chrome
-proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - AUTO
-      - Tokyo-01
-  - name: AUTO
-    type: url-test
-    proxies:
-      - Tokyo-01
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-rules:
-  - MATCH,PROXY
-```
+### 3.1 Clash.Meta YAML 规范
 
-- 所有字符串通过 YAML 库序列化；规则作为结构化数组校验。
-- 节点名、代理组名与规则中的名称做唯一性检查。
-- 不强制覆盖客户端 DNS、外部控制器或 `allow-lan`；档案可显式配置基础字段。
-- 档案存储 `clash_base_json`、`proxy_groups_json`、`rules_json`，不接受未校验的任意 YAML 片段。
+- 协议支持：完整映射 VLESS + REALITY 协议字段（包括传输类型、流控 `xtls-rprx-vision`、REALITY 公钥与 short-id、客户端指纹）。
+- 结构化注入：由档案中结构化存储的 `clash_base_json`、`proxy_groups_json` 与 `rules_json` 装配 proxies、proxy-groups 与 rules 配置块。
+- 标识符防护：节点名称、策略组名称与规则指向做全局唯一性校验，避免同名冲突。
 
-## 4. 通用 URI
+### 3.2 通用 URI 规范
 
-```text
-vless://UUID@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=PUBLIC_KEY&sid=SHORT_ID&type=tcp#Tokyo-01
-```
+- 标准链接：组装规范的 `vless://` 链接，主机、端口、UUID、公钥、流控与指纹等参数均由服务端记录填充。
+- 格式编码：默认采用换行符分隔多个节点链接，并进行标准 Base64 编码输出；通过参数 `encoding=plain` 可输出明文连接串。
 
-- UUID、主机、端口来自服务端记录，不从查询参数接收。
-- query 与 fragment 使用 UTF-8 百分号编码；IPv6 字面量使用方括号。
-- 空 `short-id` 不输出无意义参数。
-- 多节点以换行分隔，默认使用标准 Base64 编码完整 UTF-8 文本。
-- `encoding=plain` 仅用于兼容与调试。
+## 4. 响应标头与缓存规范
 
-## 5. 响应头与缓存
-
-- Clash：`Content-Type: application/yaml; charset=utf-8`。
-- URI：`Content-Type: text/plain; charset=utf-8`。
-- `profile-update-interval: 6`（小时）。
-- `subscription-userinfo: upload=...; download=...; total=...; expire=...`；`total=0` 表示不限量，`expire=0` 表示永不过期。
-- `Content-Disposition` 使用固定扩展名的安全文件名。
-- `Cache-Control: private, no-store`，避免含凭据内容被共享缓存保存。
-- Cache API 只作为压测后的可选优化。Access 前置的 Worker 当前无法使用 Cache API；订阅路径虽排除在 Access 之外，仍需实测后再启用。
+- 文档内容类型：Clash 响应声明 `Content-Type: application/yaml; charset=utf-8`；URI 响应声明 `Content-Type: text/plain; charset=utf-8`。
+- 用量指示头：携带 `subscription-userinfo: upload=...; download=...; total=...; expire=...`，向客户端展示当期消耗量与配额上限（0 表示无限制）。
+- 客户端更新周期：携带 `profile-update-interval: 6`（小时），指示推荐同步频率。
+- 缓存控制：采用 `Cache-Control: private, no-store`，禁止边缘及共享代理节点持久化含有用户凭据的订阅文档。

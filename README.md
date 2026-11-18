@@ -13,8 +13,6 @@
 - Agent 静态资产滚动分发，节点通过面板域名一条命令安装
 - 派生节点状态、系统指标、站点/节点/用户流量汇总与保留期清理
 
-阶段划分与设计边界见 [docs/architecture.md](docs/architecture.md)，交付顺序见 [docs/roadmap.md](docs/roadmap.md)。
-
 ## 技术栈
 
 - Worker：Hono、D1、Cloudflare Access JWT、Zod
@@ -86,8 +84,6 @@ npm run format:check
 ```bash
 curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 ```
-
-发布、缓存与回滚规则见 [docs/agent-distribution.md](docs/agent-distribution.md)，Agent 模块与运行模型见 [docs/agent.md](docs/agent.md)。
 
 ## 文档
 

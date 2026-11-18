@@ -2,71 +2,60 @@
 
 Zako Panel 由控制面（Cloudflare Worker + D1）、管理界面（Vue SPA）与节点侧 Go Agent 组成。Worker 不转发代理流量，不执行 Xray，不主动连接节点。
 
-本文件描述跨模块的目标、决策与边界。项目定位与开发命令见 [README](../README.md)；子系统细节见 [api.md](api.md)、[database.md](database.md)、[traffic.md](traffic.md)、[subscription.md](subscription.md)、[agent.md](agent.md) 与 [config-delivery.md](config-delivery.md)。
+本文件描述跨模块的目标、决策与边界。项目定位与开发命令见 [README](../README.md)；子系统细节见 [api.md](api.md)、[database.md](database.md)、[traffic.md](traffic.md)、[subscription.md](subscription.md)、[agent.md](agent.md)、[security.md](security.md) 与 [deployment.md](deployment.md)。
 
-## 1. 目标与范围
+## 1. 目标与边界
 
-### 1.1 阶段划分
+### 1.1 系统约束
 
-| 阶段 | 功能 |
-| --- | --- |
-| P0 | 节点与默认订阅档案、VLESS + REALITY、Clash.Meta YAML / 通用 URI、规则分发、Agent 心跳与流量上报、幂等入账、节点与客户端流量统计 |
-| P1 | 订阅用户、管理员角色、节点授权、独立订阅令牌、流量额度与到期、令牌轮换与撤销、用户集合同步、Xray 热更新、系统指标 |
-| P2 | Xray 配置版本化、远程发布、校验、原子切换、失败回滚、配置历史与 diff |
+- 代理协议支持 VLESS + REALITY，传输协议为 TCP，流控为 `xtls-rprx-vision`。
+- Xray 基础配置由安装流程生成，客户端凭据由 Agent 根据版本号拉取并热更新。
+- 节点状态由 Agent 上报的心跳时间动态派生，控制面不主动轮询节点。
+- 运行成本优先以 Cloudflare 免费额度为基准，鉴权、流量幂等和配置校验机制保持完整。
+- 流量额度与有效期实施软限制：超额或到期后停止下发新订阅并将凭据从节点入站中移除，保持已建立连接直至自然结束。
+- 控制面使用 Cloudflare Worker 与 D1，未引入外部消息队列或第三方控制服务。
+- Agent 二进制与安装脚本由独立静态资产 Downloads Worker 分发，面板 Worker 专注控制面业务。
 
-P0 与 P1 已交付，表中阶段标签用于标注接口与页面的归属。实施顺序与验收标准见 [roadmap.md](roadmap.md)。
+### 1.2 系统边界
 
-### 1.2 已确认约束
+系统范围不包含多租户计费结算、自动支付、外部订阅转换、WebSocket 长连接、实时硬限速、历史二进制分发、任意远程 Shell 执行以及分钟级原始流量留存。
 
-- 当前只支持 VLESS + REALITY，传输为 TCP，流控为 `xtls-rprx-vision`。
-- Xray 入站模板由安装脚本生成；入站的用户集合由 Agent 按 `users_ver` 同步并热更新，P2 才远程发布静态配置定义。
-- 节点在线状态以 Agent 上报为准，Worker 不主动连接节点。
-- 免费额度优先，但鉴权、流量幂等和配置安全不降级。
-- 额度与到期采用软限制：停止下发新订阅、从节点用户集合移除，不承诺终止已建立的代理连接。
-- 首版不引入 Durable Object、Queues、KV、R2 或第三方控制面。
-- Agent 二进制通过独立 assets-only Downloads Worker 的静态资产分发，稳定 URL 滚动发布；面板 Worker 不处理 `/dl/*`。
+### 1.3 规模指标
 
-### 1.3 非目标
-
-首版不实现多租户计费、自动支付、外部订阅转换、WebSocket 长连接、实时硬限速、面板内置 Xray 二进制分发、Agent 历史版本分发、任意远程命令执行、分钟级原始流量留存。
-
-### 1.4 规模目标
-
-| 指标 | 目标 | 预算上限 |
+| 指标 | 设计目标 | 预算上限 |
 | --- | --- | --- |
 | 节点数 | 20 | 100 |
 | 订阅用户数 | 50 | 50 |
 | 活跃用户-节点组合数 | 50 | 100 |
 | 单节点活跃用户上限 | 20 | 20 |
-| 流量保留 | 90 天小时桶 / 30 天报表 ID | 同左 |
+| 流量保留 | 90 天小时桶 / 30 天报表记录 | 同左 |
 | 心跳间隔 | 300 秒 | 60–900 秒 |
 | 流量上报间隔 | 900 秒 | 300–3600 秒 |
 
-容量以“活跃用户-节点组合数”为主变量。100 节点场景按 100 个组合做容量验证；每节点 50 个活跃用户的密集授权不在免费额度内。超过上限时优先调整上报间隔与保留期；仍然不足则升级 Workers Paid，不假设免费额度无限。
+系统容量主要取决于“活跃用户-节点组合数”。当规模超出上限时，通过调整上报间隔与保留周期适配预算，或升级 Workers 付费计划。
 
 ## 2. 核心架构决策
 
-| 决策 | 选择 | 原因 |
+| 决策 | 方案 | 理由 |
 | --- | --- | --- |
-| 项目结构 | Monorepo | Worker、Web、Agent 与 API 契约统一版本 |
-| Worker 路由 | Hono + route / service / repository | 小型运行时，按资源横向扩展 |
-| 数据访问 | D1 prepared statements + batch | 明确 SQL、参数绑定与行读取量 |
-| API 契约 | OpenAPI 3.1 | 生成 TypeScript 类型；Go 端以契约测试约束 |
-| 前端 | Vue 3 + Vite + Vue Router | 静态 SPA，无 SSR Worker 开销 |
-| UI 组件 | Element Plus + ECharts | 管理表格、表单与流量图表 |
-| 管理认证 | Cloudflare Access JWT + D1 RBAC | 避免在 10ms CPU 内执行密码哈希 |
-| Agent 认证 | 每节点独立高熵 Bearer token | 可单独撤销，数据库只存哈希 |
-| Agent 分发 | 独立 assets-only Downloads Worker + 稳定 URL 滚动发布 | 静态请求不计 Worker 请求，面板 SPA 与发布解耦 |
-| 节点模型 | `nodes` + `endpoints` | 单入站，P2 多协议不改表 |
-| Agent 上报 | 单端点合并心跳与流量 | 减少重复请求，离线时一次请求补状态 |
-| 流量幂等 | `report_id` + payload hash + D1 batch | ACK 丢失、Agent 重装均不重复入账 |
-| 流量存储 | 小时桶 + 站点桶 + 用户当前周期汇总 | 图表可聚合，额度检查 O(1) |
-| 用户变更 | `users_ver` + 用户列表拉取 + 热更新 | 停用/超额能及时从节点移除 |
-| 配置下发 | 不可变定义 + SHA-256 + Agent 本地合入私钥 | 私钥不离开节点，错误配置不替换旧配置 |
-| 状态检测 | 心跳时间派生，不写 `online` 字段 | 无逐节点 Cron，无冗余状态写入 |
-| 免费额度 | 静态资源走 Assets，控制面只做轻量 CRUD | 请求、CPU 与 D1 写入均可预算 |
+| 工程结构 | Monorepo | Worker、Web、Agent 与 API 契约统一版本管理 |
+| Worker 架构 | Hono + 分层模式 | 轻量运行时，路由、服务与仓储职责清晰隔离 |
+| 数据访问 | D1 预编译语句 + 事务批处理 | 确定性 SQL，严格控制参数绑定与单次行读写 |
+| API 契约 | OpenAPI 3.1 | 单一真实源生成 TypeScript 类型，Go 端通过契约测试对齐 |
+| 前端架构 | Vue 3 + Vite + Vue Router | 静态单页应用，无服务端渲染资源消耗 |
+| UI 框架 | Element Plus + ECharts | 提供开箱即用的管理表格、表单与流量可视化 |
+| 管理端认证 | Cloudflare Access JWT + D1 角色 | 避免在 Worker CPU 额度内进行耗时密码哈希计算 |
+| Agent 认证 | 独立高熵 Bearer Token | 单节点可单独撤销，控制面仅持久化 SHA-256 哈希 |
+| Agent 分发 | 独立静态 Downloads Worker | 静态下载走 CDN 边缘分发，无 Worker 运行时费用消耗 |
+| 节点模型 | `nodes` 表关联 `endpoints` 表 | 入站与网络参数解耦，支持多端点扩展 |
+| Agent 上报 | 单端点合并心跳与流量 | 降低请求频次，合并提交确保状态与用量原子更新 |
+| 流量幂等 | 客户端 `report_id` + 载荷哈希 | 网络重试或重复提交均保证账单精确入账 |
+| 流量存储 | 小时聚合桶 + 站点桶 + 周期汇总 | 兼顾图表聚合查询效率与常数时间额度判断 |
+| 凭据同步 | 全局版本号 `users_ver` + 差集热更新 | 变更时增量生效，无需频繁重启代理核心 |
+| 配置下发 | 不可变配置定义 + SHA-256 校验 | 私钥保留在节点本地，配置错误自动保留有效备份 |
+| 状态检测 | 基于最近心跳时间动态派生 | 避免定时扫表修改状态字段，降低数据库写入压力 |
 
-首版不设置全局 `run_worker_first=true`，只对 `/api/*` 与 `/sub/*` 开启 Worker 优先路由。`/dl/*` 由独立 Downloads Worker 的路由处理，不进入面板 Worker。
+路由层仅将 `/api/*` 与 `/sub/*` 映射至 Worker 逻辑，静态资源与 `/dl/*` 分发均由 Cloudflare 边缘静态直接承载。
 
 ## 3. 总体架构
 
@@ -84,65 +73,59 @@ flowchart LR
     Xray --> Users[代理用户]
 ```
 
-### 3.1 控制面与数据面边界
+### 3.1 边界与职责划分
 
-- Worker 不转发代理流量，不保存代理会话，不执行 Xray 二进制。
-- Agent 不开放公网管理端口，只发起出站 HTTPS；StatsService 与 HandlerService 仅 loopback。
-- Vue 是静态 SPA，不承担订阅令牌或 Agent token 的服务端保护职责。
-- D1 是控制面事实来源；Agent 本地状态（计数基线、outbox、用户集合、当前配置）是节点侧事实来源。
-- 节点私钥只保存在节点本地；Worker 只保存 REALITY 公钥与配置定义。
-- Downloads Worker 只保存 Agent 发布产物，不连接 D1，不执行面板业务逻辑。
+- Worker 负责控制面业务编排，不承担代理流量转发，不保存用户代理会话，不调用 Xray 可执行文件。
+- Agent 仅发起向控制面的出站 HTTPS 请求，不对公网暴露管理或 RPC 监听端口；gRPC 服务仅监听环回地址。
+- Web 管理界面为纯静态前端，敏感凭据仅在创建或轮换操作响应中展示一次。
+- D1 存储控制面全局数据；Agent 本地数据库存储计数器基线、待发送报表与凭据状态。
+- REALITY 私钥仅留存在节点本地；控制面仅保存公钥与入站配置定义。
+- Downloads Worker 仅托管分发静态文件，不连接数据库，不运行业务逻辑。
 
-## 4. 模块边界
+## 4. 模块职责
 
-仓库顶层目录与各应用入口见 [README](../README.md#目录)。
+顶层目录与应用入口详见 [README](../README.md#目录)。
 
 ### 4.1 Worker 分层
 
-- `routes`：HTTP 参数、状态码、响应组装；不直接拼 SQL。
-- `services`：业务规则。订阅分发筛选在 `distribution`，档案行映射在 `profile-mapping`，节点用户集合版本递增在 `users-version`，其余按资源划分。
-- `repositories`：D1 SQL、batch、查询映射与行数约束。
-- `protocols`：协议适配器（参数校验、Clash 与 URI 渲染），按 `endpoints.protocol` 经注册表查找。
-- `renderers`：Clash.Meta YAML 与通用 URI 文档序列化。
-- `middleware`：Access JWT、Agent token、角色、请求 ID、错误处理、请求体限制。
-- `lib`：哈希、随机 token、ULID、周期与状态规则（节点状态、订阅用户资格）、时间与字节工具。
+- `routes`：负责 HTTP 参数解析、状态码映射与响应格式装配。
+- `services`：承载业务规则，包括订阅节点筛选、配置映射、版本递增与流量汇总。
+- `repositories`：执行 D1 SQL、批量操作、结果集映射与读写限制。
+- `protocols`：协议校验与配置转换适配器，通过注册表统一管理。
+- `renderers`：Clash.Meta YAML 配置与通用 URI 订阅文本生成。
+- `middleware`：提供 Access JWT 校验、Agent Token 验证、RBAC 鉴权与错误包装。
+- `lib`：通用辅助函数，涵盖哈希、随机凭据、ULID 生成、周期计算与状态判定。
 
-新增资源时新增独立 route 模块与 service，通过 Hono `.route()` 组合。API 统一使用 `/api/v1`；订阅路径使用 `/sub/{token}`；Agent 路径使用 `/api/v1/agent`。
+API 路径统一采用 `/api/v1` 前缀；订阅端点为 `/sub/{token}`；Agent 通信端点为 `/api/v1/agent`。
 
 ### 4.2 Web 应用
 
-| 页面 | 阶段 | 内容 |
-| --- | --- | --- |
-| 总览 | P0 | 节点状态数量、站点流量、最近异常 |
-| 节点 | P0 | 创建/编辑、公网参数、心跳、版本、token 轮换、系统指标 |
-| 节点详情 | P0 | 派生状态、系统指标、流量汇总、端点管理与配置错误 |
-| 订阅档案 | P0 | 节点选择、规则编辑、Clash 预览与跳过原因 |
-| 订阅 | P0 | 链接复制、格式选择、撤销与轮换 |
-| 流量 | P0 | 时间范围、节点维度汇总与图表 |
-| 订阅用户 | P1 | 额度、周期、到期、状态、节点授权、用户详情与流量图表 |
-| 管理员 | P1 | Access 身份、角色与启用状态 |
-| 配置中心 | P2 | 版本 diff、发布、结果与回滚 |
+| 模块 | 核心内容 |
+| --- | --- |
+| 仪表盘 | 节点运行状态统计、全站流量指标、系统异常警报 |
+| 节点管理 | 节点基础信息编辑、公网连接参数、系统负载指标、Token 轮换 |
+| 节点详情 | 运行状态诊断、网络与硬件指标、流量统计、端点管理与配置历史 |
+| 订阅档案 | 节点筛选策略、基础配置项、分流规则组装与预览 |
+| 订阅管理 | 订阅令牌下发、链接复制、格式切换、撤销与轮换 |
+| 流量分析 | 时间跨度筛选、多维度（全站 / 节点 / 用户）用量聚合与趋势图 |
+| 用户管理 | 流量配额设定、重置周期、有效期维护、节点授权矩阵 |
+| 管理员 | Cloudflare Access 身份绑定、角色分配与启用维护 |
 
-- `domain/`：纯函数规则（流量窗口与合计、额度单位换算、状态与原因描述符、表单序列化），不依赖 Vue。
-- `composables/`：`useAsyncResource` 负责单次读取，`useAsyncAction` 负责写操作与按行 loading，`useCrudDialog` 负责对话框状态，`usePolling` 负责定时刷新。
-- `components/`：端点表单、节点授权、流量合计与页面工具栏等跨页复用块；页面只做编排与布局。
-- 路由懒加载，ECharts 独立异步 chunk。
-- 状态轮询 30–60 秒，页面隐藏时暂停；流量页不高频轮询。
-- 订阅与 Agent token 只在创建或轮换时显示一次，不写入 `localStorage`。
-- 管理 API 使用同源请求与 Access Cookie，不在前端保存长期凭据。
+前端架构划分：
+- `domain/`：纯函数业务逻辑（流量单位换算、时间窗口切分、状态描述判定），脱离框架依赖。
+- `composables/`：通用逻辑抽象（异步资源加载、操作提交状态、对话框生命周期、条件轮询）。
+- `components/`：业务通用组件（端点配置表单、节点授权选择器、流量指标面板）。
+- 管理凭据使用只读同源 Cookie 鉴权，订阅 Token 与 Agent Token 均不持久化于本地存储。
 
 ### 4.3 Downloads Worker
 
-- `wrangler.downloads.jsonc` 定义 `zako-agent-downloads`，没有 `main`，只配置 `assets` 与 `/dl/*` route。
-- 资产由 `deploy/stage-downloads.sh` 生成到 `apps/downloads/dist`，发布时整体部署；稳定 URL 滚动更新。
-- `_headers` 设置 `must-revalidate`、内容类型与下载头；`not_found_handling` 为 `none`。
-- 静态请求由 Cloudflare 直接返回，不计 Worker 请求与 CPU；版本与回滚细节见 [agent-distribution.md](agent-distribution.md)。
+- 由 `wrangler.downloads.jsonc` 独立配置，仅挂载静态资产目录与 `/dl/*` 路由规则。
+- 资产打包生成固定命名的发布包、安装脚本及校验签名，通过稳定 URL 提供滚动分发。
+- 静态请求由边缘缓存直接响应，不计入 Worker 请求与计算时间。
 
-## 5. 扩展方式
+## 5. 系统扩展
 
-- 新协议：新增 `ProtocolAdapter`，实现参数校验、`toClash` 与 `toUri`；在 `protocols/index.ts` 注册并把 `DEFAULT_PROTOCOL` 指向它，端点校验、分发渲染与管理表单都经由注册表。当前注册 `vless-reality`。
-- 新订阅格式：复用筛选后的 endpoint DTO，新增 Renderer；不复制授权逻辑。
-- 新采集指标：扩展心跳可选字段与独立 service，旧 Agent 可继续工作。
-- 新管理功能：新增 `/api/v1/admin/<resource>`、OpenAPI 路径、D1 migration 与 Vue 页面。
-- 外部主动拨测：作为独立模块追加，结果单独表示公网可达性，不参与 Agent 心跳状态。
-- 主动探测如启用，使用 `cloudflare:sockets` 的 `connect()`，每次最多 40 个目标、6 个并发连接，仅作为可选信号；REALITY 对任意 TCP 连接都会接受，探测不能替代握手验证。
+- 协议扩展：新增 `ProtocolAdapter` 实现参数校验及 Clash / URI 生成规则，在注册表中声明即可生效。
+- 订阅格式扩展：复用已过滤的节点 DTO，增加对应的 Renderer 实现。
+- 指标扩展：心跳结构支持选填字段，控制面通过独立服务消化新指标。
+- 管理功能扩展：按分层规范补充管理路由、业务服务、D1 迁移脚本与前端视图。

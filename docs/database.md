@@ -1,252 +1,62 @@
-# D1 数据模型
+# D1 数据模型与存储设计
 
-表结构以 `migrations/` 下的追加式 SQL 为准，本文件说明字段约束、索引取舍与保留策略。接口见 [api.md](api.md)，写入路径见 [traffic.md](traffic.md)。
+控制面数据持久化采用 Cloudflare D1。数据库表结构与索引定义由 `migrations/` 目录下的 SQL 文件管理，本文件概括核心实体关系、设计权衡与保留策略。业务逻辑详见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
 
-## 1. 通用约定
+## 1. 通用设计约定
 
-- ID 使用不可预测的 ULID 文本；`xray_email` 使用 `u_<ULID>`，不含个人信息。
-- 邮箱字段统一做 trim 与小写规范化后再比较和建立唯一索引。
-- 时间统一为 Unix 秒 INTEGER；API 使用 Unix 秒，字段名以 `_at` 结尾；前端负责本地化显示。
-- 流量字节使用非负 INTEGER；JSON 中超过 `2^53-1` 时使用十进制字符串。
-- `NULL` 表示不限量或永不到期；不使用 `0` 表达无限。
-- 所有外键显式声明；有历史流量的节点与用户采用停用，不做物理删除。
-- 迁移只追加 SQL 文件；部署前在 staging 验证并备份。
+- 标识符格式：业务主键统一采用 ULID 字符串；节点客户端 `xray_email` 采用 `u_<ULID>` 命名，避免泄露用户个人信息。
+- 邮箱规范化：邮箱入库前均经过小写化与首尾空白清除处理，并建立唯一约束。
+- 时间表示：时间字段统一存储为 Unix 秒整数，列名以 `_at` 结尾。
+- 计量单位：流量字节数以非负整数存储。配额与有效期字段使用 `NULL` 表达无限制。
+- 数据保护：存在历史用量记录的节点和用户采用状态停用机制，避免物理级联删除导致历史审计断层。
+- 迁移规范：数据库结构变更仅通过追加迁移脚本实施。
 
-## 2. 核心表
+## 2. 核心实体模型
 
-```sql
-CREATE TABLE nodes (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  agent_token_hash TEXT NOT NULL,
-  heartbeat_interval_seconds INTEGER NOT NULL DEFAULT 300
-    CHECK (heartbeat_interval_seconds BETWEEN 60 AND 900),
-  last_seen_at INTEGER,
-  xray_healthy INTEGER CHECK (xray_healthy IN (0, 1)),
-  stats_healthy INTEGER CHECK (stats_healthy IN (0, 1)),
-  agent_version TEXT,
-  xray_version TEXT,
-  sys_json TEXT,
-  desired_config_version INTEGER NOT NULL DEFAULT 0,
-  applied_config_version INTEGER NOT NULL DEFAULT 0,
-  last_config_error TEXT,
-  last_config_at INTEGER,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+### 2.1 节点与接入端点
 
-CREATE UNIQUE INDEX idx_nodes_name ON nodes(name);
-CREATE UNIQUE INDEX idx_nodes_token ON nodes(agent_token_hash);
-CREATE INDEX idx_nodes_enabled ON nodes(enabled);
+- 节点信息（`nodes`）：维护节点展示名、通信 Token 哈希、心跳周期配置（60–900 秒）、最后活跃时间、健康状态、组件版本及配置同步版本号。
+- 端点定义（`endpoints`）：单节点支持多个网络接入端点，绑定协议类型、主机域名、监听端口及协议参数（`params_json`）。各端点独立记录启用状态。
 
-CREATE TABLE endpoints (
-  id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  protocol TEXT NOT NULL,
-  host TEXT NOT NULL,
-  port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
-  params_json TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE (node_id, name)
-);
+### 2.2 订阅用户与节点凭据
 
-CREATE INDEX idx_endpoints_node_enabled ON endpoints(node_id, enabled);
-```
+- 订阅用户（`subscribers`）：维护用户展示名、邮箱、物化状态（`active`、`limited`、`expired`、`disabled`）、流量限额、有效期时间戳及当前计费周期的起止时间。
+- 节点授权凭据（`node_clients`）：连接用户与节点的授权实体。维护入站唯一的 `xray_email` 与 `vless_uuid`。同一节点下的多个 endpoint 复用相同的客户端凭据。当管理员撤销用户在某节点的授权时，记录标记为 `enabled=0` 并保留历史用量关联。
 
-`params_json` 按协议校验：当前只注册 `vless-reality`，字段包含 `sni`、`public_key`、`short_id`、`fingerprint`、`flow`、`network`；不接受任意 YAML 片段。
+### 2.3 订阅档案与访问令牌
 
-```sql
-CREATE TABLE subscribers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT,
-  status TEXT NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'limited', 'expired', 'disabled')),
-  traffic_limit_bytes INTEGER
-    CHECK (traffic_limit_bytes IS NULL OR traffic_limit_bytes >= 0),
-  expires_at INTEGER,
-  usage_cycle_start INTEGER NOT NULL,
-  usage_cycle_end INTEGER NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+- 订阅档案（`subscription_profiles`）：定义客户端规则模板，包含节点筛选策略（全量或指定列表）、在线节点强制过滤开关，以及结构化存储的 Clash 基础配置、代理组和规则集。
+- 档案关联节点（`profile_nodes`）：当档案采用指定节点策略时，记录档案与节点的映射关系。
+- 订阅凭据（`subscriptions`）：用户在特定档案下的访问令牌实体，存储访问 Token 的 SHA-256 哈希值、创建时间、过期时间及撤销状态。
 
-CREATE UNIQUE INDEX idx_subscribers_email
-  ON subscribers(email) WHERE email IS NOT NULL;
-CREATE INDEX idx_subscribers_status ON subscribers(status);
+### 2.4 系统管理与权限
 
-CREATE TABLE node_clients (
-  id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  subscriber_id TEXT NOT NULL REFERENCES subscribers(id) ON DELETE RESTRICT,
-  xray_email TEXT NOT NULL,
-  vless_uuid TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE (node_id, xray_email),
-  UNIQUE (node_id, vless_uuid),
-  UNIQUE (subscriber_id, node_id)
-);
+- 管理员（`admin_users`）：记录 Cloudflare Access 绑定的管理员邮箱、分配角色（`owner`、`admin`、`viewer`）与启用状态。
 
-CREATE INDEX idx_node_clients_subscriber
-  ON node_clients(subscriber_id, enabled);
-```
+## 3. 流量计量模型
 
-`subscribers.status` 是物化值，取值 `active`、`limited`、`expired`、`disabled`，由周期任务按优先级派生（`disabled` 粘性、`expired`、`limited`、`active`）。`usage_cycle_start` 与 `usage_cycle_end` 为 UTC 自然月边界：每月 1 日 00:00 UTC 开始，下月 1 日结束。管理接口只接受 `active` 与 `disabled`，`limited` 与 `expired` 由额度与到期派生。
+流量表专为高吞吐入账和低开销查询进行了针对性聚合分层设计：
 
-`node_clients` 同时表达节点授权与凭据。`PUT /api/v1/admin/subscribers/{subscriberId}/nodes` 按请求的节点集合整体替换授权：新增节点创建行并生成 `xray_email` 与 UUID；此前被移除的节点复用原有行与凭据，只把 `enabled` 置回 1；移出集合的节点置 `enabled=0` 而不删除，保留流量归属。授权集合有实际变化时在同一 batch 内递增 `meta.users_ver`。多 endpoint 复用同一 `node_client`；需要协议独立凭据时再增加 `endpoint_clients` 表，不在当前模型提前抽象。
+- 原始报表（`traffic_reports`）：以 `(node_id, report_id)` 为主键，记录每次上报的时段、条目数、异常断层标记及载荷哈希，提供幂等校验支撑。
+- 节点小时聚合（`node_traffic_hourly`）：按 `(node_id, bucket_start)` 维护节点每小时的上行与下行字节数。
+- 全站小时聚合（`site_traffic_hourly`）：以 `bucket_start` 为主键维护全站每小时用量。该表消除了对节点流量表跨节点时间扫描的需求，使仪表盘聚合查询的时间复杂度保持在常数级。
+- 用户节点小时聚合（`user_traffic_hourly`）：按 `(subscriber_id, node_id, bucket_start)` 归档每个用户在各节点的小时消耗，支撑用户明细及排行榜检索。
+- 用户周期用量（`subscriber_usage`）：以 `subscriber_id` 为主键，维护用户在当前计费周期内的累计上行与下行总量，实现常数时间的配额检查与订阅响应头装配。
 
-```sql
-CREATE TABLE subscription_profiles (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  description TEXT,
-  node_selection TEXT NOT NULL DEFAULT 'all'
-    CHECK (node_selection IN ('all', 'selected')),
-  online_only INTEGER NOT NULL DEFAULT 1 CHECK (online_only IN (0, 1)),
-  clash_base_json TEXT NOT NULL DEFAULT '{}',
-  proxy_groups_json TEXT NOT NULL DEFAULT '[]',
-  rules_json TEXT NOT NULL DEFAULT '[]',
-  revision INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+## 4. 配置与系统元数据
 
-CREATE TABLE profile_nodes (
-  profile_id TEXT NOT NULL
-    REFERENCES subscription_profiles(id) ON DELETE CASCADE,
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  PRIMARY KEY (profile_id, node_id)
-) WITHOUT ROWID;
+- 节点配置历史（`node_configs`）：以 `(node_id, version)` 归档不可变配置定义（规范化 JSON 与 SHA-256 哈希），记录配置发布者、下发时间、应用确认时间及错误详情。配置回滚通过基于旧版本定义生成递增新版本实现。
+- 系统全局元数据（`meta`）：以键值对管理全局状态，核心键包含控制凭据拉取的全局版本号 `users_ver` 与默认订阅用户标识 `default_subscriber_id`。
+- 审计记录（`audit_events`）：记录关键管理操作的触发人员、动作类型与变更载荷。
 
-CREATE TABLE subscriptions (
-  id TEXT PRIMARY KEY,
-  subscriber_id TEXT NOT NULL
-    REFERENCES subscribers(id) ON DELETE RESTRICT,
-  profile_id TEXT NOT NULL REFERENCES subscription_profiles(id),
-  name TEXT NOT NULL,
-  token_hash TEXT NOT NULL UNIQUE,
-  revoked_at INTEGER,
-  expires_at INTEGER,
-  created_at INTEGER NOT NULL
-);
+## 5. 数据生命周期与清理策略
 
-CREATE INDEX idx_subscriptions_subscriber
-  ON subscriptions(subscriber_id, revoked_at);
+为确保系统运行在免费额度存储与读写预算内，系统通过定时触发器定期清理过期数据：
 
-CREATE TABLE admin_users (
-  id TEXT PRIMARY KEY,
-  email TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer')),
-  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+| 数据类型 | 保留期限 | 清理方式 |
+| --- | --- | --- |
+| 小时聚合记录（节点、站点、用户） | 90 天 | 基于 `bucket_start` 分批物理删除 |
+| 上报凭证记录（`traffic_reports`） | 30 天 | 基于 `received_at` 分批物理删除 |
+| 审计日志（`audit_events`） | 180 天 | 基于 `created_at` 分批物理删除 |
 
-CREATE UNIQUE INDEX idx_admin_users_email ON admin_users(email);
-```
-
-## 3. 流量表
-
-```sql
-CREATE TABLE traffic_reports (
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  report_id TEXT NOT NULL,
-  payload_hash TEXT NOT NULL,
-  period_start INTEGER NOT NULL,
-  period_end INTEGER NOT NULL,
-  item_count INTEGER NOT NULL,
-  has_counter_gap INTEGER NOT NULL DEFAULT 0
-    CHECK (has_counter_gap IN (0, 1)),
-  received_at INTEGER NOT NULL,
-  PRIMARY KEY (node_id, report_id)
-) WITHOUT ROWID;
-
-CREATE TABLE node_traffic_hourly (
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  bucket_start INTEGER NOT NULL,
-  uplink_bytes INTEGER NOT NULL DEFAULT 0,
-  downlink_bytes INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (node_id, bucket_start)
-) WITHOUT ROWID;
-
-CREATE TABLE site_traffic_hourly (
-  bucket_start INTEGER PRIMARY KEY,
-  uplink_bytes INTEGER NOT NULL DEFAULT 0,
-  downlink_bytes INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL
-) WITHOUT ROWID;
-
-CREATE TABLE user_traffic_hourly (
-  subscriber_id TEXT NOT NULL REFERENCES subscribers(id) ON DELETE RESTRICT,
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  bucket_start INTEGER NOT NULL,
-  uplink_bytes INTEGER NOT NULL DEFAULT 0,
-  downlink_bytes INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (subscriber_id, node_id, bucket_start)
-) WITHOUT ROWID;
-
-CREATE TABLE subscriber_usage (
-  subscriber_id TEXT PRIMARY KEY
-    REFERENCES subscribers(id) ON DELETE RESTRICT,
-  cycle_start INTEGER NOT NULL,
-  uplink_bytes INTEGER NOT NULL DEFAULT 0,
-  downlink_bytes INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL
-) WITHOUT ROWID;
-```
-
-设计说明：
-
-- `site_traffic_hourly` 维护全站小时汇总，避免给 `node_traffic_hourly` 增加 `(bucket_start)` 二级索引。每次报表多写 1 行，换取仪表盘 O(24) 读取与节点桶无索引写入。
-- `user_traffic_hourly` 以订阅用户为前缀，用户详情与排行按用户读取；不建额外索引。
-- `subscriber_usage` 只保留当前周期汇总，额度判断与 `subscription-userinfo` 读取 O(1)。
-
-## 4. 配置与元数据
-
-```sql
-CREATE TABLE node_configs (
-  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  version INTEGER NOT NULL,
-  definition_json TEXT NOT NULL,
-  definition_sha256 TEXT NOT NULL,
-  created_by TEXT REFERENCES admin_users(id),
-  created_at INTEGER NOT NULL,
-  applied_at INTEGER,
-  last_error TEXT,
-  PRIMARY KEY (node_id, version)
-) WITHOUT ROWID;
-
-CREATE TABLE meta (
-  k TEXT PRIMARY KEY,
-  v TEXT NOT NULL
-) WITHOUT ROWID;
-
-CREATE TABLE audit_events (
-  id TEXT PRIMARY KEY,
-  actor_email TEXT,
-  action TEXT NOT NULL,
-  target_type TEXT,
-  target_id TEXT,
-  detail_json TEXT,
-  created_at INTEGER NOT NULL
-);
-
-CREATE INDEX idx_audit_created ON audit_events(created_at);
-```
-
-`meta` 保存 `users_ver`（全局用户集合版本，由 `services/users-version.ts` 统一递增）、`default_subscriber_id`（新建节点时默认授权的订阅用户）与少量运行时设置。`audit_events` 只有保留期清理，写入路径尚未接入。`definition_json` 不含 REALITY 私钥与用户凭据；版本号在节点内严格递增，回滚创建新版本而非降低版本号。配置发布语义见 [config-delivery.md](config-delivery.md)。
-
-## 5. 数据保留与清理
-
-- 小时桶保留 90 天，`traffic_reports` 保留 30 天，审计事件保留 180 天。
-- 清理按主键或时间范围每批 1,000 行执行，避免单语句长时间写入；删除同样计入 D1 写入。
-- 节点与用户停用不删除历史流量；物理删除只用于无历史数据的对象。
-- D1 Time Travel 与部署前备份是恢复手段；迁移前在 staging 验证。
+清理任务单批次上限控制在 1,000 行，避免长事务阻塞数据库并平摊 D1 写入配额开销。

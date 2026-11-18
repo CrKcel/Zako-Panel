@@ -1,12 +1,14 @@
-# API 契约
+# API 契约与接口规范
 
-管理 API 与订阅 API 以 `packages/contracts/openapi.yaml` 为准，TypeScript 类型由该文件生成；Go 端结构体手写，并用 `packages/contracts/fixtures` 做契约测试。管理接口鉴权见 [security.md](security.md)，流量与订阅的业务规则见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
+系统 API 以 `packages/contracts/openapi.yaml` 作为契约定义源，TypeScript 类型由代码生成工具同步更新；Go 端结构体在 `apps/agent` 中定义，并通过跨语言测试用例保障兼容性。认证授权设计详见 [security.md](security.md)，业务处理规则详见 [traffic.md](traffic.md) 与 [subscription.md](subscription.md)。
 
-Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 OpenAPI 契约内，路径与缓存规则见 [agent-distribution.md](agent-distribution.md)。
+Agent 安装包与二进制下载端点由独立 Downloads Worker 托管，不属于控制面 OpenAPI 契约，分发细节详见 [deployment.md](deployment.md)。
 
-## 1. 通用约定
+## 1. 通用设计规范
 
-成功响应：
+### 1.1 统一响应封装
+
+成功响应结构：
 
 ```json
 {
@@ -17,7 +19,7 @@ Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 O
 }
 ```
 
-错误响应：
+错误响应结构：
 
 ```json
 {
@@ -29,205 +31,125 @@ Agent 二进制下载端点是 Downloads Worker 的静态文件端点，不在 O
 }
 ```
 
-- 列表使用 `limit + cursor`，默认 50，最大 200；不使用深分页 offset。
-- 所有输入在路由边界校验；SQL 全部使用绑定参数。
-- 管理 API 不开放跨域；前端同源请求。
-- 请求 ID 使用 ULID，写入日志与响应头 `X-Request-Id`。
-- 不在日志、错误堆栈或分析事件中记录 token、完整订阅 URL、UUID 或请求体。
+### 1.2 交互准则
+
+- 列表接口使用基于游标的分页机制（`limit` 默认 50，上限 200，配合 `cursor`）。
+- 控制面接口入参均在路由层完成 Schema 严格校验，后端 SQL 严格使用参数化绑定。
+- 管理 API 仅接受同源请求，依靠 Cloudflare Access 凭证鉴权。
+- 全链路日志与响应头均注入基于 ULID 的 `X-Request-Id` 以供链路追踪。
+- 敏感凭证（明文 Token、节点私钥、UUID 及完整请求体）禁止在持久化日志中留存。
 
 ## 2. 管理 API
 
-| 方法与路径 | 阶段 | 用途 |
+管理路由前缀为 `/api/v1/admin`，由 Cloudflare Access 保护并结合数据库角色执行权限校验。
+
+| 请求方法与路径 | 说明 | 权限要求 |
 | --- | --- | --- |
-| `GET/POST /api/v1/admin/nodes` | P0 | 节点列表、创建节点（可同时创建首个 endpoint） |
-| `GET/PATCH /api/v1/admin/nodes/{nodeId}` | P0 | 节点详情、心跳间隔与启用状态 |
-| `POST /api/v1/admin/nodes/{nodeId}/agent-token/rotate` | P0 | 轮换 Agent token，返回一次性明文 |
-| `GET /api/v1/admin/nodes/{nodeId}/status` | P0 | 心跳、健康、版本与最近配置错误 |
-| `GET /api/v1/admin/nodes/{nodeId}/clients` | P0 | 节点入站凭据的 `xray_email` 与 UUID，用于核对 Agent 同步结果 |
-| `GET/POST /api/v1/admin/nodes/{nodeId}/endpoints` | P0/P2 | endpoint 列表与新增；当前节点只有一个 endpoint |
-| `PATCH/DELETE /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}` | P0/P2 | 修改或停用 endpoint |
-| `GET/POST /api/v1/admin/profiles` | P0 | 订阅档案列表与创建 |
-| `GET/PATCH/DELETE /api/v1/admin/profiles/{profileId}` | P0 | 节点选择、Clash 基础字段、代理组与规则 |
-| `GET /api/v1/admin/profiles/{profileId}/preview` | P0 | 渲染该档案当前会下发的 Clash 文档 |
-| `GET/POST /api/v1/admin/subscriptions` | P0 | 订阅列表与创建，创建时返回一次性 token |
-| `POST /api/v1/admin/subscriptions/{subscriptionId}/rotate` | P0 | 生成新 token 并撤销旧 token |
-| `POST /api/v1/admin/subscriptions/{subscriptionId}/revoke` | P0 | 撤销订阅 |
-| `GET /api/v1/admin/traffic/summary` | P0 | 按时间、节点或用户聚合流量 |
-| `GET/POST /api/v1/admin/subscribers` | P1 | 用户、额度、周期与到期管理 |
-| `GET/PATCH /api/v1/admin/subscribers/{subscriberId}` | P1 | 用户详情与状态 |
-| `PUT /api/v1/admin/subscribers/{subscriberId}/nodes` | P1 | 整体替换节点授权，创建或停用 `node_clients` |
-| `GET/POST /api/v1/admin/admins` | P1 | 管理员列表与新增 |
-| `PATCH /api/v1/admin/admins/{adminId}` | P1 | 修改管理员角色与启用状态 |
-| `GET/POST /api/v1/admin/nodes/{nodeId}/configs` | P2 | 创建并发布配置版本、查看历史 |
-| `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | P2 | 配置详情与 diff 数据 |
-| `POST /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback` | P2 | 从历史定义创建新版本 |
+| `GET /api/v1/admin/nodes` | 获取节点列表，支持游标分页 | viewer |
+| `POST /api/v1/admin/nodes` | 创建节点，支持级联初始化首个 endpoint | admin |
+| `GET /api/v1/admin/nodes/{nodeId}` | 获取指定节点详情与状态 | viewer |
+| `PATCH /api/v1/admin/nodes/{nodeId}` | 更新节点名称、状态或心跳周期 | admin |
+| `POST /api/v1/admin/nodes/{nodeId}/agent-token/rotate` | 轮换 Agent 认证 Token，返回一次性明文 | admin |
+| `GET /api/v1/admin/nodes/{nodeId}/status` | 查询节点派生状态、健康状态与版本指标 | viewer |
+| `GET /api/v1/admin/nodes/{nodeId}/clients` | 查询节点同步凭据列表（用于对齐验证） | viewer |
+| `GET /api/v1/admin/nodes/{nodeId}/endpoints` | 获取节点 endpoint 列表 | viewer |
+| `POST /api/v1/admin/nodes/{nodeId}/endpoints` | 为节点添加 endpoint | admin |
+| `PATCH /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}` | 更新指定 endpoint 状态与连接参数 | admin |
+| `DELETE /api/v1/admin/nodes/{nodeId}/endpoints/{endpointId}` | 停用或移除 endpoint | admin |
+| `GET /api/v1/admin/profiles` | 获取订阅档案列表 | viewer |
+| `POST /api/v1/admin/profiles` | 创建订阅档案（配置代理组、规则及筛选策略） | admin |
+| `GET /api/v1/admin/profiles/{profileId}` | 获取订阅档案详情 | viewer |
+| `PATCH /api/v1/admin/profiles/{profileId}` | 修改订阅档案规则或基础设置 | admin |
+| `DELETE /api/v1/admin/profiles/{profileId}` | 移除订阅档案 | admin |
+| `GET /api/v1/admin/profiles/{profileId}/preview` | 预览 Clash 文档渲染结果及节点筛选跳过原因 | viewer |
+| `GET /api/v1/admin/subscriptions` | 获取订阅凭证列表 | viewer |
+| `POST /api/v1/admin/subscriptions` | 创建订阅凭证，返回一次性明文 Token | admin |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/rotate` | 轮换订阅 Token 并立即使旧凭据失效 | admin |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/revoke` | 撤销订阅凭据 | admin |
+| `GET /api/v1/admin/traffic/summary` | 聚合流量报表（支持站点、节点、用户维度） | viewer |
+| `GET /api/v1/admin/subscribers` | 获取订阅用户列表及用量汇总 | viewer |
+| `POST /api/v1/admin/subscribers` | 创建订阅用户并设定流量周期与到期时间 | admin |
+| `GET /api/v1/admin/subscribers/{subscriberId}` | 获取订阅用户详细属性与周期用量 | viewer |
+| `PATCH /api/v1/admin/subscribers/{subscriberId}` | 更新用户配额、到期时间或手动启停 | admin |
+| `PUT /api/v1/admin/subscribers/{subscriberId}/nodes` | 全量更新用户的节点授权集合，管理入站凭据 | admin |
+| `GET /api/v1/admin/admins` | 获取管理员列表及权限角色 | owner |
+| `POST /api/v1/admin/admins` | 添加管理员账号并授权角色 | owner |
+| `PATCH /api/v1/admin/admins/{adminId}` | 调整管理员角色或启停状态 | owner |
+| `GET /api/v1/admin/nodes/{nodeId}/configs` | 获取节点历史配置版本列表 | viewer |
+| `POST /api/v1/admin/nodes/{nodeId}/configs` | 创建并下发新的配置版本 | admin |
+| `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | 查看配置版本详情及 diff 内容 | viewer |
+| `POST /api/v1/admin/nodes/{nodeId}/configs/{version}/rollback` | 基于历史版本创建新版本进行回滚 | admin |
 
-P2 的配置管理接口已注册路由并通过入参校验，服务层尚未实现，返回 `501 NOT_IMPLEMENTED`。P0 与 P1 的接口均已交付。
+配置管理相关接口已在路由层定义入参规范，服务层未就绪时返回 `501 NOT_IMPLEMENTED`。
 
-流量汇总支持 `from`、`to`、`groupBy=node|subscriber|site`、`nodeId`、`subscriberId`；最大时间范围 31 天。`from`、`to` 为 Unix 秒，归一到小时边界。
+### 2.1 流量汇总与约束
 
-创建节点时，节点与首个 endpoint 在同一 D1 batch 写入，并为当前默认订阅用户创建 `node_clients`。`PUT /subscribers/{subscriberId}/nodes` 为新增授权补齐凭据、重新授权时复用原凭据、移除授权时置 `enabled=0`。
+- 聚合统计支持参数：`from`、`to`（Unix 秒，对齐小时桶）、`groupBy`（`site`、`node`、`subscriber`）以及关联过滤 ID。
+- 查询跨度最大支持 31 天，必须显式携带时间区间以避免全表扫描。
+- 用户状态变更接口（`PATCH /subscribers/{id}`）仅允许更新为 `active` 或 `disabled`；`limited` 与 `expired` 由系统自动计算派生。
+- 管理员角色管理接口对最后一名活跃 `owner` 实施保护，尝试停用或降级时返回 `409`。
 
-`GET /api/v1/admin/nodes/{nodeId}/clients` 返回该节点的 `node_clients` 记录，用于核对 Agent 同步到入站的 client。`xray_email` 必须与该入站 client 的 `email` 一致，否则统计无法归属到订阅用户。
+### 2.2 档案预览机制
 
-订阅用户与管理员接口的字段约束：
+`GET /api/v1/admin/profiles/{profileId}/preview` 端点复用正式订阅分发逻辑：
+- 响应数据包含组装好的完整配置文档、命中包含的代理节点列表、被跳过的节点及其判定原因（如 `offline`、`unhealthy`、`disabled`、`not_selected`）。
+- 预览文档中的敏感凭据替换为占位符。
+- 无可用节点时返回包含空列表的数据，不抛出 `503` 异常。
 
-- 订阅用户列表返回 `node_count`，即该用户当前 `enabled=1` 的 `node_clients` 数量；`node_ids` 只在详情返回。
-- `PATCH /api/v1/admin/subscribers/{subscriberId}` 的 `status` 只接受 `active` 与 `disabled`；`limited` 与 `expired` 由额度与到期派生后物化，不能直接写入。
-- `PATCH /api/v1/admin/admins/{adminId}` 在请求会移除最后一个启用的 `owner` 时返回 `409`。
+## 3. Agent 通信 API
 
-### 2.1 档案预览
+节点端 Agent 发起的所有请求均携带 `Authorization: Bearer <node_id>.<secret>` 标头。
 
-`GET /api/v1/admin/profiles/{profileId}/preview` 返回该档案针对某个订阅用户会渲染出的 Clash 文档，用于在创建订阅前确认节点选择、代理组与规则。查询参数 `subscriberId` 省略时使用 `meta.default_subscriber_id`。
-
-```json
-{
-  "data": {
-    "document": "mixed-port: 7890\nproxies:\n  - name: Tokyo-01\n...",
-    "proxies": [{ "name": "Tokyo-01", "node_id": "01J..." }],
-    "skipped": [{ "node_id": "01J...", "node_name": "Osaka-01", "reason": "offline" }],
-    "subscriber": { "id": "01J...", "name": "默认用户", "blocked_reason": null }
-  }
-}
-```
-
-- `document` 与订阅响应走同一套渲染与筛选逻辑，代理 UUID 替换为占位值；预览不暴露凭据。
-- `skipped` 说明节点被排除的原因，取 `disabled`、`offline`、`unhealthy`、`not_selected`、`no_endpoint`。
-- `subscriber.blocked_reason` 取 `inactive`、`expired`、`over_quota` 或 `null`，与订阅接口返回 `403` 的条件一致。
-- 没有可分发节点时返回空 `proxies`，不返回 `503`；`503` 只属于真正下发订阅的路径。
-
-## 3. Agent API
-
-Agent 请求使用 `Authorization: Bearer <node_id>.<secret>`。请求体上限与报表切分规则见 [traffic.md](traffic.md)。
-
-### 3.1 上报
+### 3.1 状态与流量上报
 
 `POST /api/v1/agent/report`
 
-```json
-{
-  "sent_at": 1780000000,
-  "agent_version": "0.1.0",
-  "xray_version": "25.10.1",
-  "xray_healthy": true,
-  "stats_healthy": true,
-  "applied_config_version": 3,
-  "users_ver": 12,
-  "sys": {
-    "cpu": 0.12,
-    "mem": 0.41,
-    "load": 0.30,
-    "uptime": 86400
-  },
-  "traffic": {
-    "report_id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
-    "period_start": 1780000000,
-    "period_end": 1780000900,
-    "has_counter_gap": false,
-    "node": {
-      "uplink_bytes": 10240,
-      "downlink_bytes": 204800
-    },
-    "users": [
-      {
-        "xray_email": "u_01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
-        "uplink_bytes": 10240,
-        "downlink_bytes": 204800
-      }
-    ]
-  }
-}
-```
+上报载荷包含两部分内容：
+1. 节点指标与心跳：上报时间、Agent 版本、Xray 版本、健康探针状态、已生效配置版本号（`applied_config_version`）、当前已应用凭据版本号（`users_ver`）以及可选的系统负载数据（CPU、内存、载荷与正常运行时间）。
+2. 流量结算（可选）：单次上报可携带由 `report_id`、时间区间（`period_start` 与 `period_end`）、节点总量增量与用户维度增量构成的结算数据。
 
-响应：
+响应载荷包含处理确认与控制指令：
+- `ack_report_id`：成功入账的报表 ID。
+- `server_time`：服务端统一时钟戳。
+- `heartbeat_interval_seconds` 与 `traffic_interval_seconds`：下发推荐的调度周期。
+- `users_ver`：全局凭据版本号，用于通知 Agent 拉取最新用户名单。
+- `desired_config_version`：目标配置版本号。
+- `unknown_users`：未能匹配到有效订阅用户的记录数。
 
-```json
-{
-  "data": {
-    "ack_report_id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
-    "server_time": 1780000002,
-    "heartbeat_interval_seconds": 300,
-    "traffic_interval_seconds": 900,
-    "users_ver": 13,
-    "desired_config_version": 3,
-    "unknown_users": 0,
-    "directives": []
-  }
-}
-```
+上报规范与边界处理：
+- 心跳更新与流量结算解耦：即使流量数据遇到冲突，心跳状态依然正常落盘。
+- 单个报表最大承载 40 个用户条目，载荷上限 64 KB。
+- 结算区间跨度限制在 3600 秒内，且起止时间点必须归属于同一小时自然桶。
+- 幂等性保障：以报表内容规范化 JSON 的 SHA-256 哈希值作为校验依据；同一 `report_id` 再次上报相同载荷直接返回确认，载荷不同则返回 `409 REPORT_CONFLICT`。
 
-规则：
-
-- 心跳与流量共用一个端点；纯心跳请求省略 `traffic`，`ack_report_id` 为 `null`。
-- 单份报表最多 40 个用户条目、64 KB；超出返回 `413`，Agent 切分后重试。
-- `period_end > period_start`，跨度不超过 3600 秒；`period_start` 与 `period_end - 1` 必须位于同一小时桶，跨桶返回 `422`，由 Agent 在采样侧切分。
-- `period_end` 允许最多 5 分钟未来偏移；超过 7 天的报表返回 `422`。
-- 同一报表内的 `xray_email` 必须唯一；重复条目由 Agent 聚合，Worker 收到重复条目返回 `422`。
-- `payload_hash` 为 `traffic` 对象规范化 JSON（键排序）的 SHA-256；同一 `report_id` 重复提交且 hash 相同按成功返回，hash 不同返回 `409 REPORT_CONFLICT`。
-- Agent 收到 `409` 丢弃该报表并告警，不阻塞后续队列。
-- 未知 `xray_email` 仍计入节点与站点流量，跳过用户汇总，响应包含 `unknown_users` 计数。
-- 心跳字段先于流量批次提交；流量批次失败不会让节点被判离线。
-- Agent 以响应中的 `heartbeat_interval_seconds` 与 `traffic_interval_seconds` 为准，持久化后在下一次调度生效。
-- `sys` 为可选字段，限制 2 KB；节点列表与节点详情展示该指标。
-- `directives` 保留给未来扩展，当前返回空数组；旧 Agent 忽略未知类型。
-
-### 3.2 用户列表
+### 3.2 节点凭据拉取
 
 `GET /api/v1/agent/users`
 
-```json
-{
-  "data": {
-    "version": 13,
-    "users": [
-      {
-        "xray_email": "u_01J...",
-        "vless_uuid": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
-  }
-}
-```
+- 返回目标节点处于启用状态且订阅有效的所有客户端凭证列表（`xray_email` 与 `vless_uuid`）。
+- 响应头包含代表凭据集合版本的 `ETag`。
+- 支持 `If-None-Match` 条件请求：当本地凭据版本与远端匹配时，服务端直接响应 `304 Not Modified`，避免冗余数据传输与磁盘写入。
 
-- 只返回该节点上启用且订阅用户状态为 `active` 的凭据。
-- 响应头 `ETag` 为带引号的版本号（如 `"13"`），与响应体的 `version` 相同。
-- 支持 `If-None-Match`：命中该标签（含 `W/"13"` 弱形式与 `*`）时返回 `304`，无响应体。
+### 3.3 配置拉取与结果反馈
 
-### 3.3 配置
-
-这两个端点属于 P2：路由与入参校验已注册，服务层尚未实现，当前返回 `501 NOT_IMPLEMENTED`。以下为契约定义的响应形状。
-
-- `GET /api/v1/agent/config`：返回当前 `desired_config_version` 的定义、SHA-256 与版本；Agent 版本已是最新时返回 `204`。
-- `POST /api/v1/agent/config/result`：
-
-```json
-{
-  "version": 4,
-  "status": "applied",
-  "applied_at": 1780000000,
-  "error": null
-}
-```
-
-- `status` 取 `applied` / `failed`；错误包含 `code` 与 `message`，不包含私钥或完整配置。
-- 迟到的旧版本结果不能覆盖更新版本状态。
-
-发布与应用流程见 [config-delivery.md](config-delivery.md)。
+- `GET /api/v1/agent/config`：用于 Agent 获取期望版本的不可变配置定义（规范化 JSON 与 SHA-256 哈希）。当 Agent 已处于目标版本时响应 `204 No Content`。
+- `POST /api/v1/agent/config/result`：Agent 在完成配置校验、原子替换与重启验证后，向控制面上报最终生效版本号、状态（`applied` 或 `failed`）以及结构化错误信息。
 
 ## 4. 订阅 API
 
-- `GET /sub/{token}/clash.yaml`
-- `GET /sub/{token}/uri?encoding=base64`
-- `GET /sub/{token}/uri?encoding=plain`
+订阅端点路径直接暴露于根路径下，由专用随机 Token 访问，不依赖管理面板会话。
 
-状态码：
+- `GET /sub/{token}/clash.yaml`：生成适用于 Clash.Meta 的配置文档。
+- `GET /sub/{token}/uri?encoding=base64`：生成经 Base64 编码的通用代理链接文本。
+- `GET /sub/{token}/uri?encoding=plain`：生成明文换行分隔的通用代理链接。
 
-| 状态码 | 条件 |
+状态码响应规范：
+
+| 状态码 | 业务原因 |
 | --- | --- |
-| `401` | token 不存在或已撤销 |
-| `403` | 订阅用户停用、到期、超额，或订阅本身到期 |
-| `503` | 身份有效，但当前没有可分发节点 |
-| `400` | 不支持的编码或格式 |
-| `404` | 未知路径 |
-
-订阅 token 明文只在创建或轮换响应中出现一次；管理和 Agent API 不返回明文。生成逻辑见 [subscription.md](subscription.md)。
+| `200` | 正常响应订阅文档，附带 `subscription-userinfo` 头反映用量 |
+| `401` | Token 不存在或已撤销 |
+| `403` | 订阅已到期、所属用户被停用或本周期用量已达上限 |
+| `503` | 用户凭证有效，但当前无符合分发条件的可用节点 |
+| `400` | 请求了不支持的编码格式或参数异常 |
+| `404` | 请求端点不存在 |

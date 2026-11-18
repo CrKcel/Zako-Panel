@@ -1,22 +1,18 @@
 # Zako Panel 文档
 
-文档按主题拆分：`architecture.md` 记录跨模块的目标、决策与边界，其余文件各自负责一个子系统或流程。
+文档按业务主题独立划分：`architecture.md` 阐述跨模块的目标、核心决策与系统边界，其余文件各自负责一个子系统或流程。
 
-| 文档 | 内容 |
+| 文档 | 核心内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | 目标与范围、阶段划分、核心决策、总体架构、模块边界、扩展方式 |
-| [api.md](api.md) | 响应格式、管理 API、Agent API、订阅 API 与状态码 |
-| [database.md](database.md) | D1 表结构、索引、迁移约定、保留与清理 |
-| [traffic.md](traffic.md) | Xray 统计配置、Agent 采样、幂等入账、额度与周期 |
-| [subscription.md](subscription.md) | 节点状态与分发条件、订阅查询、Clash 与 URI 生成、响应头 |
-| [agent.md](agent.md) | Agent 模块、配置文件、进程模型、用户同步与热更新 |
-| [agent-distribution.md](agent-distribution.md) | Agent 静态资产分发、滚动发布、Downloads Worker、安装与回滚 |
-| [config-delivery.md](config-delivery.md) | 配置定义与版本、发布流程、应用状态机与回滚 |
-| [security.md](security.md) | 管理员认证、token、节点与输入约束 |
-| [operations.md](operations.md) | 免费额度预算、可观测性、故障行为 |
-| [deployment.md](deployment.md) | 面板部署、Access 配置、节点安装与初始化 |
-| [launch-checklist.md](launch-checklist.md) | 上线检查表：面板、Access、节点、订阅用户、管理员、订阅、流量、容量与安全 |
-| [testing.md](testing.md) | Worker、Agent、Web 与联调测试范围 |
-| [roadmap.md](roadmap.md) | 阶段实施顺序与验收标准 |
+| [architecture.md](architecture.md) | 总体目标、核心决策、系统边界、模块职责与扩展方式 |
+| [api.md](api.md) | 响应格式规范、管理 API、Agent 通信 API、订阅 API 与状态码 |
+| [database.md](database.md) | D1 实体模型、流量聚合设计、索引策略与数据生命周期 |
+| [traffic.md](traffic.md) | Xray 统计规范、Agent 增量采样、Worker 幂等入账与自然月周期 |
+| [subscription.md](subscription.md) | 节点状态派生、订阅分发过滤规则、Clash 与 URI 格式规范及响应标头 |
+| [agent.md](agent.md) | Agent 运行模型、运行时配置、用户凭据同步、远程配置管理与权限模型 |
+| [security.md](security.md) | Access 身份鉴权、凭据与敏感数据防护、节点安全约束与分发安全边界 |
+| [operations.md](operations.md) | 免费额度预算基线、开销测算模型、可观测性与系统自愈故障矩阵 |
+| [deployment.md](deployment.md) | 控制面板部署、Downloads Worker 静态资产分发、节点一键安装与上线验证清单 |
+| [testing.md](testing.md) | Worker、Agent、静态分发、前端及端到端容量测试策略 |
 
-建议阅读顺序：`architecture` → `database` → `api` → 当前工作涉及的子系统文档。
+建议阅读顺序：`architecture` → `database` → `api` → 当前关注的子系统文档。

@@ -9,7 +9,7 @@
 // Wall time here includes the local Miniflare runtime, so the numbers are a
 // regression signal rather than the deployed Worker's billed CPU. Production
 // CPU and D1 row counts are read from Cloudflare observability as part of
-// docs/launch-checklist.md.
+// docs/deployment.md.
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';

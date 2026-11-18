@@ -1,50 +1,34 @@
-# 安全设计
+# 安全模型与防护设计
 
-安全边界依赖 Cloudflare Access、D1 中的角色记录和节点本地的密钥管理。Access 策略与节点密钥的部署步骤见 [deployment.md](deployment.md)，Agent 下载分发见 [agent-distribution.md](agent-distribution.md)，可观测性相关的脱敏要求见 [operations.md](operations.md)。
+系统安全边界依赖 Cloudflare Access 身份网关、数据库角色权限控制以及节点侧最小特权隔离。部署细节详见 [deployment.md](deployment.md)，运行监控与日志脱敏详见 [operations.md](operations.md)。
 
-## 1. 管理员
+## 1. 管理员访问控制与身份鉴权
 
-- Cloudflare Access 保护 `/admin/*` 与 `/api/v1/admin/*`。
-- Worker 使用 Access JWKS 验证 JWT 签名、issuer、audience、过期与生效时间；不信任可伪造的 email header。
-- `admin_users` 决定角色与启用状态；禁用后即使 Access 身份有效也不能调用管理 API。
-- 角色：`owner` 管理管理员与全部资源，`admin` 管理节点、订阅与配置，`viewer` 只读。
-- Access 路径策略排除 `/sub/*`、`/api/v1/agent/*` 与 `/dl/*`。
-- 本地开发没有 Access 代理：仅当同时设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL` 时，未携带 Access JWT 的管理请求按该邮箱鉴权；携带 JWT 的请求仍走 JWKS 校验。部署变量不得包含这两项。
+- 网关保护：管理面板（`/admin/*`）与管理接口（`/api/v1/admin/*`）均由 Cloudflare Access 强制保护。
+- 签名验证：Worker 通过 Access 提供的 JWKS 公钥端点校验 JWT 的有效性、颁发者、受众目标与生效时间，杜绝伪造请求头。
+- 权限判定：通过数据库 `admin_users` 表对身份进行二次校验，支持细粒度角色控制：
+  - `owner`：拥有系统全量管理权限，负责管理员的授权、停用与降级。
+  - `admin`：负责日常运维管理，包括节点管理、订阅配置、用户维护及配置下发。
+  - `viewer`：只读审计权限，可查看统计图表、节点健康状态与用户明细。
+- 路径策略：订阅端点（`/sub/*`）、Agent 上报端点（`/api/v1/agent/*`）及分发路径（`/dl/*`）排除在 Access 之外，分别由专属 Token 与静态访问策略保障安全。
 
-## 2. Token 与敏感信息
+## 2. 凭证与敏感数据保护
 
-- Agent 与订阅 token 至少 256-bit 随机数，使用 URL 安全编码。
-- D1 只存 SHA-256；明文只在创建或轮换响应中出现一次，不落日志、分析事件或错误堆栈。
-- Agent token 格式 `Bearer <node_id>.<secret>`；Worker 先按节点 ID 查询，再对 secret 做 SHA-256 与恒定时间比较。
-- 轮换后更新节点上的 token 文件并重启 Agent；旧 token 立即失效。
-- token、REALITY 私钥、Agent 状态文件与用户集合的权限为 0600。
-- 订阅 URL 视为秘密，不写入第三方统计，不发送 Referer。
-- REALITY 私钥只在节点本地保存；Worker 只保存公钥。
-- VLESS UUID 是代理凭据，只出现在订阅响应、节点凭据接口与节点本地配置中。节点凭据接口经 Access 鉴权并要求 `viewer` 及以上角色；档案预览使用占位 UUID，不返回真实凭据。
+- 密码学安全：订阅 Token 与 Agent 认证 Token 均采用至少 256 位加密安全随机数生成，并采用 URL 安全字符编码。
+- 哈希存储：控制面数据库仅持久化 Token 的 SHA-256 哈希值。明文凭证仅在生成或轮换的响应中返回一次，禁止在日志、分析监控或错误堆栈中记录。
+- 常数时间比对：Agent Token 采用 `Bearer <node_id>.<secret>` 格式，服务端通过索引定位节点后，对密钥部分进行 SHA-256 计算并执行常数时间安全比对，防范时序侧信道攻击。
+- 私钥隔离：REALITY 真实私钥仅保存在节点本地（权限 `0600`），控制面仅维护公钥。
+- 代理凭据最小暴露：VLESS UUID 仅在订阅下发、节点授权管理以及节点配置内出现。档案预览与公共查询统一使用占位凭据。
 
-## 3. 节点与输入
+## 3. 节点与网络安全约束
 
-- 防火墙只开放必要的 Xray 端口与受限 SSH；StatsService、HandlerService 仅 loopback。
-- SQL 全部参数绑定；YAML 正规序列化；URI 正确百分号编码。
-- 限制订阅节点数、规则大小、Agent 请求体与报表条目数；超限返回 `413`。
-- WAF 对 `/sub/*`、`/api/v1/agent/*` 与 `/dl/*` 配置限流；失败请求不写高基数 D1 日志。
-- Agent 通过 systemd 限制写路径，仅允许写 `/var/lib/zako-agent` 与 `/etc/xray`；Xray 校验与重启使用固定命令。
-- 配置错误不能破坏最近已知可用版本；P2 不提供任意命令执行。
+- 网络面收敛：节点防火墙仅放行代理服务端口与管理员 SSH 访问；Xray 的 `StatsService` 与 `HandlerService` 严格绑定环回地址 `127.0.0.1`。
+- 请求体防御：控制面针对报表大小、用户批量上限及规则数量设定严格配额，超出阈值直接返回 `413 Payload Too Large`。
+- 运行权限收敛：Agent 进程以独立的低权限系统用户 `zako-agent` 运行，开启 `NoNewPrivileges=true`；服务重启依赖限定动作与服务名的 polkit 授权。
+- 任意命令防范：远程配置机制仅支持结构化 JSON 定义的下发与合入校验，系统不提供任意 Shell 脚本执行通道。
 
-### 3.1 Agent 运行权限
+## 4. 静态分发安全边界
 
-- Agent 以 `zako-agent` 系统用户运行，systemd 单元保持 `NoNewPrivileges=true`，不授予 capability，也不需要 root。
-- 重启权限来自 polkit 规则 `/etc/polkit-1/rules.d/50-zako-agent-xray.rules`：仅当发起用户为 `zako-agent`、目标单元为 `xray.service`、动作为 `restart` 时返回允许；其他单元与 `stop` 等动作不受该规则授权。
-- `/etc/xray` 目录为 `root:zako-agent`、`0770`。Agent 以同目录临时文件加 rename 替换 `config.json`，因此需要目录写权限而非文件写权限。
-- `/etc/xray/config.json` 为 `0640`、属组 `zako-agent`；`/etc/xray/reality.key` 与 `/etc/zako-agent/token` 为 `0600`；用户集合文件 `/var/lib/zako-agent/users.json` 为 `0600`。
-- 安装脚本负责创建目录权限与 polkit 规则，权限被手工改动后热更新回退路径会失败。
-
-## 4. Agent 分发
-
-- `/dl/*` 公开只读，不经过 Access。Agent 二进制不包含 token、私钥或面板地址；节点接入控制面仍依赖本地 Agent token 与配置。
-- Downloads Worker 为 assets-only，没有 Worker 脚本与 D1 binding；静态资产由 Cloudflare 直接返回。
-- 发布产物只包含二进制、示例配置、systemd unit、安装脚本、polkit 规则与 Xray 模板。打包测试检查 `token`、`state.db`、`reality.key` 与 `.dev.vars` 不在归档中。
-- 稳定下载 URL 使用 `Cache-Control: public, max-age=0, must-revalidate` 与 ETag；不使用 immutable。
-- `/dl/*` 配置 WAF 限流；下载日志不包含凭据。
-- 发布 tag 不可移动；回滚使用 Downloads Worker 的 Cloudflare 版本回滚，或重跑上一个 tag。
-- 网络安装脚本以 root 执行，首次安装前应下载并检查脚本；校验依赖 HTTPS 与同源的 `SHA256SUMS`。
+- 资产隔离：Downloads Worker 独立部署且为纯静态资产服务，无数据库绑定与后端执行脚本。
+- 零敏感内容：分发文件仅包含编译好的二进制、示例模板、服务单元文件与安装脚本，流水线自动化测试持续校验敏感私钥或配置文件的排除情况。
+- 传输完整性：安装脚本在执行前下载并校验同源 `SHA256SUMS` 哈希清单，校验失败立即终止安装。

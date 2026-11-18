@@ -1,166 +1,63 @@
-# 流量采集与入账
+# 流量采集与入账结算
 
-平台按小时桶记录节点、站点与订阅用户流量，额度判断读取当前周期汇总。上报接口与字段校验见 [api.md](api.md)，表结构与保留期见 [database.md](database.md)，Agent 进程模型见 [agent.md](agent.md)。
+系统按小时自然桶记录节点、全站及订阅用户的流量消耗，并在用户当前计费周期内进行总量汇总与额度校验。API 契约详见 [api.md](api.md)，数据库表结构详见 [database.md](database.md)，Agent 进程与同步机制详见 [agent.md](agent.md)。
 
-## 1. Xray 统计配置
+## 1. Xray 统计配置与监控规范
 
-Xray 配置必须包含 stats、policy、API inbound 与 routing：
+Agent 通过环回 gRPC 接口对接 Xray 核心的 `StatsService`：
 
-```json
-{
-  "stats": {},
-  "policy": {
-    "levels": {
-      "0": {
-        "statsUserUplink": true,
-        "statsUserDownlink": true
-      }
-    },
-    "system": {
-      "statsInboundUplink": true,
-      "statsInboundDownlink": true
-    }
-  },
-  "api": {
-    "tag": "api",
-    "services": ["StatsService", "HandlerService"]
-  },
-  "inbounds": [
-    {
-      "tag": "api",
-      "listen": "127.0.0.1",
-      "port": 10085,
-      "protocol": "dokodemo-door",
-      "settings": { "address": "127.0.0.1" }
-    }
-  ],
-  "routing": {
-    "rules": [
-      { "type": "field", "inboundTag": ["api"], "outboundTag": "api" }
-    ]
-  }
-}
-```
+- 统计范围：启用 Level 0 用户级别及入站级别的上行（`uplink`）与下行（`downlink`）流量统计。
+- 标识对齐：每个受纳管的客户端配置全局唯一的 `email` 标识，对应数据库 `node_clients.xray_email`。
+- 流量隔离：节点流量统计仅采集业务代理入站的流量，排除本地管理 API 入站的开销。
+- 查询模式：Agent 使用非重置查询（`reset=false`）定期读取累计计数器，保障计数基线的连续性。
 
-- 每个需要统计的用户设置稳定且唯一的 `email`，对应 `node_clients.xray_email`。
-- 统计键：`user>>>EMAIL>>>traffic>>>uplink|downlink`、`inbound>>>TAG>>>traffic>>>uplink|downlink`。
-- 节点流量只汇总代理 inbound tag，排除 `api` inbound，避免把本地 API 流量计入用户流量。
-- Agent 使用 `QueryStats(pattern="user>>>", reset=false)`、inbound 查询与 `GetSysStats`；不使用 `reset=true`。
+## 2. Agent 采样与增量切分
 
-## 2. Agent 采样与增量
+Agent 本地运行采样与上报两个独立的调度循环：
 
-```text
-每 30 秒读取原始计数器：
-  首次看到计数器：只建立基线，不回填未知历史
-  当前值 >= 基线：delta = 当前值 - 基线
-  当前值 < 基线或 Xray uptime 回退：delta = 当前值，标记 counter gap
-  缺失计数器：记录异常，不产生负 delta
+### 2.1 采样与基线维护
 
-在同一 BoltDB 事务中：
-  保存 delta 到当前未结算报表
-  更新原始计数基线与 Xray uptime
+- 采样频率：默认每 30 秒轮询一次 Xray 统计接口。
+- 基线计算：首次获取的计数器作为初始基线；后续采样值大于等于基线时，增量为当前值与基线的差值。
+- 断层检测：当采样值低于基线或检测到 Xray 运行时间回退时，判定发生进程重启或计数器归零，将当前值直接作为增量并标记 `has_counter_gap`，避免产生负数流量。
+- 本地落盘：增量数据、最新基线以及运行时状态在同一个 BoltDB 事务中完成持久化。
 
-每 15 分钟（默认，Worker 下发）：
-  按小时边界和 40 个用户条目上限切分非零 delta
-  为每份报表生成持久 report_id 并关闭批次
-  发送最早未 ACK 报表
-  只有收到报告级 ACK 才删除 outbox
-```
+### 2.2 报表切分与批次出站
 
-- 报表 `period_start`/`period_end` 必须落在同一小时桶；跨边界时按采样时间切分，无法精确归属的尾部计入下一小时并标记 `has_counter_gap`。
-- 关闭报表时 `period_end` 取关闭时刻与所属小时边界的较小值；Worker 只接受不超过 5 分钟未来偏移的 `period_end`，未结束的小时不能直接上报小时边界。
-- Agent 重启后从 BoltDB 恢复基线、outbox、`users_ver` 与配置版本。
-- 网络失败采用指数退避与 jitter；Worker 返回 `429` 时遵守 `Retry-After` 或加大退避。
-- Agent 使用心跳返回的 `server_time` 检测明显时钟偏移，节点仍应通过 timesyncd/NTP 校时。
-- outbox 中超过 7 天的报表丢弃并记录告警，避免与 Worker 报表 ID 保留期冲突。
+- 调度周期：默认每 15 分钟触发一次出站结算。
+- 切分约束：单份报表所含数据严格限制在同一个自然小时区间内，且最多包含 40 个用户条目。跨越自然小时边界或超出条目上限的数据被自动拆分为多个独立报表。
+- 区间边界：关闭报表时，结束时间取当前时间与所在小时边界的较小者，未来时钟偏移严格限制在 5 分钟以内。
+- 队列保障：报表生成持久化 `report_id` 并存入本地发送队列；仅在收到服务端的确认回复后将报表从本地队列安全移除。超过 7 天未送达的过期报表会被主动废弃以避免与服务端凭证窗口冲突。
 
-## 3. Worker 幂等入账
+## 3. Worker 幂等入账机制
 
-单次上报按以下顺序处理：
+服务端收到上报请求后，通过事务批处理确保状态与用量的原子落盘：
 
-1. 验证 Agent token 与请求体。
-2. `batch` 提交心跳更新，并读取该节点用户映射与订阅周期：
+1. 身份与参数校验：验证 Agent Bearer Token，校验时间区间是否合法且属于单一小时自然桶。
+2. 心跳与指标更新：在首个批处理事务中更新节点的在线时间戳、健康状态、硬件负载指标与已生效配置版本。
+3. 用户映射解析：将报表中的 `xray_email` 批量映射为内部 `subscriber_id`。未识别的凭据流量仅计入节点与全站汇总。
+4. 流量增量入账：在原子事务中完成多表写入：
+   - 插入 `traffic_reports` 记录凭据。
+   - 累加更新 `node_traffic_hourly`、`site_traffic_hourly` 以及 `user_traffic_hourly` 对应小时桶的字节数。
+   - 累加更新用户当前计费周期的汇总记录 `subscriber_usage`。
+5. 冲突与幂等保障：当 `traffic_reports` 发生主键冲突时，比对已存记录的载荷 SHA-256 哈希值。哈希一致则按幂等成功返回确认；哈希不一致则判定为非法冲突并返回 `409 REPORT_CONFLICT`。
 
-```sql
-UPDATE nodes
-SET last_seen_at = ?, xray_healthy = ?, stats_healthy = ?,
-    agent_version = ?, xray_version = ?, sys_json = ?,
-    applied_config_version = ?, updated_at = ?
-WHERE id = ?;
+## 4. 配额管理与周期判定
 
-SELECT subscriber_id, xray_email
-FROM node_clients
-WHERE node_id = ? AND xray_email IN (/* ≤ 40 个绑定参数 */);
+### 4.1 周期定义与推进
 
-SELECT id, usage_cycle_start, status, traffic_limit_bytes, expires_at
-FROM subscribers
-WHERE id IN (/* 去重后的订阅用户 */);
-```
+- 周期边界：订阅用户的使用周期采用 UTC 自然月规范（每月 1 日 00:00 UTC 开始至次月 1 日 00:00 UTC 截止）。
+- 定时推进：定时任务周期性扫描候选用户列表。当检测到周期截止时间已到达时，将 `subscriber_usage` 累计值重置并更新周期起止时间戳。
 
-3. 将 `traffic.users` 中的 `xray_email` 映射为 `subscriber_id`；未知邮箱只计入节点与站点桶。
-4. `batch` 提交流量，顺序固定：
+### 4.2 状态派生规则
 
-```sql
-INSERT INTO traffic_reports
-  (node_id, report_id, payload_hash, period_start, period_end,
-   item_count, has_counter_gap, received_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+订阅用户状态根据当前业务属性实时派生，并物化至 `subscribers.status` 字段中：
 
-INSERT INTO node_traffic_hourly
-  (node_id, bucket_start, uplink_bytes, downlink_bytes, updated_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(node_id, bucket_start) DO UPDATE SET
-  uplink_bytes = node_traffic_hourly.uplink_bytes + excluded.uplink_bytes,
-  downlink_bytes = node_traffic_hourly.downlink_bytes + excluded.downlink_bytes,
-  updated_at = excluded.updated_at;
+| 优先级 | 物化状态 | 判定条件 | 业务影响 |
+| --- | --- | --- | --- |
+| 1 | `disabled` | 管理员手动停用 | 拒绝订阅下发，凭据从节点入站中移除 |
+| 2 | `expired` | 有效期截止时间已到达 | 拒绝订阅下发，凭据从节点入站中移除 |
+| 3 | `limited` | 设定有限额且当前周期用量达到限额 | 拒绝订阅下发，凭据从节点入站中移除 |
+| 4 | `active` | 处于有效期内且未超出配额 | 正常下发订阅配置与节点访问权限 |
 
-INSERT INTO site_traffic_hourly
-  (bucket_start, uplink_bytes, downlink_bytes, updated_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(bucket_start) DO UPDATE SET
-  uplink_bytes = site_traffic_hourly.uplink_bytes + excluded.uplink_bytes,
-  downlink_bytes = site_traffic_hourly.downlink_bytes + excluded.downlink_bytes,
-  updated_at = excluded.updated_at;
-
--- 每 16 行一条语句，6 个绑定参数/行，避免超过 100 参数限制
-INSERT INTO user_traffic_hourly
-  (subscriber_id, node_id, bucket_start, uplink_bytes, downlink_bytes, updated_at)
-VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) /* ... */
-ON CONFLICT(subscriber_id, node_id, bucket_start) DO UPDATE SET
-  uplink_bytes = user_traffic_hourly.uplink_bytes + excluded.uplink_bytes,
-  downlink_bytes = user_traffic_hourly.downlink_bytes + excluded.downlink_bytes,
-  updated_at = excluded.updated_at;
-
--- 每 20 行一条语句，5 个绑定参数/行
-INSERT INTO subscriber_usage
-  (subscriber_id, cycle_start, uplink_bytes, downlink_bytes, updated_at)
-VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?) /* ... */
-ON CONFLICT(subscriber_id) DO UPDATE SET
-  uplink_bytes = CASE
-    WHEN subscriber_usage.cycle_start = excluded.cycle_start
-    THEN subscriber_usage.uplink_bytes + excluded.uplink_bytes
-    ELSE excluded.uplink_bytes END,
-  downlink_bytes = CASE
-    WHEN subscriber_usage.cycle_start = excluded.cycle_start
-    THEN subscriber_usage.downlink_bytes + excluded.downlink_bytes
-    ELSE excluded.downlink_bytes END,
-  cycle_start = excluded.cycle_start,
-  updated_at = excluded.updated_at;
-```
-
-5. 若 `traffic_reports` 插入触发唯一约束，整个流量 batch 回滚；Worker 查询该 `report_id` 的 `payload_hash`：相同则按成功返回 ACK，不同则返回 `409`。心跳批次已提交，节点状态不受影响。
-6. `subscriber_usage.cycle_start` 使用订阅用户当前的 `usage_cycle_start`；周期已滚动时，CASE 分支重置累计值。
-7. 心跳中的 `applied_config_version` 只接受不大于 `desired_config_version` 的值。
-
-报表切分后每份报表独立 `report_id`、独立 batch；单份失败不影响其他报表。D1 batch 是原子事务，任一语句失败会回滚整个 batch。
-
-## 4. 额度与周期
-
-- `subscribers.usage_cycle_start` / `usage_cycle_end` 定义当前周期，取 UTC 自然月：每月 1 日 00:00 UTC 开始，下月 1 日 00:00 UTC 结束。
-- `*/15` Cron 每轮先用一条 SQL 选出候选订阅用户，单轮上限 500 行；只读取这些候选行的 `subscriber_usage`。候选条件是周期已结束，或存储的状态值可能已经过期：`active` 但到期/超额、`expired` 但到期时间已放宽、`limited` 但额度已放宽。该查询只判断“存储值是否可能失效”，不判断下一个状态值；优先级仍由 `lib/subscriber-status.ts` 的单一定义决定。仅在 `usage_cycle_end <= now` 时推进周期，单行最多推进 240 次以覆盖长期未运行的记录，超过上限时直接切换到当前月周期。
-- 推进周期时把 `subscriber_usage` 重置为 `(cycle_start, 0, 0)`，并在同一 batch 内更新 `usage_cycle_start` / `usage_cycle_end`。
-- 周期内状态按以下优先级派生并物化到 `subscribers.status`：`disabled`（管理员停用，粘性）优先，其次 `expired`（`expires_at <= now`），其次 `limited`（有限额且周期用量 `>= limit`），否则 `active`。订阅请求的放行判定与 Cron 物化状态都投影同一份定义（`lib/subscriber-status.ts`），因此 403 原因与展示状态不会分叉。
-- 有状态变化时本轮递增一次 `meta.users_ver`，触发 Agent 拉取用户列表；所有状态都与现有值一致时不写 `users_ver`。
-- 管理员修改额度、到期或状态时，在同一 D1 batch 中写入订阅用户，状态发生变化才递增 `users_ver`；`PUT /subscribers/{subscriberId}/nodes` 在授权集合实际变化时递增 `users_ver`。
-- 订阅请求实时按 `expires_at`、当前周期用量与 `disabled` 判定，不依赖 Cron 的物化结果；`limited` 与 `expired` 的物化值只影响管理界面展示与 Agent 用户集合。
-- 从节点移除用户后，已建立的连接不会被主动中断；新连接与后续配置刷新才生效。
+当定时任务或管理操作导致用户的物化状态产生变更时，系统递增全局凭证版本号 `meta.users_ver`，通知相关节点拉取最新名单执行热更新。已建立的代理会话保持自然连接，新连接即刻受限。

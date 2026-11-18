@@ -29,10 +29,10 @@ npx wrangler d1 migrations apply zako-panel --remote
 npm run deploy
 ```
 
-部署完成后运行系统初始化脚本，创建首任超级管理员（`owner`）、默认订阅档案与基础元数据：
+部署完成后运行系统初始化脚本，创建默认订阅档案、默认订阅用户与基础元数据：
 
 ```bash
-npm run bootstrap -- --email admin@example.com
+npm run bootstrap
 npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 ```
 

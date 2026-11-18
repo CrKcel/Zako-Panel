@@ -921,110 +921,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/admin/admins:
-    get:
-      operationId: listAdmins
-      tags: [admin]
-      summary: List administrators
-      security:
-        - AccessJwt: []
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Administrator page
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/AdminUser'
-                  meta:
-                    $ref: '#/components/schemas/ListMeta'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-    post:
-      operationId: createAdmin
-      tags: [admin]
-      summary: Add an administrator
-      security:
-        - AccessJwt: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAdminRequest'
-      responses:
-        '201':
-          description: Administrator created
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    $ref: '#/components/schemas/AdminUser'
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /api/v1/admin/admins/{adminId}:
-    patch:
-      operationId: updateAdmin
-      tags: [admin]
-      summary: Update an administrator role or enabled state
-      security:
-        - AccessJwt: []
-      parameters:
-        - $ref: '#/components/parameters/AdminId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateAdminRequest'
-      responses:
-        '200':
-          description: Updated administrator
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    $ref: '#/components/schemas/AdminUser'
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
   /api/v1/admin/nodes/{nodeId}/configs:
     get:
       operationId: listNodeConfigs
@@ -1549,12 +1445,6 @@ components:
       required: true
       schema:
         type: string
-    AdminId:
-      name: adminId
-      in: path
-      required: true
-      schema:
-        type: string
     ConfigVersion:
       name: version
       in: path
@@ -2011,25 +1901,6 @@ components:
               type: array
               items:
                 type: string
-    AdminRole:
-      type: string
-      enum: [owner, admin, viewer]
-    AdminUser:
-      type: object
-      required: [id, email, role, enabled, created_at, updated_at]
-      properties:
-        id:
-          type: string
-        email:
-          type: string
-        role:
-          $ref: '#/components/schemas/AdminRole'
-        enabled:
-          type: boolean
-        created_at:
-          type: integer
-        updated_at:
-          type: integer
     TrafficGroupBy:
       type: string
       enum: [node, subscriber, site]
@@ -2402,23 +2273,6 @@ components:
           items:
             type: string
           uniqueItems: true
-    CreateAdminRequest:
-      type: object
-      required: [email, role]
-      properties:
-        email:
-          type: string
-          format: email
-        role:
-          $ref: '#/components/schemas/AdminRole'
-    UpdateAdminRequest:
-      type: object
-      minProperties: 1
-      properties:
-        role:
-          $ref: '#/components/schemas/AdminRole'
-        enabled:
-          type: boolean
     PublishConfigRequest:
       type: object
       required: [definition]

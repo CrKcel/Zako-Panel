@@ -2,8 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../env';
 import { AppError } from '../lib/errors';
-import { findAdminByEmail } from '../repositories/admins';
-import type { AppContext, AppEnv } from '../types';
+import type { AppEnv } from '../types';
 
 const jwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -32,18 +31,11 @@ function localAdminEmail(env: Env): string | null {
 	return email;
 }
 
-async function applyAdmin(c: AppContext, email: string): Promise<void> {
-	const admin = await findAdminByEmail(c.env.DB, email);
-	if (!admin || admin.enabled !== 1) {
-		throw new AppError('FORBIDDEN', 'Administrator is not enabled', 403);
-	}
-	c.set('admin', { id: admin.id, email: admin.email, role: admin.role });
-}
-
 /**
- * Verifies the Cloudflare Access JWT with the team JWKS and resolves the
- * administrator from D1. Access only gates the path; the D1 role and enabled
- * flag remain authoritative inside the worker.
+ * Verifies the Cloudflare Access JWT with the team JWKS and attaches the
+ * authenticated administrator's email from the token (or DEV_ADMIN_EMAIL in
+ * local development). Access itself is authoritative for who may reach the
+ * panel.
  */
 export const accessAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	const token = c.req.header('Cf-Access-Jwt-Assertion');
@@ -51,7 +43,7 @@ export const accessAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	if (!token) {
 		const email = localAdminEmail(c.env);
 		if (!email) throw new AppError('UNAUTHORIZED', 'Missing Access token', 401);
-		await applyAdmin(c, email);
+		c.set('admin', { email });
 		await next();
 		return;
 	}
@@ -71,6 +63,6 @@ export const accessAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 	}
 	if (!email) throw new AppError('UNAUTHORIZED', 'Access token has no email claim', 401);
 
-	await applyAdmin(c, email);
+	c.set('admin', { email: email.trim().toLowerCase() });
 	await next();
 };

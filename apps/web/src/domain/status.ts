@@ -1,4 +1,4 @@
-import type { AdminRole, DistributionSkipReason, NodeStatus, SubscriberBlockReason, SubscriberStatus, Subscription } from '@zako/contracts';
+import type { DistributionSkipReason, NodeStatus, SubscriberBlockReason, SubscriberStatus, Subscription } from '@zako/contracts';
 
 export type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger';
 
@@ -21,12 +21,6 @@ const SUBSCRIBER_STATUS: Record<SubscriberStatus, StatusDescriptor> = {
 	disabled: { label: '停用', tag: 'info' },
 };
 
-const ADMIN_ROLE: Record<AdminRole, StatusDescriptor> = {
-	owner: { label: '所有者', tag: 'warning' },
-	admin: { label: '管理员', tag: 'primary' },
-	viewer: { label: '只读', tag: 'info' },
-};
-
 const DISTRIBUTION_SKIP_REASON: Record<DistributionSkipReason, string> = {
 	disabled: '节点停用',
 	offline: '心跳过期',
@@ -47,10 +41,6 @@ export function nodeStatusDescriptor(status: NodeStatus): StatusDescriptor {
 
 export function subscriberStatusDescriptor(status: SubscriberStatus): StatusDescriptor {
 	return SUBSCRIBER_STATUS[status];
-}
-
-export function adminRoleDescriptor(role: AdminRole): StatusDescriptor {
-	return ADMIN_ROLE[role];
 }
 
 export function distributionSkipReasonLabel(reason: DistributionSkipReason): string {

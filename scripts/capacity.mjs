@@ -191,11 +191,6 @@ function buildSeedSql(adminEmail) {
 
 	const statements = [
 		...insertMany(
-			'admin_users',
-			['id', 'email', 'role', 'enabled', 'created_at', 'updated_at'],
-			[[ulid(), adminEmail, 'owner', 1, now, now]],
-		),
-		...insertMany(
 			'subscribers',
 			[
 				'id',
@@ -673,11 +668,6 @@ async function main() {
 					const items = JSON.parse(body).data.items;
 					return items.length === subscriberCount ? null : `list returned ${items.length} subscribers, expected ${subscriberCount}`;
 				},
-			},
-			{
-				label: 'admins list',
-				path: '/api/v1/admin/admins?limit=200',
-				validate: (body) => (Array.isArray(JSON.parse(body).data.items) ? null : 'missing data.items'),
 			},
 		];
 

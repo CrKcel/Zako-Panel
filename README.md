@@ -6,7 +6,6 @@
 
 - 节点、endpoint 与订阅档案管理，支持 VLESS + REALITY
 - 订阅用户、额度、周期与到期管理，按节点授权
-- 管理员角色与启用状态管理
 - Clash.Meta YAML 与通用 URI 订阅，代理组与规则可配置
 - Agent 心跳、Xray 统计采样、流量上报与按小时幂等入账
 - 用户集合下发与 Xray 热更新，失败自动回退为配置重启
@@ -41,7 +40,7 @@ docs/               项目文档
 ```bash
 npm install
 npm run db:migrate:local        # 本地 D1 建表
-npm run bootstrap -- --email you@example.com   # 初始化 owner、默认档案与订阅
+npm run bootstrap               # 初始化默认档案、默认用户与订阅
 ```
 
 `bootstrap` 生成的 `bootstrap.sql` 需按输出提示导入 D1；订阅 token 只在终端输出一次。
@@ -57,7 +56,7 @@ npm run dev:web                 # Vite，http://127.0.0.1:5173/admin/
 
 Vite 将 `/api` 与 `/sub` 代理到 Wrangler。本地 Access 配置写入 `.dev.vars`，参考 `.dev.vars.example`。
 
-本地没有 Access 代理，管理 API 默认返回 `401 Missing Access token`。复制 `.dev.vars.example` 为 `.dev.vars`，设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL=<admin_users 中的邮箱>` 后，Worker 在缺少 Access JWT 时按该邮箱鉴权。该邮箱需已存在且启用，可在本地 D1 导入 `bootstrap` 生成的 SQL：
+本地没有 Access 代理，管理 API 默认返回 `401 Missing Access token`。复制 `.dev.vars.example` 为 `.dev.vars`，设置 `ENVIRONMENT=development` 与 `DEV_ADMIN_EMAIL=<任意开发邮箱>` 后，Worker 在缺少 Access JWT 时按该邮箱通过鉴权。如需默认订阅数据，可在本地 D1 导入 `bootstrap` 生成的 SQL：
 
 ```bash
 npx wrangler d1 execute zako-panel --local --file=bootstrap.sql

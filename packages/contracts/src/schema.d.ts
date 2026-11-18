@@ -309,41 +309,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/admins": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List administrators */
-        get: operations["listAdmins"];
-        put?: never;
-        /** Add an administrator */
-        post: operations["createAdmin"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/admins/{adminId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update an administrator role or enabled state */
-        patch: operations["updateAdmin"];
-        trace?: never;
-    };
     "/api/v1/admin/nodes/{nodeId}/configs": {
         parameters: {
             query?: never;
@@ -727,16 +692,6 @@ export interface components {
             node_ids: string[];
         };
         /** @enum {string} */
-        AdminRole: "owner" | "admin" | "viewer";
-        AdminUser: {
-            id: string;
-            email: string;
-            role: components["schemas"]["AdminRole"];
-            enabled: boolean;
-            created_at: number;
-            updated_at: number;
-        };
-        /** @enum {string} */
         TrafficGroupBy: "node" | "subscriber" | "site";
         TrafficItem: {
             key: string;
@@ -910,15 +865,6 @@ export interface components {
         ReplaceSubscriberNodesRequest: {
             node_ids: string[];
         };
-        CreateAdminRequest: {
-            /** Format: email */
-            email: string;
-            role: components["schemas"]["AdminRole"];
-        };
-        UpdateAdminRequest: {
-            role?: components["schemas"]["AdminRole"];
-            enabled?: boolean;
-        };
         PublishConfigRequest: {
             definition: {
                 [key: string]: unknown;
@@ -1080,7 +1026,6 @@ export interface components {
         ProfileId: string;
         SubscriptionId: string;
         SubscriberId: string;
-        AdminId: string;
         ConfigVersion: number;
         SubscriptionToken: string;
     };
@@ -1905,101 +1850,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-        };
-    };
-    listAdmins: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Administrator page */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: {
-                            items: components["schemas"]["AdminUser"][];
-                        };
-                        meta: components["schemas"]["ListMeta"];
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createAdmin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAdminRequest"];
-            };
-        };
-        responses: {
-            /** @description Administrator created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["AdminUser"];
-                        meta: components["schemas"]["Meta"];
-                    };
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    updateAdmin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                adminId: components["parameters"]["AdminId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateAdminRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated administrator */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["AdminUser"];
-                        meta: components["schemas"]["Meta"];
-                    };
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
         };
     };
     listNodeConfigs: {

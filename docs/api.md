@@ -75,9 +75,6 @@ Agent 安装包与二进制下载端点由独立 Downloads Worker 托管，不�
 | `GET /api/v1/admin/subscribers/{subscriberId}` | 获取订阅用户详细属性与周期用量 | viewer |
 | `PATCH /api/v1/admin/subscribers/{subscriberId}` | 更新用户配额、到期时间或手动启停 | admin |
 | `PUT /api/v1/admin/subscribers/{subscriberId}/nodes` | 全量更新用户的节点授权集合，管理入站凭据 | admin |
-| `GET /api/v1/admin/admins` | 获取管理员列表及权限角色 | owner |
-| `POST /api/v1/admin/admins` | 添加管理员账号并授权角色 | owner |
-| `PATCH /api/v1/admin/admins/{adminId}` | 调整管理员角色或启停状态 | owner |
 | `GET /api/v1/admin/nodes/{nodeId}/configs` | 获取节点历史配置版本列表 | viewer |
 | `POST /api/v1/admin/nodes/{nodeId}/configs` | 创建并下发新的配置版本 | admin |
 | `GET /api/v1/admin/nodes/{nodeId}/configs/{version}` | 查看配置版本详情及 diff 内容 | viewer |

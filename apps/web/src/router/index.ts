@@ -56,12 +56,6 @@ const routes: RouteRecordRaw[] = [
 		meta: { title: '流量' },
 	},
 	{
-		path: '/admins',
-		name: 'admins',
-		component: () => import('../views/AdminListView.vue'),
-		meta: { title: '管理员' },
-	},
-	{
 		path: '/:pathMatch(.*)*',
 		redirect: { name: 'overview' },
 	},

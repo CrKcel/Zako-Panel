@@ -11,7 +11,6 @@ const items = [
 	{ path: '/profiles', label: '订阅档案' },
 	{ path: '/subscriptions', label: '订阅' },
 	{ path: '/traffic', label: '流量' },
-	{ path: '/admins', label: '管理员' },
 ];
 
 const activeMenu = computed(() => {

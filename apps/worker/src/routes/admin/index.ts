@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { accessAuth } from '../../middleware/access';
 import type { AppEnv } from '../../types';
-import { adminUserRoutes } from './admins';
 import { configRoutes } from './configs';
 import { enrollmentTokenRoutes } from './enrollment-tokens';
 import { nodeRoutes } from './nodes';
@@ -19,5 +18,4 @@ adminRoutes.route('/node-enrollment-tokens', enrollmentTokenRoutes);
 adminRoutes.route('/profiles', profileRoutes);
 adminRoutes.route('/subscriptions', subscriptionRoutes);
 adminRoutes.route('/subscribers', subscriberRoutes);
-adminRoutes.route('/admins', adminUserRoutes);
 adminRoutes.route('/traffic', trafficRoutes);

@@ -1,5 +1,4 @@
 import { env } from 'cloudflare:test';
-import type { AdminRole } from '@zako/contracts';
 import { sha256Hex } from '../src/lib/hash';
 import { newId } from '../src/lib/ids';
 import type { VlessRealityParams } from '../src/protocols/vless-reality';
@@ -42,7 +41,6 @@ export async function resetDatabase(): Promise<void> {
 		'nodes',
 		'subscribers',
 		'node_configs',
-		'admin_users',
 		'audit_events',
 		'meta',
 	];
@@ -305,23 +303,4 @@ export async function seedDistribution(options: SeedDistributionOptions = {}): P
 	const token = testToken(options.scope ?? 'a');
 	await seedSubscription({ token, subscriberId, profileId });
 	return { token, subscriberId, profileId, nodeId, nodeClient, endpointId };
-}
-
-export interface SeedAdminOptions {
-	id?: string;
-	email: string;
-	role?: AdminRole;
-	enabled?: boolean;
-}
-
-export async function seedAdmin(options: SeedAdminOptions): Promise<string> {
-	const id = options.id ?? newId();
-	const now = nowSeconds();
-	await env.DB.prepare(
-		`INSERT INTO admin_users (id, email, role, enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-	)
-		.bind(id, options.email.trim().toLowerCase(), options.role ?? 'owner', options.enabled === false ? 0 : 1, now, now)
-		.run();
-	return id;
 }

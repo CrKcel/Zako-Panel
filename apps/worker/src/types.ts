@@ -1,11 +1,8 @@
-import type { AdminRole } from '@zako/contracts';
 import type { Context } from 'hono';
 import type { Env } from './env';
 
 export interface AdminIdentity {
-	id: string;
 	email: string;
-	role: AdminRole;
 }
 
 export interface AgentIdentity {

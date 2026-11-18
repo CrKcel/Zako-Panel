@@ -10,7 +10,7 @@ import {
 	recordConfigResult,
 	rollbackConfig,
 } from '../src/services/config-service';
-import { nowSeconds, seedAdmin, seedNode, testToken } from './helpers';
+import { nowSeconds, seedNode, testToken } from './helpers';
 
 const SAMPLE_CONFIG = {
 	log: { loglevel: 'warning' },
@@ -48,12 +48,11 @@ const SAMPLE_CONFIG = {
 describe('config service', () => {
 	it('publishes immutable versions, advances desired_config_version and computes canonical sha256', async () => {
 		const nodeId = await seedNode();
-		const admin = await seedAdmin({ email: 'ops@example.com', role: 'admin' });
 
-		const v1 = await publishConfig(env.DB, nodeId, { definition: SAMPLE_CONFIG }, { id: admin, email: 'ops@example.com', role: 'admin' });
+		const v1 = await publishConfig(env.DB, nodeId, { definition: SAMPLE_CONFIG }, { email: 'ops@example.com' });
 
 		expect(v1.version).toBe(1);
-		expect(v1.created_by).toBe(admin);
+		expect(v1.created_by).toBe('ops@example.com');
 		expect(v1.applied_at).toBeNull();
 		expect(v1.last_error).toBeNull();
 		expect(v1.definition_sha256).toBe(await sha256Hex(canonicalJson(SAMPLE_CONFIG)));

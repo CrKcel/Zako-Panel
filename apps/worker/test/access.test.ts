@@ -2,10 +2,9 @@ import { env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
-import { errorHandler } from '../src/middleware/error-handler';
 import { accessAuth } from '../src/middleware/access';
+import { errorHandler } from '../src/middleware/error-handler';
 import type { AppEnv } from '../src/types';
-import { seedAdmin } from './helpers';
 
 const app = new Hono<AppEnv>();
 app.use('*', accessAuth);
@@ -24,17 +23,13 @@ function request(init: RequestInit | undefined, overrides: Partial<Env>): Promis
 }
 
 describe('admin access', () => {
-	it('authenticates local development requests by DEV_ADMIN_EMAIL', async () => {
-		await seedAdmin({ email: 'dev@example.com' });
-
-		const response = await request(undefined, { ENVIRONMENT: 'development', DEV_ADMIN_EMAIL: 'dev@example.com' });
+	it('authenticates local development requests by DEV_ADMIN_EMAIL without a D1 admin row', async () => {
+		const response = await request(undefined, { ENVIRONMENT: 'development', DEV_ADMIN_EMAIL: 'Dev@Example.com' });
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ email: 'dev@example.com' });
 	});
 
 	it('keeps the Access requirement outside local development', async () => {
-		await seedAdmin({ email: 'dev@example.com' });
-
 		const production = await request(undefined, { ENVIRONMENT: 'production', DEV_ADMIN_EMAIL: 'dev@example.com' });
 		expect(production.status).toBe(401);
 
@@ -42,19 +37,7 @@ describe('admin access', () => {
 		expect(missingEmail.status).toBe(401);
 	});
 
-	it('rejects development identities that are unknown or disabled', async () => {
-		await seedAdmin({ email: 'disabled@example.com', enabled: false });
-
-		const disabled = await request(undefined, { ENVIRONMENT: 'development', DEV_ADMIN_EMAIL: 'disabled@example.com' });
-		expect(disabled.status).toBe(403);
-
-		const unknown = await request(undefined, { ENVIRONMENT: 'development', DEV_ADMIN_EMAIL: 'unknown@example.com' });
-		expect(unknown.status).toBe(403);
-	});
-
 	it('never replaces a presented Access token with the development identity', async () => {
-		await seedAdmin({ email: 'dev@example.com' });
-
 		const response = await request(
 			{ headers: { 'Cf-Access-Jwt-Assertion': 'token' } },
 			{ ENVIRONMENT: 'development', DEV_ADMIN_EMAIL: 'dev@example.com', ACCESS_TEAM_DOMAIN: undefined, ACCESS_AUD: undefined },

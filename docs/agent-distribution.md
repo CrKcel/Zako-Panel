@@ -6,7 +6,7 @@ Agent 二进制由独立的 assets-only Downloads Worker 提供，挂在面板�
 
 - Downloads Worker 名称 `zako-agent-downloads`，配置在 `wrangler.downloads.jsonc`。
 - Worker 没有 `main`，只包含 `apps/downloads/dist` 下的静态资产；静态请求由 Cloudflare 直接返回，不计 Worker 请求与 CPU。
-- 路由 `panel.example.com/dl/*` 指向 Downloads Worker。Cloudflare 按具体程度匹配 route，`/dl/*` 优先于面板 Worker 的 `/` 或 Custom Domain；面板 Worker 的 SPA fallback 与路由配置保持不变，Access 需排除 `/dl/*`。
+- 路由 `332711.xyz/dl/*` 指向 Downloads Worker。Cloudflare 按具体程度匹配 route，`/dl/*` 优先于面板 Worker 的 `/` 或 Custom Domain；面板 Worker 的 SPA fallback 与路由配置保持不变，Access 需排除 `/dl/*`。
 - `assets.not_found_handling` 为 `none`，缺失路径返回空 body 的 404。
 - 面板 Worker 不处理 `/dl/*`，Agent 发布也不会触发面板部署。
 
@@ -66,9 +66,9 @@ zako-agent/
 
 首次发布前：
 
-- 将 `wrangler.downloads.jsonc` 的 `routes.pattern` 与 `zone_name` 替换为实际面板域名与 zone。
+- 确认 `wrangler.downloads.jsonc` 的 route 为 `332711.xyz/dl/*`、zone 为 `332711.xyz`；换域名要同步改这两项并重发版本，安装脚本里的下载地址在发布时写入。
 - 设置 GitHub secret `CLOUDFLARE_API_TOKEN`（Workers Scripts:Edit、Workers Routes:Edit、Zone:Read）与 `CLOUDFLARE_ACCOUNT_ID`。
-- 设置 GitHub variable `AGENT_DOWNLOAD_BASE_URL`，例如 `https://panel.example.com/dl/agent`。
+- 设置 GitHub variable `AGENT_DOWNLOAD_BASE_URL=https://332711.xyz/dl/agent`。
 - 确认 `/dl/*` 未进入 Cloudflare Access。
 
 发布命令：
@@ -94,13 +94,13 @@ git push origin agent-v0.1.0
 节点需要 Debian 12/13、root、`curl` 或 `wget`、`tar`、`coreutils` 与 CA 证书。
 
 ```bash
-curl -fsSL https://panel.example.com/dl/agent/install.sh | sudo bash -s
+curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 ```
 
 需要检查脚本时：
 
 ```bash
-curl -fsSLo /tmp/zako-agent-install.sh https://panel.example.com/dl/agent/install.sh
+curl -fsSLo /tmp/zako-agent-install.sh https://332711.xyz/dl/agent/install.sh
 less /tmp/zako-agent-install.sh
 sudo bash /tmp/zako-agent-install.sh
 ```
@@ -131,10 +131,10 @@ npx wrangler rollback --config wrangler.downloads.jsonc
 ## 7. 验证
 
 ```bash
-curl -fsS https://panel.example.com/dl/agent/version
-curl -fsSI https://panel.example.com/dl/agent/zako-agent-linux-amd64.tar.gz
-curl -fsSI https://panel.example.com/dl/agent/install.sh
-curl -s -o /dev/null -w '%{http_code}\n' https://panel.example.com/dl/agent/missing.tar.gz
+curl -fsS https://332711.xyz/dl/agent/version
+curl -fsSI https://332711.xyz/dl/agent/zako-agent-linux-amd64.tar.gz
+curl -fsSI https://332711.xyz/dl/agent/install.sh
+curl -s -o /dev/null -w '%{http_code}\n' https://332711.xyz/dl/agent/missing.tar.gz
 ```
 
 预期：

@@ -81,7 +81,7 @@ npm run format:check
 面板与节点的完整步骤见 [docs/deployment.md](docs/deployment.md)。Agent 二进制通过独立 Downloads Worker 滚动发布，节点安装命令为：
 
 ```bash
-curl -fsSL https://<面板域名>/dl/agent/install.sh | sudo bash -s
+curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 ```
 
 发布、缓存与回滚规则见 [docs/agent-distribution.md](docs/agent-distribution.md)，Agent 模块与运行模型见 [docs/agent.md](docs/agent.md)。

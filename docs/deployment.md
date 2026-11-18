@@ -46,13 +46,13 @@ npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 
 ## 2. Agent 下载 Worker
 
-Agent 二进制由独立 assets-only Downloads Worker 在面板域名 `/dl/agent/*` 下分发。产物、缓存与回滚规则见 [agent-distribution.md](agent-distribution.md)。
+Agent 二进制由独立 assets-only Downloads Worker 在 `332711.xyz/dl/agent/*` 下分发。产物、缓存与回滚规则见 [agent-distribution.md](agent-distribution.md)。
 
 ### 2.1 路由与部署
 
-1. 把 `wrangler.downloads.jsonc` 的 `routes.pattern` 与 `zone_name` 替换为实际面板域名与 zone，例如 `panel.example.com/dl/*` 与 `example.com`。
+1. 确认 `wrangler.downloads.jsonc` 的 route 为 `332711.xyz/dl/*`、zone 为 `332711.xyz`；换域名要同步改这两项并重发版本。
 2. 确认 `/dl/*` 未进入 Access（见 1.2）。
-3. 配置 GitHub repository variable `AGENT_DOWNLOAD_BASE_URL=https://<面板域名>/dl/agent`。
+3. 配置 GitHub repository variable `AGENT_DOWNLOAD_BASE_URL=https://332711.xyz/dl/agent`。
 4. 配置 GitHub secrets `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。token 需要 Workers Scripts:Edit、Workers Routes:Edit 与 Zone:Read。
 5. 推送 `agent-v*` tag 触发 `Release agent` 流水线；流水线构建、校验、生成静态资产并部署 Downloads Worker。已生成 `apps/downloads/dist` 时，也可以用 `npm run deploy:downloads` 手工部署。
 
@@ -61,9 +61,9 @@ Agent 二进制由独立 assets-only Downloads Worker 在面板域名 `/dl/agent
 ### 2.2 发布验证
 
 ```bash
-curl -fsS https://<面板域名>/dl/agent/version
-curl -fsSI https://<面板域名>/dl/agent/zako-agent-linux-amd64.tar.gz
-curl -s -o /dev/null -w '%{http_code}\n' https://<面板域名>/dl/agent/missing.tar.gz
+curl -fsS https://332711.xyz/dl/agent/version
+curl -fsSI https://332711.xyz/dl/agent/zako-agent-linux-amd64.tar.gz
+curl -s -o /dev/null -w '%{http_code}\n' https://332711.xyz/dl/agent/missing.tar.gz
 ```
 
 返回 HTML 200 表示 `/dl/*` 落到了面板 SPA，需要检查 route 或 Access 排除。
@@ -75,7 +75,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<面板域名>/dl/agent/missing
 ### 3.1 网络安装
 
 ```bash
-curl -fsSL https://<面板域名>/dl/agent/install.sh | sudo bash -s
+curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
 ```
 
 脚本下载当前稳定版本，校验 SHA-256，解压后执行 tarball 内的 `install.sh`。`install.sh` 完成以下操作：

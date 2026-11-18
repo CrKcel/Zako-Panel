@@ -10,7 +10,7 @@
 - [ ] `assets.run_worker_first` 只包含 `/api/*` 与 `/sub/*`；SPA 深链接由静态资源直接返回，不经过 Worker。
 - [ ] `_headers` 生效：CSP、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`；`/admin/assets/*` 为 immutable 缓存。
 - [ ] `_redirects` 生效：`/` 302 到 `/admin/`，`/admin/assets/*` 重写到 `/assets/*`。
-- [ ] `wrangler.downloads.jsonc` 的面板域名与 zone 已替换，Downloads Worker route `/dl/*` 已部署。
+- [ ] `wrangler.downloads.jsonc` 的 route `332711.xyz/dl/*` 已随部署创建。
 - [ ] `/dl/*` 由 Downloads Worker 处理，不落面板 SPA；面板 Worker 未因 Agent 发布而重新部署。
 
 ## 2. Access 与身份

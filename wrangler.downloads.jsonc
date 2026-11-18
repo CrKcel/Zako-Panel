@@ -8,11 +8,12 @@
 		"directory": "apps/downloads/dist",
 		"not_found_handling": "none",
 	},
-	// Replace the host and zone with the real panel values before deploying.
+	// The download prefix shares the panel hostname. A Custom Domain covers a whole
+	// hostname, so serving one path prefix needs a route on the zone.
 	"routes": [
 		{
-			"pattern": "panel.example.com/dl/*",
-			"zone_name": "example.com",
+			"pattern": "332711.xyz/dl/*",
+			"zone_name": "332711.xyz",
 		},
 	],
 }

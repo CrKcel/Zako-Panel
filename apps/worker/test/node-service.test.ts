@@ -3,18 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { AppError } from '../src/lib/errors';
 import { sha256Hex } from '../src/lib/hash';
 import { parseAgentToken } from '../src/lib/token';
-import {
-	createNode,
-	disableEndpoint,
-	getNodeStatus,
-	listEndpoints,
-	listNodeClients,
-	listNodes,
-	rotateAgentToken,
-} from '../src/services/node-service';
+import { createEnrollmentToken, enrollNode } from '../src/services/enrollment-service';
+import { disableEndpoint, getNodeStatus, listEndpoints, listNodeClients, listNodes, rotateAgentToken } from '../src/services/node-service';
 import { getClashSubscription } from '../src/services/subscription-service';
 import {
-	DEFAULT_PARAMS,
 	nowSeconds,
 	readMeta,
 	seedEndpoint,
@@ -26,56 +18,33 @@ import {
 	testToken,
 } from './helpers';
 
-const createInput = {
-	name: 'Tokyo-01',
-	endpoint: { name: 'primary', host: '203.0.113.10', port: 443, params: DEFAULT_PARAMS },
-};
-
-describe('node creation', () => {
-	it('creates the node, first endpoint and default subscriber client in one batch', async () => {
-		const subscriberId = await seedSubscriber({ name: 'default' });
-		await seedMeta('default_subscriber_id', subscriberId);
-
-		const result = await createNode(env.DB, createInput);
-
-		expect(result.node.name).toBe('Tokyo-01');
-		expect(result.node.status).toBe('offline');
-		expect(result.endpoint.node_id).toBe(result.node.id);
-		expect(result.endpoint.params).toEqual(DEFAULT_PARAMS);
-
-		const parsed = parseAgentToken(result.agent_token);
-		expect(parsed?.nodeId).toBe(result.node.id);
-		const stored = await env.DB.prepare('SELECT agent_token_hash FROM nodes WHERE id = ?')
-			.bind(result.node.id)
-			.first<{ agent_token_hash: string }>();
-		expect(stored?.agent_token_hash).toBe(await sha256Hex(parsed?.secret ?? ''));
-		expect(stored?.agent_token_hash).not.toContain(parsed?.secret ?? 'x');
-
-		const client = await env.DB.prepare('SELECT subscriber_id, enabled, vless_uuid FROM node_clients WHERE node_id = ?')
-			.bind(result.node.id)
-			.first<{ subscriber_id: string; enabled: number; vless_uuid: string }>();
-		expect(client?.subscriber_id).toBe(subscriberId);
-		expect(client?.enabled).toBe(1);
-		expect(client?.vless_uuid).toMatch(/^[0-9a-f-]{36}$/);
-
-		expect(await readMeta('users_ver')).toBe('1');
+async function enrollTestNode(name: string) {
+	const createdToken = await createEnrollmentToken(env.DB, {}, 'admin@example.com');
+	return enrollNode(env.DB, `Bearer ${createdToken.token}`, {
+		name,
+		host: '203.0.113.10',
+		reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
+		reality_short_id: '0123456789abcdef',
 	});
+}
 
-	it('distributes a new node to the default subscription after its first heartbeat', async () => {
+describe('node enrollment provisioning', () => {
+	it('distributes a newly enrolled node to the default subscription after its first heartbeat', async () => {
 		const subscriberId = await seedSubscriber({ name: 'default' });
 		await seedMeta('default_subscriber_id', subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('bootstrap');
 		await seedSubscription({ token, subscriberId, profileId });
 
-		const created = await createNode(env.DB, createInput);
+		const enrolled = await enrollTestNode('Tokyo-01');
+		expect(await readMeta('users_ver')).toBe('1');
 		// A node with no heartbeat yet is offline and not distributable.
 		await expect(getClashSubscription(env.DB, token)).rejects.toMatchObject({ status: 503 });
 
 		const now = nowSeconds();
 		const response = await SELF.fetch('https://panel.test/api/v1/agent/report', {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${created.agent_token}`, 'Content-Type': 'application/json' },
+			headers: { Authorization: `Bearer ${enrolled.agent_token}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				sent_at: now,
 				agent_version: '0.1.0',
@@ -93,7 +62,7 @@ describe('node creation', () => {
 		expect(rendered.body).toContain('type: vless');
 
 		const client = await env.DB.prepare('SELECT vless_uuid FROM node_clients WHERE node_id = ?')
-			.bind(created.node.id)
+			.bind(enrolled.node_id)
 			.first<{ vless_uuid: string }>();
 		expect(rendered.body).toContain(`uuid: ${client?.vless_uuid}`);
 	});
@@ -101,12 +70,12 @@ describe('node creation', () => {
 	it('exposes the credentials a node-local inbound must contain', async () => {
 		const subscriberId = await seedSubscriber({ name: 'default' });
 		await seedMeta('default_subscriber_id', subscriberId);
-		const created = await createNode(env.DB, createInput);
+		const enrolled = await enrollTestNode('Tokyo-01');
 
-		const clients = await listNodeClients(env.DB, created.node.id);
+		const clients = await listNodeClients(env.DB, enrolled.node_id);
 		expect(clients).toHaveLength(1);
 		expect(clients[0]).toMatchObject({
-			node_id: created.node.id,
+			node_id: enrolled.node_id,
 			subscriber_id: subscriberId,
 			subscriber_name: 'default',
 			enabled: true,
@@ -118,20 +87,15 @@ describe('node creation', () => {
 	});
 
 	it('skips the default client when no default subscriber exists', async () => {
-		const result = await createNode(env.DB, { ...createInput, name: 'Osaka-01' });
-		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(result.node.id).all();
+		const enrolled = await enrollTestNode('Osaka-01');
+		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(enrolled.node_id).all();
 		expect(clients.results).toHaveLength(0);
-	});
-
-	it('rejects a duplicate node name with 409', async () => {
-		await createNode(env.DB, createInput);
-		await expect(createNode(env.DB, createInput)).rejects.toMatchObject({ code: 'CONFLICT', status: 409 });
 	});
 
 	it('ignores a default subscriber id that no longer exists', async () => {
 		await seedMeta('default_subscriber_id', '01J2Z6Q8Y3V9M4K7T1B5C0D2E6');
-		const result = await createNode(env.DB, { ...createInput, name: 'Nagoya-01' });
-		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(result.node.id).all();
+		const enrolled = await enrollTestNode('Nagoya-01');
+		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(enrolled.node_id).all();
 		expect(clients.results).toHaveLength(0);
 	});
 });

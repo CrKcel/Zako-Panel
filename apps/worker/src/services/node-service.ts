@@ -1,7 +1,6 @@
 import type {
 	AgentUpdateResult,
 	CreateEndpointRequest,
-	CreateNodeRequest,
 	Endpoint,
 	Node,
 	NodeClient,
@@ -42,12 +41,6 @@ import { insertAuditEvent } from '../repositories/audit-events';
 import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode } from '../repositories/subscribers';
 import type { ListQuery, Paginated } from '../types';
 import { bumpUsersVersionStatement } from './users-version';
-
-export interface CreateNodeResult {
-	node: Node;
-	endpoint: Endpoint;
-	agent_token: string;
-}
 
 export interface NodeProvisionParams {
 	nodeId: string;
@@ -249,36 +242,6 @@ export async function listNodes(db: D1Database, query: ListQuery): Promise<Pagin
 	const items = pageRows.map((row) => toNode(row, now));
 	const last = items[items.length - 1];
 	return { items, next_cursor: hasMore && last ? last.id : null };
-}
-
-export async function createNode(db: D1Database, input: CreateNodeRequest): Promise<CreateNodeResult> {
-	const now = nowSeconds();
-	const nodeId = newId();
-	const endpointId = newId();
-	const heartbeatInterval = input.heartbeat_interval_seconds ?? 300;
-	const { statements, agentToken, nodeRow, endpointRow } = await prepareNodeProvision(db, {
-		nodeId,
-		endpointId,
-		name: input.name,
-		heartbeatInterval,
-		endpoint: input.endpoint,
-		now,
-	});
-
-	try {
-		await db.batch(statements);
-	} catch (error) {
-		if (isUniqueConstraintError(error)) {
-			throw new AppError('CONFLICT', 'Node name already exists', 409);
-		}
-		throw error;
-	}
-
-	return {
-		node: toNode(nodeRow, now),
-		endpoint: toEndpoint(endpointRow),
-		agent_token: agentToken,
-	};
 }
 
 export async function getNode(db: D1Database, nodeId: string): Promise<{ node: Node; endpoints: Endpoint[] }> {

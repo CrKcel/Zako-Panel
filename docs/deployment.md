@@ -36,7 +36,7 @@ npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 
 ---
 
-## 2. 节点一键安装（推荐）
+## 2. 节点一键部署
 
 节点支持 **Debian 12 / 13**，只需预先有 `curl`（或 `wget`）、`tar` 和 CA 证书。脚本会自动下载缺失的 Xray-core（支持 `--xray-mirror` 指定镜像）、生成 REALITY 私钥、创建低权限用户 `zako-agent` 并注册节点。
 
@@ -53,19 +53,15 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
 
 执行完后，`xray.service` 和 `zako-agent.service` 会自动拉起，节点几十秒内就会在面板显示为 `online`。
 
-### 手动安装与升级
+### 升级与卸载
 
-- **纯安装模式**（不带 `--panel` 和 `--token`）：适合手工建节点、手填 `/etc/zako-agent/token` 和 `config.yaml`：
-  ```bash
-  curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
-  ```
-  脚本会在终端打印生成的公钥和 `short_id`。
 - **升级 Agent**：
   - **远程自动更新**：调用 `POST /api/v1/admin/nodes/{nodeId}/agent-update`（传入 `target_version`），节点会在下次心跳收到 `self_update` 指令后自动从 `/dl/agent/` 下载校验、替换二进制并重启（失败自动回滚）。
-  - **手动升级**：直接重跑一次不带 `--token` 的安装命令，然后重启服务即可：
-  ```bash
-  sudo systemctl restart zako-agent
-  ```
+  - **就地覆盖升级**：在已部署的节点上重跑不带 `--token` 的安装命令覆盖二进制并保留现有配置，然后重启服务即可：
+    ```bash
+    curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
+    sudo systemctl restart zako-agent
+    ```
 - **卸载节点**：
   - **从面板远程卸载**：在后台节点列表或详情页点击 **「删除」**，默认会先将节点标记为「正在卸载」并在下次心跳下发 `uninstall` 指令，节点自动清理本机服务与文件后从面板删除（可选同时卸载 Xray-core）；若节点长期离线，可选择 **「强制删除」** 立即从面板移除。
   - **从节点主动卸载**：在节点上以 root 执行内置命令（会自动通知面板删除节点并清理本机）：

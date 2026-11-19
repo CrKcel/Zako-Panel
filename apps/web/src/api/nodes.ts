@@ -2,7 +2,6 @@ import type {
 	ConfigVersion,
 	CreateEndpointRequest,
 	CreateNodeEnrollmentTokenRequest,
-	CreateNodeRequest,
 	Endpoint,
 	Node,
 	NodeClient,
@@ -15,12 +14,6 @@ import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 export interface NodeListParams {
 	limit?: number;
 	cursor?: string;
-}
-
-export interface CreateNodeResult {
-	node: Node;
-	endpoint: Endpoint;
-	agent_token: string;
 }
 
 export interface NodeDetail {
@@ -52,9 +45,6 @@ export const nodesApi = {
 		return apiRequest<void>(`/api/v1/admin/node-enrollment-tokens/${tokenId}`, {
 			method: 'DELETE',
 		});
-	},
-	create(input: CreateNodeRequest): Promise<CreateNodeResult> {
-		return apiRequest<CreateNodeResult>('/api/v1/admin/nodes', { method: 'POST', body: input });
 	},
 	get(nodeId: string): Promise<NodeDetail> {
 		return apiRequest<NodeDetail>(`/api/v1/admin/nodes/${nodeId}`);

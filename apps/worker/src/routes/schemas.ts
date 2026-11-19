@@ -47,12 +47,6 @@ export const updateEndpointSchema = z
 	})
 	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
 
-export const createNodeSchema = z.object({
-	name: z.string().trim().min(1).max(64),
-	heartbeat_interval_seconds: z.number().int().min(60).max(900).optional(),
-	endpoint: createEndpointSchema,
-});
-
 export const updateNodeSchema = z
 	.object({
 		name: z.string().trim().min(1).max(64).optional(),

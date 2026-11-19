@@ -1,27 +1,19 @@
 <script setup lang="ts">
-import type { CreateNodeEnrollmentTokenRequest, CreateNodeRequest, Node, NodeEnrollmentToken } from '@zako/contracts';
+import type { CreateNodeEnrollmentTokenRequest, Node, NodeEnrollmentToken } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
-import EndpointFormFields from '../components/EndpointFormFields.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
-import { emptyEndpointFormValue, endpointRequestBody, type EndpointFormValue } from '../domain/endpoint-form';
 import { nodeStatusDescriptor } from '../domain/status';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatPercent, formatTimestamp } from '../utils/format';
-
-interface CreateForm {
-	name: string;
-	heartbeat_interval_seconds: number;
-	endpoint: EndpointFormValue;
-}
 
 interface EditForm {
 	name: string;
@@ -29,20 +21,10 @@ interface EditForm {
 	enabled: boolean;
 }
 
-function emptyCreateForm(): CreateForm {
-	return {
-		name: '',
-		heartbeat_interval_seconds: 300,
-		endpoint: emptyEndpointFormValue(),
-	};
-}
-
 const search = ref('');
 const statusFilter = ref<'all' | Node['status']>('all');
 
-const createForm = ref<CreateForm>(emptyCreateForm());
 const editForm = ref<EditForm>({ name: '', heartbeat_interval_seconds: 300, enabled: true });
-const createFormRef = ref<FormInstance>();
 const editFormRef = ref<FormInstance>();
 const agentToken = ref('');
 const tokenVisible = ref(false);
@@ -99,29 +81,9 @@ const required = (message: string): { required: true; message: string; trigger: 
 	trigger: 'blur',
 });
 
-const createRules: FormRules = {
-	name: [required('请输入节点名称')],
-	'endpoint.name': [required('请输入端点名称')],
-	'endpoint.host': [required('请输入地址')],
-	'endpoint.sni': [required('请输入 SNI')],
-	'endpoint.public_key': [required('请输入 Public Key')],
-};
-
 const editRules: FormRules = {
 	name: [required('请输入节点名称')],
 };
-
-const {
-	visible: createVisible,
-	submitting: creating,
-	openCreate,
-	close: closeCreate,
-	submit: submitCreateTask,
-} = useCrudDialog({
-	reset: () => {
-		createForm.value = emptyCreateForm();
-	},
-});
 
 const {
 	visible: editVisible,
@@ -141,26 +103,6 @@ const {
 		};
 	},
 });
-
-async function submitCreate(): Promise<void> {
-	if (!(await createFormRef.value?.validate().catch(() => false))) return;
-	const request: CreateNodeRequest = {
-		name: createForm.value.name,
-		heartbeat_interval_seconds: createForm.value.heartbeat_interval_seconds,
-		endpoint: endpointRequestBody(createForm.value.endpoint),
-	};
-	const saved = await submitCreateTask(
-		async () => {
-			const result = await nodesApi.create(request);
-			closeCreate();
-			agentToken.value = result.agent_token;
-			tokenVisible.value = true;
-			showSuccess('节点已创建');
-		},
-		(error) => showError(error, '节点创建失败'),
-	);
-	if (saved) await reload();
-}
 
 async function submitEdit(): Promise<void> {
 	const nodeId = editingId.value;
@@ -324,7 +266,6 @@ async function submitDeleteNode(): Promise<void> {
 			</template>
 			<el-button :loading="loading" @click="refresh">刷新</el-button>
 			<el-button @click="openEnrollList">部署 Token</el-button>
-			<el-button @click="openCreate">手动创建节点</el-button>
 			<el-button type="primary" @click="openEnrollCreate">一键部署节点</el-button>
 		</PageToolbar>
 
@@ -404,28 +345,6 @@ async function submitDeleteNode(): Promise<void> {
 			</el-table-column>
 		</el-table>
 	</el-card>
-
-	<el-dialog v-model="createVisible" title="创建节点" width="640px" :close-on-click-modal="false" destroy-on-close>
-		<el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="140px">
-			<el-form-item label="名称" prop="name">
-				<el-input v-model="createForm.name" placeholder="节点名称" />
-			</el-form-item>
-			<el-form-item label="心跳间隔" prop="heartbeat_interval_seconds">
-				<el-input-number v-model="createForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
-			</el-form-item>
-			<EndpointFormFields
-				v-model="createForm.endpoint"
-				prop-prefix="endpoint."
-				name-label="端点名称"
-				address-placeholder="203.0.113.10"
-				sni-placeholder="www.example.com"
-			/>
-		</el-form>
-		<template #footer>
-			<el-button @click="closeCreate">取消</el-button>
-			<el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
-		</template>
-	</el-dialog>
 
 	<el-dialog v-model="editVisible" title="编辑节点" width="520px" :close-on-click-modal="false" destroy-on-close>
 		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="120px">

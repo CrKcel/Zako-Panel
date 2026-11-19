@@ -14,8 +14,7 @@ export interface paths {
         /** List nodes */
         get: operations["listNodes"];
         put?: never;
-        /** Create a node with its first endpoint and agent token */
-        post: operations["createNode"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -860,11 +859,6 @@ export interface components {
         RequestNodeAgentUpdateRequest: {
             target_version: string;
         };
-        CreateNodeRequest: {
-            name: string;
-            heartbeat_interval_seconds?: number;
-            endpoint: components["schemas"]["CreateEndpointRequest"];
-        };
         UpdateNodeRequest: {
             name?: string;
             enabled?: boolean;
@@ -1137,42 +1131,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-        };
-    };
-    createNode: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateNodeRequest"];
-            };
-        };
-        responses: {
-            /** @description Node created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: {
-                            node: components["schemas"]["Node"];
-                            endpoint: components["schemas"]["Endpoint"];
-                            /** @description Plaintext token returned once. */
-                            agent_token: string;
-                        };
-                        meta: components["schemas"]["Meta"];
-                    };
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
         };
     };
     getNode: {

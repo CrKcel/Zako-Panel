@@ -3,7 +3,6 @@ import { noContent, ok, okPage } from '../../lib/response';
 import { readJson, readQuery } from '../../lib/validation';
 import {
 	createEndpoint,
-	createNode,
 	deleteOrUninstallNode,
 	disableEndpoint,
 	getNode,
@@ -19,7 +18,6 @@ import {
 import type { AppEnv } from '../../types';
 import {
 	createEndpointSchema,
-	createNodeSchema,
 	deleteNodeQuerySchema,
 	listQuerySchema,
 	pathId,
@@ -33,11 +31,6 @@ export const nodeRoutes = new Hono<AppEnv>();
 nodeRoutes.get('/', async (c) => {
 	const query = readQuery(c, listQuerySchema);
 	return okPage(c, await listNodes(c.env.DB, query));
-});
-
-nodeRoutes.post('/', async (c) => {
-	const input = await readJson(c, createNodeSchema);
-	return ok(c, await createNode(c.env.DB, input), 201);
 });
 
 nodeRoutes.get('/:nodeId', async (c) => {

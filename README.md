@@ -93,10 +93,12 @@ npm run format:check
 
 ## 部署
 
-面板上线与节点一键安装的完整步骤见 [docs/deployment.md](docs/deployment.md)。节点一键安装命令：
+面板上线与节点快速部署的完整步骤见 [docs/deployment.md](docs/deployment.md)。节点一键部署命令（在后台 **「节点列表 -> 一键部署节点」** 生成一次性 Token）：
 
 ```bash
-curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
+curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
+  --panel https://332711.xyz \
+  --token <ONE_TIME_ENROLLMENT_TOKEN>
 ```
 
 ## 文档

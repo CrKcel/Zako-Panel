@@ -46,48 +46,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-    post:
-      operationId: createNode
-      tags: [admin]
-      summary: Create a node with its first endpoint and agent token
-      security:
-        - AccessJwt: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateNodeRequest'
-      responses:
-        '201':
-          description: Node created
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: object
-                    required: [node, endpoint, agent_token]
-                    properties:
-                      node:
-                        $ref: '#/components/schemas/Node'
-                      endpoint:
-                        $ref: '#/components/schemas/Endpoint'
-                      agent_token:
-                        type: string
-                        description: Plaintext token returned once.
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
   /api/v1/admin/nodes/{nodeId}:
     get:
       operationId: getNode
@@ -2286,18 +2244,6 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-    CreateNodeRequest:
-      type: object
-      required: [name, endpoint]
-      properties:
-        name:
-          type: string
-        heartbeat_interval_seconds:
-          type: integer
-          minimum: 60
-          maximum: 900
-        endpoint:
-          $ref: '#/components/schemas/CreateEndpointRequest'
     UpdateNodeRequest:
       type: object
       minProperties: 1

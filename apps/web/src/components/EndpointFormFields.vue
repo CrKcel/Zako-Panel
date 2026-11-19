@@ -3,11 +3,6 @@ import type { EndpointFormValue } from '../domain/endpoint-form';
 
 const props = defineProps<{
 	modelValue: EndpointFormValue;
-	/** Validation path prefix of the fields in the parent form model. */
-	propPrefix?: string;
-	nameLabel?: string;
-	addressPlaceholder?: string;
-	sniPlaceholder?: string;
 }>();
 
 const emit = defineEmits<{
@@ -17,32 +12,28 @@ const emit = defineEmits<{
 function patch(changes: Partial<EndpointFormValue>): void {
 	emit('update:modelValue', { ...props.modelValue, ...changes });
 }
-
-function prop(name: string): string {
-	return `${props.propPrefix ?? ''}${name}`;
-}
 </script>
 
 <template>
-	<el-form-item :label="nameLabel ?? '名称'" :prop="prop('name')">
+	<el-form-item label="名称" prop="name">
 		<el-input :model-value="modelValue.name" @update:model-value="patch({ name: $event })" />
 	</el-form-item>
-	<el-form-item label="地址" :prop="prop('host')">
-		<el-input :model-value="modelValue.host" :placeholder="addressPlaceholder" @update:model-value="patch({ host: $event })" />
+	<el-form-item label="地址" prop="host">
+		<el-input :model-value="modelValue.host" placeholder="203.0.113.10" @update:model-value="patch({ host: $event })" />
 	</el-form-item>
-	<el-form-item label="端口" :prop="prop('port')">
+	<el-form-item label="端口" prop="port">
 		<el-input-number :model-value="modelValue.port" :min="1" :max="65535" @update:model-value="patch({ port: $event as number })" />
 	</el-form-item>
-	<el-form-item label="SNI" :prop="prop('sni')">
-		<el-input :model-value="modelValue.sni" :placeholder="sniPlaceholder" @update:model-value="patch({ sni: $event })" />
+	<el-form-item label="SNI" prop="sni">
+		<el-input :model-value="modelValue.sni" placeholder="www.example.com" @update:model-value="patch({ sni: $event })" />
 	</el-form-item>
-	<el-form-item label="Public Key" :prop="prop('public_key')">
+	<el-form-item label="Public Key" prop="public_key">
 		<el-input :model-value="modelValue.public_key" @update:model-value="patch({ public_key: $event })" />
 	</el-form-item>
-	<el-form-item label="Short ID" :prop="prop('short_id')">
+	<el-form-item label="Short ID" prop="short_id">
 		<el-input :model-value="modelValue.short_id" @update:model-value="patch({ short_id: $event })" />
 	</el-form-item>
-	<el-form-item label="Fingerprint" :prop="prop('fingerprint')">
+	<el-form-item label="Fingerprint" prop="fingerprint">
 		<el-input :model-value="modelValue.fingerprint" @update:model-value="patch({ fingerprint: $event })" />
 	</el-form-item>
 	<el-form-item label="Flow">

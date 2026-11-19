@@ -2,12 +2,14 @@
 #
 # zako-agent installer for Debian 12/13.
 #
-# Installs a prebuilt static binary, creates the service account and state
-# directories, installs the systemd unit and enables it. The service is not
-# started: a node token and validated config must be in place first.
+# Installs Xray-core (if missing) and the prebuilt zako-agent binary, creates
+# the service account and state directories, installs the systemd units, and
+# enrolls the node with the control plane using --panel and --token.
+# On an already-enrolled node, running without --panel/--token upgrades the
+# binary and systemd units in place while preserving existing configuration.
 #
-# Usage: install.sh [path-to-zako-agent-binary]
-#        ZAKO_AGENT_BINARY=/path/to/binary install.sh
+# Usage: install.sh [path-to-zako-agent-binary] --panel <url> --token <token> [options]
+#        ZAKO_AGENT_BINARY=/path/to/binary install.sh --panel <url> --token <token> [options]
 set -euo pipefail
 export LC_ALL=C
 
@@ -64,13 +66,14 @@ ensure_xray_dir() {
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [path-to-zako-agent-binary] [options]
+Usage: install.sh [path-to-zako-agent-binary] --panel <url> --token <token> [options]
 
-Installs and enables zako-agent on Debian 12/13, and automatically installs
-Xray-core if missing.
+Installs and enrolls zako-agent on Debian 12/13, and automatically installs
+Xray-core if missing. Re-running without --panel/--token on an already-enrolled
+node upgrades the binary and systemd units in place.
 
 Options:
-  --panel <url>        Control plane HTTPS URL for automatic node enrollment
+  --panel <url>        Control plane HTTPS URL for node enrollment
   --token <token>      One-time enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)
@@ -139,6 +142,11 @@ done
 
 if [[ -n "${PANEL_URL}" && -z "${ENROLL_TOKEN}" ]] || [[ -z "${PANEL_URL}" && -n "${ENROLL_TOKEN}" ]]; then
 	die "--panel and --token must be provided together"
+fi
+if [[ -z "${PANEL_URL}" && -z "${ENROLL_TOKEN}" ]]; then
+	if [[ ! -s "${TOKEN_PATH}" || ! -s "${CONFIG_PATH}" ]]; then
+		die "--panel and --token are required for new node deployment (generate a one-time deployment command in the panel)"
+	fi
 fi
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -210,34 +218,6 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 install -d -m 0700 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${CONFIG_DIR}" "${STATE_DIR}"
-
-if [[ -e "${CONFIG_PATH}" ]]; then
-	log "preserving existing ${CONFIG_PATH}"
-else
-	config_example=""
-	for candidate in \
-		"${SCRIPT_DIR}/zako-agent.example.yaml" \
-		"${SCRIPT_DIR}/config.example.yaml" \
-		"${REPO_ROOT}/apps/agent/config.example.yaml"; do
-		if [[ -f "${candidate}" ]]; then
-			config_example="${candidate}"
-			break
-		fi
-	done
-	if [[ -n "${config_example}" ]]; then
-		install -m 0640 -o root -g "${SERVICE_GROUP}" "${config_example}" "${CONFIG_PATH}"
-		log "installed config example ${config_example} to ${CONFIG_PATH}"
-	else
-		warn "no config example found; create ${CONFIG_PATH} before starting the service"
-	fi
-fi
-
-if [[ ! -e "${TOKEN_PATH}" ]]; then
-	install -m 0600 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /dev/null "${TOKEN_PATH}"
-fi
-if [[ ! -s "${TOKEN_PATH}" ]]; then
-	warn "no agent token in ${TOKEN_PATH}; write the token issued by the panel before starting"
-fi
 
 if [[ ! -f "${SCRIPT_DIR}/systemd/zako-agent.service" ]]; then
 	die "systemd unit not found at ${SCRIPT_DIR}/systemd/zako-agent.service"
@@ -318,9 +298,6 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		chown "${SERVICE_USER}:${SERVICE_GROUP}" "${REALITY_KEY}"
 		chmod 0600 "${REALITY_KEY}"
 		log "wrote REALITY private key to ${REALITY_KEY} (0600, ${SERVICE_USER})"
-		if [[ -z "${PANEL_URL}" ]]; then
-			printf 'REALITY public key: %s\n' "${public_key}"
-		fi
 	fi
 
 	xray_template="${SCRIPT_DIR}/xray/config.example.json"
@@ -389,45 +366,12 @@ Node enrolled and started!
 EOF
 		exit 0
 	fi
-
-	# The static inbound is materialised from the shipped template. Clients start as
-	# placeholders and are replaced by the first user sync, which renders the same
-	# file from the node's user set.
-	if [[ ! -f "${xray_template}" ]]; then
-		warn "xray config template not found at ${xray_template}; create ${XRAY_CONFIG} manually"
-	elif [[ -e "${XRAY_CONFIG}" ]]; then
-		log "preserving existing ${XRAY_CONFIG}"
-	elif [[ ! -s "${REALITY_KEY}" ]]; then
-		warn "REALITY key is empty; ${XRAY_CONFIG} was not generated"
-	elif ! command -v python3 >/dev/null 2>&1; then
-		warn "python3 is required to render ${XRAY_CONFIG}; create it manually from ${xray_template}"
-	elif ! short_id="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"; then
-		die "could not generate a REALITY short id"
-	else
-		python3 "${xray_renderer}" "${xray_template}" "${XRAY_CONFIG}" "$(head -n 1 "${REALITY_KEY}")" "${short_id}"
-		chown root:"${SERVICE_GROUP}" "${XRAY_CONFIG}"
-		chmod 0640 "${XRAY_CONFIG}"
-		log "wrote ${XRAY_CONFIG} with the REALITY private key (0640)"
-		printf 'REALITY short id: %s\n' "${short_id}"
-		printf 'Copy xray_email and UUID from the node credential list into %s\n' "${XRAY_CONFIG}"
-	fi
 else
-	warn "xray not found at ${XRAY_BIN}; skipped REALITY key and Xray config generation"
+	warn "xray not found at ${XRAY_BIN}; skipped REALITY key generation"
 fi
 
 if systemctl is-active --quiet zako-agent.service; then
-	start_hint="zako-agent.service is running; restart it to use the new binary: systemctl restart zako-agent"
+	log "zako-agent upgraded; restart to use the new binary: systemctl restart zako-agent"
 else
-	start_hint="Start with: systemctl start zako-agent"
+	log "zako-agent upgraded; start with: systemctl start zako-agent"
 fi
-
-cat <<EOF
-
-zako-agent is installed and enabled.
-Next steps:
-  1. Write the node token issued by the panel to ${TOKEN_PATH}.
-     Keep the file owned by ${SERVICE_USER} and mode 0600.
-  2. Review ${CONFIG_PATH}; control_plane_url, node_id and Xray paths are required.
-  3. ${start_hint}
-  4. Follow logs with: journalctl -u zako-agent -f
-EOF

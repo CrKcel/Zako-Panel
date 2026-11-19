@@ -26,18 +26,18 @@ die() {
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [--base-url <https://panel.example.com/dl/agent>] [--panel <https://panel.example.com> --token <enrollment_token>] [options]
+Usage: install.sh [--base-url <https://panel.example.com/dl/agent>] --panel <https://panel.example.com> --token <enrollment_token> [options]
 
 Downloads the current zako-agent release from the panel, verifies its SHA-256
 checksum and runs the bundled installer. Run as root.
 
-When --panel and --token are provided, the installer automatically installs Xray
-if missing, enrolls the node with the panel, writes configuration files, and
-starts xray and zako-agent services.
+Automatically installs Xray if missing, enrolls the node with the panel, writes
+configuration files, and starts xray and zako-agent services. On an
+already-enrolled node, omit --panel and --token to upgrade in place.
 
 Options:
   --base-url <url>     Override the agent download base URL
-  --panel <url>        Control plane HTTPS URL for automatic node enrollment
+  --panel <url>        Control plane HTTPS URL for node enrollment
   --token <token>      One-time enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)

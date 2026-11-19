@@ -3,6 +3,7 @@ import type { ConfigVersion, Endpoint } from '@zako/contracts';
 import { computed, ref, watch } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { useAsyncAction } from '../composables/useAsyncAction';
+import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
@@ -18,6 +19,8 @@ const props = defineProps<{
 const emit = defineEmits<{
 	changed: [];
 }>();
+
+const { t } = useI18n();
 
 const configs = ref<ConfigVersion[]>([]);
 const nextCursor = ref<string | null>(null);
@@ -40,7 +43,7 @@ async function loadConfigs(): Promise<void> {
 		configs.value = page.items;
 		nextCursor.value = page.next_cursor;
 	} catch (error) {
-		showError(error, '配置历史加载失败');
+		showError(error, t('nodeConfig.loadError'));
 	} finally {
 		loading.value = false;
 	}
@@ -54,7 +57,7 @@ async function loadMore(): Promise<void> {
 		configs.value = [...configs.value, ...page.items];
 		nextCursor.value = page.next_cursor;
 	} catch (error) {
-		showError(error, '加载更多配置失败');
+		showError(error, t('nodeConfig.loadMoreError'));
 	} finally {
 		loadingMore.value = false;
 	}
@@ -70,18 +73,20 @@ watch(
 
 function versionTag(row: ConfigVersion): { label: string; type: 'success' | 'warning' | 'danger' | 'info' } {
 	if (row.version === props.appliedVersion && row.version === props.desiredVersion) {
-		return { label: '已生效', type: 'success' };
+		return { label: t('nodeConfig.tags.applied'), type: 'success' };
 	}
 	if (row.version === props.desiredVersion) {
-		return row.last_error ? { label: '同步失败', type: 'danger' } : { label: '待同步', type: 'warning' };
+		return row.last_error
+			? { label: t('nodeConfig.tags.syncFailed'), type: 'danger' }
+			: { label: t('nodeConfig.tags.pending'), type: 'warning' };
 	}
 	if (row.version === props.appliedVersion) {
-		return { label: '当前运行', type: 'success' };
+		return { label: t('nodeConfig.tags.running'), type: 'success' };
 	}
 	if (row.last_error) {
-		return { label: '曾失败', type: 'danger' };
+		return { label: t('nodeConfig.tags.previouslyFailed'), type: 'danger' };
 	}
-	return { label: '历史版本', type: 'info' };
+	return { label: t('nodeConfig.tags.history'), type: 'info' };
 }
 
 function buildDefaultTemplate(): Record<string, unknown> {
@@ -171,21 +176,24 @@ const { running: publishing, run: runPublish } = useAsyncAction(
 		try {
 			parsed = JSON.parse(jsonInput.value);
 		} catch (error) {
-			jsonError.value = error instanceof Error ? `JSON 格式错误: ${error.message}` : 'JSON 格式错误';
+			jsonError.value =
+				error instanceof Error
+					? t('nodeConfig.publish.jsonErrorWithReason', { message: error.message })
+					: t('nodeConfig.publish.jsonError');
 			throw error;
 		}
 		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-			jsonError.value = '配置根节点必须是 JSON 对象';
+			jsonError.value = t('nodeConfig.publish.rootObjectError');
 			throw new Error(jsonError.value);
 		}
 		jsonError.value = '';
 		await nodesApi.publishConfig(props.nodeId, parsed as Record<string, unknown>);
 		publishVisible.value = false;
-		showSuccess('配置已发布并进入下发队列');
+		showSuccess(t('nodeConfig.publish.success'));
 		await loadConfigs();
 		emit('changed');
 	},
-	{ onError: (error) => (jsonError.value ? undefined : showError(error, '配置发布失败')) },
+	{ onError: (error) => (jsonError.value ? undefined : showError(error, t('nodeConfig.publish.failed'))) },
 );
 
 async function openDetail(row: ConfigVersion): Promise<void> {
@@ -207,18 +215,14 @@ async function openDetail(row: ConfigVersion): Promise<void> {
 }
 
 async function handleRollback(row: ConfigVersion): Promise<void> {
-	try {
-		await confirmAction(`确认基于版本 v${row.version} 创建新版本并下发回滚？`, '回滚配置');
-	} catch {
-		return;
-	}
+	if (!(await confirmAction(t('nodeConfig.rollback.confirm', { version: row.version }), t('nodeConfig.rollback.title')))) return;
 	try {
 		const created = await nodesApi.rollbackConfig(props.nodeId, row.version);
-		showSuccess(`已基于 v${row.version} 生成新版本 v${created.version}`);
+		showSuccess(t('nodeConfig.rollback.success', { prev: row.version, next: created.version }));
 		await loadConfigs();
 		emit('changed');
 	} catch (error) {
-		showError(error, '配置回滚失败');
+		showError(error, t('nodeConfig.rollback.failed'));
 	}
 }
 
@@ -232,86 +236,93 @@ defineExpose({ reload: loadConfigs });
 	<el-card shadow="never" class="section">
 		<template #header>
 			<div class="card-header">
-				<span class="card-title">远程配置版本</span>
+				<span class="card-title">{{ t('nodeConfig.title') }}</span>
 				<div class="header-actions">
-					<el-button :loading="loading" @click="loadConfigs">刷新列表</el-button>
-					<el-button type="primary" @click="openPublish">发布新配置</el-button>
+					<el-button :loading="loading" @click="loadConfigs">{{ t('nodeConfig.refreshList') }}</el-button>
+					<el-button type="primary" @click="openPublish">{{ t('nodeConfig.publishNew') }}</el-button>
 				</div>
 			</div>
 		</template>
 
-		<el-table v-loading="loading" :data="configs" empty-text="暂未发布过远程配置">
-			<el-table-column label="版本" width="90">
+		<el-table v-loading="loading" :data="configs" :empty-text="t('nodeConfig.empty')">
+			<el-table-column :label="t('nodeConfig.columns.version')" width="90">
 				<template #default="{ row }">v{{ row.version }}</template>
 			</el-table-column>
-			<el-table-column label="状态" width="110">
+			<el-table-column :label="t('common.status')" width="130">
 				<template #default="{ row }">
 					<StatusBadge :label="versionTag(row as ConfigVersion).label" :type="versionTag(row as ConfigVersion).type" />
 				</template>
 			</el-table-column>
-			<el-table-column label="SHA-256" min-width="180">
+			<el-table-column :label="t('nodeConfig.columns.sha256')" min-width="180">
 				<template #default="{ row }">
 					<span class="mono">{{ row.definition_sha256.slice(0, 12) }}…</span>
-					<el-button link type="primary" @click="copyText(row.definition_sha256)">复制</el-button>
+					<el-button link type="primary" @click="copyText(row.definition_sha256)">{{ t('common.copy') }}</el-button>
 				</template>
 			</el-table-column>
-			<el-table-column label="发布时间" min-width="160">
+			<el-table-column :label="t('nodeConfig.columns.publishedAt')" min-width="165">
 				<template #default="{ row }">{{ formatTimestamp(row.created_at) }}</template>
 			</el-table-column>
-			<el-table-column label="生效时间" min-width="160">
+			<el-table-column :label="t('nodeConfig.columns.appliedAt')" min-width="165">
 				<template #default="{ row }">{{ formatTimestamp(row.applied_at) }}</template>
 			</el-table-column>
-			<el-table-column label="错误信息" min-width="200" show-overflow-tooltip>
+			<el-table-column :label="t('nodeConfig.columns.error')" min-width="200" show-overflow-tooltip>
 				<template #default="{ row }">{{ row.last_error ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column label="操作" width="160" fixed="right">
+			<el-table-column :label="t('common.actions')" width="170" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" @click="openDetail(row as ConfigVersion)">查看</el-button>
-					<el-button link type="warning" :disabled="row.version === desiredVersion" @click="handleRollback(row as ConfigVersion)"
-						>回滚</el-button
-					>
+					<el-button link type="primary" @click="openDetail(row as ConfigVersion)">{{ t('nodeConfig.actions.view') }}</el-button>
+					<el-button link type="warning" :disabled="row.version === desiredVersion" @click="handleRollback(row as ConfigVersion)">{{
+						t('nodeConfig.actions.rollback')
+					}}</el-button>
 				</template>
 			</el-table-column>
 		</el-table>
 
 		<div v-if="nextCursor" class="load-more">
-			<el-button :loading="loadingMore" @click="loadMore">加载更早版本</el-button>
+			<el-button :loading="loadingMore" @click="loadMore">{{ t('nodeConfig.loadEarlier') }}</el-button>
 		</div>
 	</el-card>
 
-	<el-dialog v-model="publishVisible" title="发布新配置" width="760px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog v-model="publishVisible" :title="t('nodeConfig.publish.title')" width="760px" :close-on-click-modal="false" destroy-on-close>
 		<div class="editor-toolbar">
-			<el-button size="small" :disabled="configs.length === 0" @click="fillFromLatest">从最新版本填充</el-button>
-			<el-button size="small" @click="fillDefaultTemplate">生成默认 Xray 模板</el-button>
-			<span class="hint">请勿填写 realitySettings.privateKey，节点会在本地自动注入私钥与用户列表。</span>
+			<el-button size="small" :disabled="configs.length === 0" @click="fillFromLatest">{{ t('nodeConfig.publish.fillLatest') }}</el-button>
+			<el-button size="small" @click="fillDefaultTemplate">{{ t('nodeConfig.publish.loadTemplate') }}</el-button>
+			<span class="hint">{{ t('nodeConfig.publish.hint') }}</span>
 		</div>
-		<el-input v-model="jsonInput" type="textarea" :rows="18" class="json-editor" placeholder="输入 Xray JSON 配置" />
+		<el-input v-model="jsonInput" type="textarea" :rows="18" class="json-editor" :placeholder="t('nodeConfig.publish.placeholder')" />
 		<div v-if="jsonError" class="json-error">{{ jsonError }}</div>
 		<template #footer>
-			<el-button @click="publishVisible = false">取消</el-button>
-			<el-button type="primary" :loading="publishing" @click="runPublish">发布并下发</el-button>
+			<el-button @click="publishVisible = false">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="publishing" @click="runPublish">{{ t('nodeConfig.publish.submit') }}</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="detailVisible" :title="inspecting ? `配置详情 v${inspecting.version}` : '配置详情'" width="920px" destroy-on-close>
+	<el-dialog
+		v-model="detailVisible"
+		:title="inspecting ? t('nodeConfig.detail.titleWithVersion', { version: inspecting.version }) : t('nodeConfig.detail.title')"
+		width="920px"
+		destroy-on-close
+	>
 		<div v-if="inspecting" class="detail-meta">
 			<span
-				>SHA-256: <code class="mono">{{ inspecting.definition_sha256 }}</code></span
+				>{{ t('nodeConfig.columns.sha256') }}: <code class="mono">{{ inspecting.definition_sha256 }}</code></span
 			>
-			<span v-if="inspecting.last_error" class="error-text">错误: {{ inspecting.last_error }}</span>
+			<span v-if="inspecting.last_error" class="error-text">{{
+				t('nodeConfig.detail.errorPrefix', { error: inspecting.last_error })
+			}}</span>
 		</div>
 		<div class="compare-grid" :class="{ single: !compareTarget }">
 			<div>
-				<div class="pane-title">版本 v{{ inspecting?.version }}</div>
+				<div class="pane-title">{{ t('nodeConfig.detail.versionPane', { version: inspecting?.version ?? '' }) }}</div>
 				<pre class="json-preview">{{ formattedInspectJson }}</pre>
 			</div>
 			<div v-if="compareTarget">
-				<div class="pane-title">当前已生效版本 v{{ compareTarget.version }}</div>
+				<div class="pane-title">{{ t('nodeConfig.detail.activePane', { version: compareTarget.version }) }}</div>
 				<pre class="json-preview">{{ formattedCompareJson }}</pre>
 			</div>
 		</div>
 		<template #footer>
-			<el-button @click="detailVisible = false">关闭</el-button>
+			<el-button @click="detailVisible = false">{{ t('common.close') }}</el-button>
 		</template>
 	</el-dialog>
 </template>

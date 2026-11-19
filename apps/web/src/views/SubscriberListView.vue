@@ -20,9 +20,12 @@ import {
 	type LimitUnit,
 } from '../domain/subscriber';
 import { subscriberStatusDescriptor } from '../domain/status';
+import { useI18n } from '../i18n';
 import { showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 import { fromUnixSeconds, toUnixSeconds } from '../utils/time';
+
+const { t } = useI18n();
 
 interface SubscriberForm {
 	name: string;
@@ -51,12 +54,12 @@ const {
 	reload,
 } = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
 	initialValue: [],
-	onError: (error) => showError(error, '订阅用户加载失败'),
+	onError: (error) => showError(error, t('subscribers.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
-	onError: (error) => showError(error, '节点加载失败'),
+	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
 const filteredSubscribers = computed(() => {
@@ -79,12 +82,12 @@ function usageTone(ratio: number): string {
 	return 'is-primary';
 }
 
-const rules: FormRules = {
-	name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
-	email: [{ type: 'email', message: '邮箱格式不正确', trigger: 'blur' }],
-};
+const rules = computed<FormRules>(() => ({
+	name: [{ required: true, message: t('subscribers.form.nameRequired'), trigger: 'blur' }],
+	email: [{ type: 'email', message: t('subscribers.form.invalidEmail'), trigger: 'blur' }],
+}));
 
-const grantTitle = computed(() => `节点授权 · ${grantTarget.value?.name ?? ''}`);
+const grantTitle = computed(() => t('subscribers.grant.titleWithName', { name: grantTarget.value?.name ?? '' }));
 
 const {
 	visible: dialogVisible,
@@ -125,17 +128,17 @@ async function submit(): Promise<void> {
 		async () => {
 			if (subscriberId === null) {
 				await subscribersApi.create(payload);
-				showSuccess('订阅用户已创建');
+				showSuccess(t('subscribers.form.created'));
 			} else {
 				// Only suspension is an administrator decision; limited and expired are
 				// derived from quota and expiry on every write.
 				const update: UpdateSubscriberRequest = { ...payload, status: form.value.suspended ? 'disabled' : 'active' };
 				await subscribersApi.update(subscriberId, update);
-				showSuccess('订阅用户已更新');
+				showSuccess(t('subscribers.form.updated'));
 			}
 			closeDialog();
 		},
-		(error) => showError(error, '订阅用户保存失败'),
+		(error) => showError(error, t('subscribers.form.saveFailed')),
 	);
 	if (saved) await reload();
 }
@@ -151,35 +154,35 @@ function openGrant(row: Subscriber): void {
 		<PageToolbar spread>
 			<template #left>
 				<div class="filters">
-					<el-input v-model="search" placeholder="搜索名称或邮箱…" clearable class="search-input" />
+					<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
 					<el-select v-model="statusFilter" class="status-select">
-						<el-option label="全部状态" value="all" />
-						<el-option label="正常" value="active" />
-						<el-option label="超限" value="limited" />
-						<el-option label="已到期" value="expired" />
-						<el-option label="停用" value="disabled" />
+						<el-option :label="t('common.allStatuses')" value="all" />
+						<el-option :label="t('status.subscriber.active')" value="active" />
+						<el-option :label="t('status.subscriber.limited')" value="limited" />
+						<el-option :label="t('status.subscriber.expired')" value="expired" />
+						<el-option :label="t('status.subscriber.disabled')" value="disabled" />
 					</el-select>
 				</div>
 			</template>
-			<el-button :loading="loading" @click="reload">刷新</el-button>
-			<el-button type="primary" @click="openCreate">创建订阅用户</el-button>
+			<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
+			<el-button type="primary" @click="openCreate">{{ t('subscribers.create') }}</el-button>
 		</PageToolbar>
 
-		<el-table v-loading="loading" :data="filteredSubscribers" empty-text="暂无数据">
-			<el-table-column prop="name" label="名称" min-width="150">
+		<el-table v-loading="loading" :data="filteredSubscribers" :empty-text="t('common.noData')">
+			<el-table-column prop="name" :label="t('common.name')" min-width="150">
 				<template #default="{ row }">
 					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="邮箱" min-width="190">
+			<el-table-column :label="t('subscribers.columns.email')" min-width="190">
 				<template #default="{ row }">{{ row.email ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column label="状态" width="105">
+			<el-table-column :label="t('common.status')" width="115">
 				<template #default="{ row }">
 					<StatusBadge :label="subscriberStatusDescriptor(row.status).label" :type="subscriberStatusDescriptor(row.status).tag" />
 				</template>
 			</el-table-column>
-			<el-table-column label="已用 / 额度" min-width="200">
+			<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="200">
 				<template #default="{ row }">
 					<div class="usage-cell">
 						<span class="tnum">{{ usageLabel(row as Subscriber) }}</span>
@@ -193,29 +196,29 @@ function openGrant(row: Subscriber): void {
 					</div>
 				</template>
 			</el-table-column>
-			<el-table-column label="周期" min-width="310">
+			<el-table-column :label="t('subscribers.columns.cycle')" min-width="310">
 				<template #default="{ row }">
 					<span class="tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="到期" width="175">
+			<el-table-column :label="t('subscribers.columns.expiresAt')" width="180">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="授权节点" width="100">
+			<el-table-column :label="t('subscribers.columns.grantedNodes')" width="130">
 				<template #default="{ row }">
 					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
 						{{ row.node_count }}
 					</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="200" fixed="right">
+			<el-table-column :label="t('common.actions')" width="220" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
-					<el-button link type="primary" @click="openGrant(row as Subscriber)">节点授权</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
+					<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
 					<RouterLink :to="`/subscribers/${row.id}`" custom v-slot="{ navigate }">
-						<el-button link type="primary" @click="navigate">详情</el-button>
+						<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
 					</RouterLink>
 				</template>
 			</el-table-column>
@@ -224,36 +227,43 @@ function openGrant(row: Subscriber): void {
 
 	<el-dialog
 		v-model="dialogVisible"
-		:title="editingId === null ? '创建订阅用户' : '编辑订阅用户'"
-		width="520px"
+		:title="editingId === null ? t('subscribers.create') : t('subscribers.edit')"
+		width="540px"
 		:close-on-click-modal="false"
 		destroy-on-close
 	>
-		<el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
-			<el-form-item label="名称" prop="name">
+		<el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
+			<el-form-item :label="t('common.name')" prop="name">
 				<el-input v-model="form.name" />
 			</el-form-item>
-			<el-form-item label="邮箱" prop="email">
+			<el-form-item :label="t('subscribers.form.email')" prop="email">
 				<el-input v-model="form.email" />
 			</el-form-item>
-			<el-form-item label="流量额度" prop="limit_value">
+			<el-form-item :label="t('subscribers.form.quota')" prop="limit_value">
 				<div class="limit-input">
-					<el-input-number v-model="form.limit_value" :min="0" :precision="2" :controls="false" placeholder="不限量" class="limit-value" />
+					<el-input-number
+						v-model="form.limit_value"
+						:min="0"
+						:precision="2"
+						:controls="false"
+						:placeholder="t('subscribers.form.unlimited')"
+						class="limit-value"
+					/>
 					<el-select v-model="form.limit_unit" class="limit-unit">
 						<el-option v-for="unit in LIMIT_UNITS" :key="unit" :label="unit" :value="unit" />
 					</el-select>
 				</div>
 			</el-form-item>
-			<el-form-item label="到期时间" prop="expires_at">
+			<el-form-item :label="t('subscribers.form.expiresAt')" prop="expires_at">
 				<el-date-picker v-model="form.expires_at" type="datetime" class="full-width" />
 			</el-form-item>
-			<el-form-item v-if="editingId !== null" label="停用">
+			<el-form-item v-if="editingId !== null" :label="t('common.disabled')">
 				<el-switch v-model="form.suspended" />
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="closeDialog">取消</el-button>
-			<el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
+			<el-button @click="closeDialog">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="submitting" @click="submit">{{ t('common.save') }}</el-button>
 		</template>
 	</el-dialog>
 
@@ -273,7 +283,7 @@ function openGrant(row: Subscriber): void {
 }
 
 .status-select {
-	width: 120px;
+	width: 140px;
 }
 
 .usage-cell {

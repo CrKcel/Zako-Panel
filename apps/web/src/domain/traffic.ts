@@ -1,4 +1,5 @@
 import type { TrafficItem } from '@zako/contracts';
+import { t } from '../i18n';
 
 export const DAY_SECONDS = 24 * 60 * 60;
 
@@ -61,8 +62,8 @@ export function trafficChartData(items: readonly TrafficItem[] | null | undefine
 	return {
 		categories: rows.map(trafficItemLabel),
 		series: [
-			{ name: '上行', values: rows.map((item) => item.uplink_bytes) },
-			{ name: '下行', values: rows.map((item) => item.downlink_bytes) },
+			{ name: t('traffic.uplink'), values: rows.map((item) => item.uplink_bytes) },
+			{ name: t('traffic.downlink'), values: rows.map((item) => item.downlink_bytes) },
 		],
 	};
 }

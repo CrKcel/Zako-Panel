@@ -1,4 +1,5 @@
 import type { Subscriber } from '@zako/contracts';
+import { t } from '../i18n';
 import { formatBytes, formatTimestamp } from '../utils/format';
 
 export type LimitUnit = 'GB' | 'MB';
@@ -36,7 +37,7 @@ export function subscriberUsedBytes(subscriber: Pick<Subscriber, 'usage'>): numb
 }
 
 export function trafficLimitLabel(bytes: number | null | undefined): string {
-	if (bytes === null || bytes === undefined) return '不限量';
+	if (bytes === null || bytes === undefined) return t('subscribers.form.unlimited');
 	return formatBytes(bytes);
 }
 

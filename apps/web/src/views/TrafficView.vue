@@ -14,11 +14,13 @@ import {
 	TRAFFIC_WINDOWS,
 	type TrafficWindowKey,
 } from '../domain/traffic';
+import { useI18n } from '../i18n';
 import { showError } from '../utils/feedback';
 import { formatBytes } from '../utils/format';
 
 const TrafficChart = defineAsyncComponent(() => import('../components/TrafficChart.vue'));
 
+const { t } = useI18n();
 const range = ref<TrafficWindowKey>('24h');
 const groupBy = ref<TrafficGroupBy>('node');
 
@@ -28,7 +30,7 @@ const {
 	reload,
 } = useAsyncResource(() => trafficApi.summary({ ...trafficWindow(TRAFFIC_WINDOWS[range.value]), groupBy: groupBy.value }), {
 	initialValue: null,
-	onError: (error) => showError(error, '流量加载失败'),
+	onError: (error) => showError(error, t('traffic.loadError')),
 });
 
 const items = computed(() => summary.value?.items ?? []);
@@ -45,30 +47,30 @@ watch([range, groupBy], () => {
 		<template #left>
 			<div class="filters">
 				<el-radio-group v-model="range">
-					<el-radio-button value="24h">24 小时</el-radio-button>
-					<el-radio-button value="7d">7 天</el-radio-button>
-					<el-radio-button value="30d">30 天</el-radio-button>
+					<el-radio-button value="24h">{{ t('traffic.ranges.24h') }}</el-radio-button>
+					<el-radio-button value="7d">{{ t('traffic.ranges.7d') }}</el-radio-button>
+					<el-radio-button value="30d">{{ t('traffic.ranges.30d') }}</el-radio-button>
 				</el-radio-group>
 				<el-radio-group v-model="groupBy">
-					<el-radio-button value="node">节点</el-radio-button>
-					<el-radio-button value="subscriber">订阅用户</el-radio-button>
-					<el-radio-button value="site">全站</el-radio-button>
+					<el-radio-button value="node">{{ t('traffic.groupBy.node') }}</el-radio-button>
+					<el-radio-button value="subscriber">{{ t('traffic.groupBy.subscriber') }}</el-radio-button>
+					<el-radio-button value="site">{{ t('traffic.groupBy.site') }}</el-radio-button>
 				</el-radio-group>
 			</div>
 		</template>
-		<el-button :loading="loading" @click="reload">刷新</el-button>
+		<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
 	</PageToolbar>
 
 	<div v-loading="loading" class="stats-grid ui-section">
-		<StatCard label="上行" :value="formatBytes(totals.uplink)" icon="arrow-up" tone="primary" />
-		<StatCard label="下行" :value="formatBytes(totals.downlink)" icon="arrow-down" tone="success" />
-		<StatCard label="总计" :value="formatBytes(totals.total)" icon="activity" />
+		<StatCard :label="t('traffic.uplink')" :value="formatBytes(totals.uplink)" icon="arrow-up" tone="primary" />
+		<StatCard :label="t('traffic.downlink')" :value="formatBytes(totals.downlink)" icon="arrow-down" tone="success" />
+		<StatCard :label="t('traffic.total')" :value="formatBytes(totals.total)" icon="activity" />
 	</div>
 
 	<el-card v-if="items.length > 0" shadow="never" class="ui-section">
 		<template #header>
 			<div class="ui-card-header">
-				<span class="ui-card-title">流量趋势</span>
+				<span class="ui-card-title">{{ t('traffic.chartTitle') }}</span>
 			</div>
 		</template>
 		<TrafficChart :categories="chart.categories" :series="chart.series" />
@@ -77,24 +79,24 @@ watch([range, groupBy], () => {
 	<el-card shadow="never">
 		<template #header>
 			<div class="ui-card-header">
-				<span class="ui-card-title">流量明细</span>
+				<span class="ui-card-title">{{ t('traffic.tableTitle') }}</span>
 			</div>
 		</template>
-		<el-table :data="items" empty-text="暂无数据">
-			<el-table-column label="维度" min-width="200">
+		<el-table :data="items" :empty-text="t('common.noData')">
+			<el-table-column :label="t('traffic.dimension')" min-width="200">
 				<template #default="{ row }">{{ trafficItemLabel(row as TrafficItem) }}</template>
 			</el-table-column>
-			<el-table-column label="上行" width="160">
+			<el-table-column :label="t('traffic.uplink')" width="160">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatBytes(row.uplink_bytes) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="下行" width="160">
+			<el-table-column :label="t('traffic.downlink')" width="160">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatBytes(row.downlink_bytes) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="合计" width="160">
+			<el-table-column :label="t('traffic.tableTotal')" width="160">
 				<template #default="{ row }">
 					<span class="tnum total-cell">{{ formatBytes(trafficItemTotal(row as TrafficItem)) }}</span>
 				</template>

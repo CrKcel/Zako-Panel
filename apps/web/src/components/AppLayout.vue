@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
+import { useI18n, type Locale, type MessageKey } from '../i18n';
+import { syncDocumentTitle } from '../router';
 import AppIcon, { type IconName } from './AppIcon.vue';
 
 const route = useRoute();
 const mobileOpen = ref(false);
+const { locale, localeOptions, setLocale, t } = useI18n();
 
-const items: Array<{ path: string; label: string; icon: IconName }> = [
-	{ path: '/', label: '总览', icon: 'overview' },
-	{ path: '/nodes', label: '节点', icon: 'nodes' },
-	{ path: '/subscribers', label: '订阅用户', icon: 'subscribers' },
-	{ path: '/profiles', label: '订阅档案', icon: 'profiles' },
-	{ path: '/subscriptions', label: '订阅', icon: 'subscriptions' },
-	{ path: '/traffic', label: '流量', icon: 'traffic' },
-];
+const items = computed<Array<{ path: string; label: string; icon: IconName }>>(() => [
+	{ path: '/', label: t('nav.overview'), icon: 'overview' },
+	{ path: '/nodes', label: t('nav.nodes'), icon: 'nodes' },
+	{ path: '/subscribers', label: t('nav.subscribers'), icon: 'subscribers' },
+	{ path: '/profiles', label: t('nav.profiles'), icon: 'profiles' },
+	{ path: '/subscriptions', label: t('nav.subscriptions'), icon: 'subscriptions' },
+	{ path: '/traffic', label: t('nav.traffic'), icon: 'traffic' },
+]);
 
 const activeMenu = computed(() => {
 	if (route.path.startsWith('/nodes')) return '/nodes';
@@ -21,7 +24,23 @@ const activeMenu = computed(() => {
 	return route.path;
 });
 
-const title = computed(() => route.meta.title ?? '');
+const title = computed(() => (route.meta.titleKey ? t(route.meta.titleKey as MessageKey) : ''));
+
+const currentLocaleLabel = computed(() => localeOptions.find((option) => option.value === locale.value)?.label ?? locale.value);
+
+function handleLocaleCommand(command: string | number | Record<string, unknown>): void {
+	if (command === 'zh-CN' || command === 'en-US') {
+		setLocale(command as Locale);
+	}
+}
+
+watch(
+	locale,
+	() => {
+		syncDocumentTitle(route.meta.titleKey);
+	},
+	{ immediate: true },
+);
 
 watch(
 	() => route.path,
@@ -41,7 +60,7 @@ watch(
 				<span class="brand-name">Zako Panel</span>
 			</div>
 
-			<nav class="nav" aria-label="主导航">
+			<nav class="nav" :aria-label="t('nav.mainNavigation')">
 				<RouterLink
 					v-for="item in items"
 					:key="item.path"
@@ -55,7 +74,7 @@ watch(
 			</nav>
 
 			<div class="aside-footer">
-				<span class="aside-meta">控制面板</span>
+				<span class="aside-meta">{{ t('nav.controlPanel') }}</span>
 			</div>
 		</aside>
 
@@ -63,10 +82,30 @@ watch(
 			<header class="header">
 				<div class="header-inner">
 					<div class="header-left">
-						<button type="button" class="menu-trigger" aria-label="打开导航" @click="mobileOpen = !mobileOpen">
+						<button type="button" class="menu-trigger" :aria-label="t('nav.openNavigation')" @click="mobileOpen = !mobileOpen">
 							<AppIcon name="menu" :size="18" />
 						</button>
 						<h1 class="page-title">{{ title }}</h1>
+					</div>
+					<div class="header-right">
+						<el-dropdown trigger="click" @command="handleLocaleCommand">
+							<button type="button" class="lang-trigger" :aria-label="t('nav.switchLanguage')">
+								<AppIcon name="globe" :size="15" />
+								<span>{{ currentLocaleLabel }}</span>
+							</button>
+							<template #dropdown>
+								<el-dropdown-menu>
+									<el-dropdown-item
+										v-for="option in localeOptions"
+										:key="option.value"
+										:command="option.value"
+										:class="{ 'is-selected-locale': locale === option.value }"
+									>
+										{{ option.label }}
+									</el-dropdown-item>
+								</el-dropdown-menu>
+							</template>
+						</el-dropdown>
 					</div>
 				</div>
 			</header>
@@ -207,6 +246,43 @@ watch(
 	display: flex;
 	align-items: center;
 	gap: 12px;
+}
+
+.header-right {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.lang-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 32px;
+	padding: 0 10px;
+	border: 1px solid var(--border-color);
+	border-radius: 7px;
+	background: var(--bg-surface);
+	color: var(--text-secondary);
+	font-family: inherit;
+	font-size: 12.5px;
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background-color 0.15s ease,
+		border-color 0.15s ease,
+		color 0.15s ease;
+}
+
+.lang-trigger:hover {
+	background: var(--bg-subtle);
+	border-color: #cbd5e1;
+	color: var(--text-primary);
+}
+
+:deep(.is-selected-locale) {
+	color: var(--accent-primary);
+	font-weight: 600;
 }
 
 .menu-trigger {

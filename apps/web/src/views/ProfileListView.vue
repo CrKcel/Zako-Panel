@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ClashPreview, DistributionSkipReason, Node, Profile } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
 import PageToolbar from '../components/PageToolbar.vue';
@@ -17,12 +17,15 @@ import {
 	type ProfileFormState,
 } from '../domain/profile-form';
 import { distributionSkipReasonLabel, subscriberBlockReasonLabel } from '../domain/status';
+import { useI18n } from '../i18n';
 import { confirmAction, showError, showSuccess, showValidationError } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
-const PARSE_ERROR_MESSAGE: Record<ProfileFormError, string> = {
-	clash_base: 'clash_base 必须是合法的 JSON 对象',
-	proxy_groups: 'proxy_groups 必须是合法的 JSON 数组',
+const { t } = useI18n();
+
+const PARSE_ERROR_KEY: Record<ProfileFormError, 'profiles.form.clashBaseError' | 'profiles.form.proxyGroupsError'> = {
+	clash_base: 'profiles.form.clashBaseError',
+	proxy_groups: 'profiles.form.proxyGroupsError',
 };
 
 const form = ref<ProfileFormState>(emptyProfileForm());
@@ -37,17 +40,17 @@ const {
 	reload,
 } = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
 	initialValue: [],
-	onError: (error) => showError(error, '订阅档案加载失败'),
+	onError: (error) => showError(error, t('profiles.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
-	onError: (error) => showError(error, '节点加载失败'),
+	onError: (error) => showError(error, t('profiles.loadNodesError')),
 });
 
-const rules: FormRules = {
-	name: [{ required: true, message: '请输入档案名称', trigger: 'blur' }],
-};
+const rules = computed<FormRules>(() => ({
+	name: [{ required: true, message: t('profiles.form.nameRequired'), trigger: 'blur' }],
+}));
 
 const {
 	visible: dialogVisible,
@@ -64,14 +67,14 @@ const {
 	load: async (id) => {
 		form.value = profileFormFrom(await profilesApi.get(id));
 	},
-	onError: (error) => showError(error, '订阅档案加载失败'),
+	onError: (error) => showError(error, t('profiles.loadError')),
 });
 
 async function submit(): Promise<void> {
 	if (!(await formRef.value?.validate().catch(() => false))) return;
 	const result = buildProfilePayload(form.value);
 	if (!result.ok) {
-		showValidationError(PARSE_ERROR_MESSAGE[result.error]);
+		showValidationError(t(PARSE_ERROR_KEY[result.error]));
 		return;
 	}
 	const profileId = editingId.value;
@@ -79,14 +82,14 @@ async function submit(): Promise<void> {
 		async () => {
 			if (profileId === null) {
 				await profilesApi.create(result.payload);
-				showSuccess('订阅档案已创建');
+				showSuccess(t('profiles.form.created'));
 			} else {
 				await profilesApi.update(profileId, result.payload);
-				showSuccess('订阅档案已更新');
+				showSuccess(t('profiles.form.updated'));
 			}
 			closeDialog();
 		},
-		(error) => showError(error, '订阅档案保存失败'),
+		(error) => showError(error, t('profiles.form.saveFailed')),
 	);
 	if (saved) await reload();
 }
@@ -98,7 +101,7 @@ const { running: previewLoading, run: runPreview } = useAsyncAction(
 	{
 		onError: (error) => {
 			previewVisible.value = false;
-			showError(error, '预览失败');
+			showError(error, t('profiles.preview.failed'));
 		},
 	},
 );
@@ -113,14 +116,14 @@ async function openPreview(profile: Profile): Promise<void> {
 const removeAction = useAsyncAction(
 	async (profile: Profile) => {
 		await profilesApi.remove(profile.id);
-		showSuccess('订阅档案已删除');
+		showSuccess(t('profiles.delete.success'));
 		await reload();
 	},
-	{ onError: (error) => showError(error, '订阅档案删除失败') },
+	{ onError: (error) => showError(error, t('profiles.delete.failed')) },
 );
 
 async function remove(profile: Profile): Promise<void> {
-	if (!(await confirmAction(`删除订阅档案「${profile.name}」？`))) return;
+	if (!(await confirmAction(t('profiles.delete.confirm', { name: profile.name })))) return;
 	await removeAction.run(profile);
 }
 </script>
@@ -128,49 +131,52 @@ async function remove(profile: Profile): Promise<void> {
 <template>
 	<el-card shadow="never">
 		<PageToolbar>
-			<el-button :loading="loading" @click="reload">刷新</el-button>
-			<el-button type="primary" @click="openCreate">创建档案</el-button>
+			<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
+			<el-button type="primary" @click="openCreate">{{ t('profiles.create') }}</el-button>
 		</PageToolbar>
-		<el-table v-loading="loading" :data="profiles" empty-text="暂无数据">
-			<el-table-column prop="name" label="名称" min-width="160" />
-			<el-table-column label="描述" min-width="200">
+		<el-table v-loading="loading" :data="profiles" :empty-text="t('common.noData')">
+			<el-table-column prop="name" :label="t('common.name')" min-width="160" />
+			<el-table-column :label="t('profiles.columns.description')" min-width="200">
 				<template #default="{ row }">{{ row.description ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column label="节点选择" width="110">
+			<el-table-column :label="t('profiles.columns.nodeSelection')" width="130">
 				<template #default="{ row }">
-					<StatusBadge :label="row.node_selection === 'all' ? '全部' : '指定'" :type="row.node_selection === 'all' ? 'primary' : 'info'" />
+					<StatusBadge
+						:label="row.node_selection === 'all' ? t('profiles.selection.all') : t('profiles.selection.selected')"
+						:type="row.node_selection === 'all' ? 'primary' : 'info'"
+					/>
 				</template>
 			</el-table-column>
-			<el-table-column label="在线过滤" width="105">
+			<el-table-column :label="t('profiles.columns.onlineOnly')" width="115">
 				<template #default="{ row }">
-					<StatusBadge :label="row.online_only ? '启用' : '关闭'" :type="row.online_only ? 'success' : 'info'" />
+					<StatusBadge :label="row.online_only ? t('common.enabled') : t('common.off')" :type="row.online_only ? 'success' : 'info'" />
 				</template>
 			</el-table-column>
-			<el-table-column label="代理组" width="85">
+			<el-table-column :label="t('profiles.columns.proxyGroups')" width="90">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.proxy_groups.length }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="规则数" width="85">
+			<el-table-column :label="t('profiles.columns.rulesCount')" width="85">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.rules.length }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="修订" width="80">
+			<el-table-column :label="t('profiles.columns.revision')" width="80">
 				<template #default="{ row }">
 					<span class="tnum">v{{ row.revision }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="更新时间" width="175">
+			<el-table-column :label="t('profiles.columns.updatedAt')" width="180">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.updated_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="190" fixed="right">
+			<el-table-column :label="t('common.actions')" width="200" fixed="right">
 				<template #default="{ row }">
-					<el-button link type="primary" @click="openPreview(row as Profile)">预览</el-button>
-					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
-					<el-button link type="danger" @click="remove(row as Profile)">删除</el-button>
+					<el-button link type="primary" @click="openPreview(row as Profile)">{{ t('profiles.actions.preview') }}</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
+					<el-button link type="danger" @click="remove(row as Profile)">{{ t('common.delete') }}</el-button>
 				</template>
 			</el-table-column>
 		</el-table>
@@ -178,30 +184,30 @@ async function remove(profile: Profile): Promise<void> {
 
 	<el-dialog
 		v-model="dialogVisible"
-		:title="editingId === null ? '创建档案' : '编辑档案'"
-		width="720px"
+		:title="editingId === null ? t('profiles.create') : t('profiles.edit')"
+		width="740px"
 		:close-on-click-modal="false"
 		destroy-on-close
 	>
-		<el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-			<el-form-item label="名称" prop="name">
+		<el-form ref="formRef" :model="form" :rules="rules" label-width="140px">
+			<el-form-item :label="t('common.name')" prop="name">
 				<el-input v-model="form.name" />
 			</el-form-item>
-			<el-form-item label="描述" prop="description">
+			<el-form-item :label="t('profiles.form.description')" prop="description">
 				<el-input v-model="form.description" />
 			</el-form-item>
-			<el-form-item label="节点选择" prop="node_selection">
+			<el-form-item :label="t('profiles.form.nodeSelection')" prop="node_selection">
 				<el-radio-group v-model="form.node_selection">
-					<el-radio value="all">全部</el-radio>
-					<el-radio value="selected">指定</el-radio>
+					<el-radio value="all">{{ t('profiles.selection.all') }}</el-radio>
+					<el-radio value="selected">{{ t('profiles.selection.selected') }}</el-radio>
 				</el-radio-group>
 			</el-form-item>
-			<el-form-item v-if="form.node_selection === 'selected'" label="节点" prop="node_ids">
+			<el-form-item v-if="form.node_selection === 'selected'" :label="t('profiles.form.nodes')" prop="node_ids">
 				<el-select v-model="form.node_ids" multiple filterable class="full-width">
 					<el-option v-for="node in nodes" :key="node.id" :label="node.name" :value="node.id" />
 				</el-select>
 			</el-form-item>
-			<el-form-item label="在线过滤" prop="online_only">
+			<el-form-item :label="t('profiles.form.onlineOnly')" prop="online_only">
 				<el-switch v-model="form.online_only" />
 			</el-form-item>
 			<el-form-item label="clash_base" prop="clash_base">
@@ -215,35 +221,35 @@ async function remove(profile: Profile): Promise<void> {
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="closeDialog">取消</el-button>
-			<el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
+			<el-button @click="closeDialog">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="submitting" @click="submit">{{ t('common.save') }}</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="previewVisible" :title="`Clash 预览 · ${previewName}`" width="820px" destroy-on-close>
+	<el-dialog v-model="previewVisible" :title="t('profiles.preview.title', { name: previewName })" width="820px" destroy-on-close>
 		<div v-loading="previewLoading">
 			<template v-if="preview">
 				<el-alert
 					v-if="preview.subscriber.blocked_reason !== null"
-					:title="`订阅用户当前不可用：${subscriberBlockReasonLabel(preview.subscriber.blocked_reason)}`"
+					:title="t('profiles.preview.blockedAlert', { reason: subscriberBlockReasonLabel(preview.subscriber.blocked_reason) })"
 					type="warning"
 					:closable="false"
 					show-icon
 					class="preview-alert"
 				/>
 				<el-descriptions :column="3" border size="small">
-					<el-descriptions-item label="订阅用户">{{ preview.subscriber.name }}</el-descriptions-item>
-					<el-descriptions-item label="节点数">
+					<el-descriptions-item :label="t('profiles.preview.subscriber')">{{ preview.subscriber.name }}</el-descriptions-item>
+					<el-descriptions-item :label="t('profiles.preview.proxiesCount')">
 						<span class="tnum">{{ preview.proxies.length }}</span>
 					</el-descriptions-item>
-					<el-descriptions-item label="跳过节点">
+					<el-descriptions-item :label="t('profiles.preview.skippedCount')">
 						<span class="tnum">{{ preview.skipped.length }}</span>
 					</el-descriptions-item>
 				</el-descriptions>
 				<el-input class="preview-document code-input" type="textarea" :model-value="preview.document" :rows="16" readonly />
 				<el-table v-if="preview.skipped.length > 0" :data="preview.skipped" size="small" class="preview-skipped">
-					<el-table-column prop="node_name" label="节点" min-width="160" />
-					<el-table-column label="原因" min-width="160">
+					<el-table-column prop="node_name" :label="t('profiles.preview.node')" min-width="160" />
+					<el-table-column :label="t('profiles.preview.reason')" min-width="160">
 						<template #default="{ row }">{{ distributionSkipReasonLabel(row.reason as DistributionSkipReason) }}</template>
 					</el-table-column>
 				</el-table>

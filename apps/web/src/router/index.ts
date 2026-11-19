@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
+import { t, type MessageKey } from '../i18n';
 
 declare module 'vue-router' {
 	interface RouteMeta {
-		title?: string;
+		titleKey?: MessageKey;
 	}
 }
 
@@ -11,49 +12,49 @@ const routes: RouteRecordRaw[] = [
 		path: '/',
 		name: 'overview',
 		component: () => import('../views/OverviewView.vue'),
-		meta: { title: '总览' },
+		meta: { titleKey: 'nav.overview' },
 	},
 	{
 		path: '/nodes',
 		name: 'nodes',
 		component: () => import('../views/NodeListView.vue'),
-		meta: { title: '节点' },
+		meta: { titleKey: 'nav.nodes' },
 	},
 	{
 		path: '/nodes/:nodeId',
 		name: 'node-detail',
 		component: () => import('../views/NodeDetailView.vue'),
-		meta: { title: '节点详情' },
+		meta: { titleKey: 'nav.nodeDetail' },
 	},
 	{
 		path: '/subscribers',
 		name: 'subscribers',
 		component: () => import('../views/SubscriberListView.vue'),
-		meta: { title: '订阅用户' },
+		meta: { titleKey: 'nav.subscribers' },
 	},
 	{
 		path: '/subscribers/:subscriberId',
 		name: 'subscriber-detail',
 		component: () => import('../views/SubscriberDetailView.vue'),
-		meta: { title: '订阅用户详情' },
+		meta: { titleKey: 'nav.subscriberDetail' },
 	},
 	{
 		path: '/profiles',
 		name: 'profiles',
 		component: () => import('../views/ProfileListView.vue'),
-		meta: { title: '订阅档案' },
+		meta: { titleKey: 'nav.profiles' },
 	},
 	{
 		path: '/subscriptions',
 		name: 'subscriptions',
 		component: () => import('../views/SubscriptionListView.vue'),
-		meta: { title: '订阅' },
+		meta: { titleKey: 'nav.subscriptions' },
 	},
 	{
 		path: '/traffic',
 		name: 'traffic',
 		component: () => import('../views/TrafficView.vue'),
-		meta: { title: '流量' },
+		meta: { titleKey: 'nav.traffic' },
 	},
 	{
 		path: '/:pathMatch(.*)*',
@@ -66,6 +67,10 @@ export const router = createRouter({
 	routes,
 });
 
+export function syncDocumentTitle(titleKey?: MessageKey): void {
+	document.title = titleKey ? `${t(titleKey)} · Zako Panel` : 'Zako Panel';
+}
+
 router.afterEach((to) => {
-	document.title = to.meta.title ? `${to.meta.title} · Zako Panel` : 'Zako Panel';
+	syncDocumentTitle(to.meta.titleKey);
 });

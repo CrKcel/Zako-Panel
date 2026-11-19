@@ -2,6 +2,7 @@
 import type { TrafficSummary } from '@zako/contracts';
 import { computed } from 'vue';
 import { sumTrafficItems } from '../domain/traffic';
+import { useI18n } from '../i18n';
 import { formatBytes } from '../utils/format';
 import AppIcon, { type IconName } from './AppIcon.vue';
 
@@ -11,12 +12,14 @@ const props = defineProps<{
 	loading?: boolean;
 }>();
 
+const { t } = useI18n();
+
 const metrics = computed<Array<{ label: string; value: string; icon: IconName; tone: string }>>(() => {
 	const totals = sumTrafficItems(props.summary?.items);
 	return [
-		{ label: '上行', value: formatBytes(totals.uplink), icon: 'arrow-up', tone: 'primary' },
-		{ label: '下行', value: formatBytes(totals.downlink), icon: 'arrow-down', tone: 'success' },
-		{ label: '总计', value: formatBytes(totals.total), icon: 'activity', tone: 'neutral' },
+		{ label: t('traffic.uplink'), value: formatBytes(totals.uplink), icon: 'arrow-up', tone: 'primary' },
+		{ label: t('traffic.downlink'), value: formatBytes(totals.downlink), icon: 'arrow-down', tone: 'success' },
+		{ label: t('traffic.total'), value: formatBytes(totals.total), icon: 'activity', tone: 'neutral' },
 	];
 });
 </script>

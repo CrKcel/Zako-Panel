@@ -3,6 +3,7 @@ import type { Node, Subscriber, SubscriberDetail } from '@zako/contracts';
 import { ref, watch } from 'vue';
 import { subscribersApi } from '../api/subscribers';
 import { useAsyncAction } from '../composables/useAsyncAction';
+import { useI18n } from '../i18n';
 import { showError, showSuccess } from '../utils/feedback';
 
 const props = defineProps<{
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 	saved: [detail: SubscriberDetail];
 }>();
 
+const { t } = useI18n();
 const selected = ref<string[]>([]);
 const loading = ref(false);
 
@@ -33,7 +35,7 @@ async function loadGrants(subscriberId: string): Promise<void> {
 		selected.value = [...detail.node_ids];
 	} catch (error) {
 		close();
-		showError(error, '订阅用户加载失败');
+		showError(error, t('subscribers.loadError'));
 	} finally {
 		loading.value = false;
 	}
@@ -59,17 +61,17 @@ const { running: saving, run: save } = useAsyncAction(
 		if (subscriber === null) return;
 		const detail = await subscribersApi.replaceNodes(subscriber.id, selected.value);
 		close();
-		showSuccess('节点授权已更新');
+		showSuccess(t('subscribers.grant.updated'));
 		emit('saved', detail);
 	},
-	{ onError: (error) => showError(error, '节点授权保存失败') },
+	{ onError: (error) => showError(error, t('subscribers.grant.saveFailed')) },
 );
 </script>
 
 <template>
 	<el-dialog
 		:model-value="visible"
-		:title="title ?? '节点授权'"
+		:title="title ?? t('subscribers.grant.title')"
 		width="520px"
 		:close-on-click-modal="false"
 		destroy-on-close
@@ -81,8 +83,8 @@ const { running: saving, run: save } = useAsyncAction(
 			</el-select>
 		</div>
 		<template #footer>
-			<el-button @click="close">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="save()">保存</el-button>
+			<el-button @click="close">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="saving" @click="save()">{{ t('common.save') }}</el-button>
 		</template>
 	</el-dialog>
 </template>

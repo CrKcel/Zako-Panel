@@ -1,6 +1,9 @@
+import { locale, t } from '../i18n';
+
 export function formatTimestamp(seconds: number | null | undefined): string {
 	if (seconds === null || seconds === undefined) return '—';
-	return new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false });
+	const tag = locale.value === 'zh-CN' ? 'zh-CN' : 'en-US';
+	return new Date(seconds * 1000).toLocaleString(tag, { hour12: false });
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -26,7 +29,7 @@ export function formatDuration(seconds: number | null | undefined): string {
 	const days = Math.floor(seconds / 86400);
 	const hours = Math.floor((seconds % 86400) / 3600);
 	const minutes = Math.floor((seconds % 3600) / 60);
-	if (days > 0) return `${days} 天 ${hours} 小时`;
-	if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
-	return `${minutes} 分钟`;
+	if (days > 0) return t('format.durationDaysHours', { days, hours });
+	if (hours > 0) return t('format.durationHoursMinutes', { hours, minutes });
+	return t('format.durationMinutes', { minutes });
 }

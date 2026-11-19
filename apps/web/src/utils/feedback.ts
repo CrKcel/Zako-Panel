@@ -1,7 +1,8 @@
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ApiError } from '../api/client';
+import { t } from '../i18n';
 
-export function showError(error: unknown, fallback = '请求失败'): void {
+export function showError(error: unknown, fallback = t('feedback.requestFailed')): void {
 	ElMessage.error(error instanceof ApiError ? error.message : fallback);
 }
 
@@ -14,12 +15,12 @@ export function showValidationError(message: string): void {
 	ElMessage.error(message);
 }
 
-export async function confirmAction(message: string, title = '确认操作'): Promise<boolean> {
+export async function confirmAction(message: string, title = t('feedback.confirmTitle')): Promise<boolean> {
 	try {
 		await ElMessageBox.confirm(message, title, {
 			type: 'warning',
-			confirmButtonText: '确定',
-			cancelButtonText: '取消',
+			confirmButtonText: t('common.confirm'),
+			cancelButtonText: t('common.cancel'),
 		});
 		return true;
 	} catch {

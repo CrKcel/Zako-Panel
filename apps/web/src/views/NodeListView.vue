@@ -11,6 +11,7 @@ import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
 import { nodeStatusDescriptor } from '../domain/status';
+import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatPercent, formatTimestamp } from '../utils/format';
@@ -21,6 +22,7 @@ interface EditForm {
 	enabled: boolean;
 }
 
+const { t } = useI18n();
 const search = ref('');
 const statusFilter = ref<'all' | Node['status']>('all');
 
@@ -61,7 +63,7 @@ const {
 } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	immediate: false,
 	initialValue: [],
-	onError: (error) => showError(error, '节点加载失败'),
+	onError: (error) => showError(error, t('nodes.loadError')),
 });
 
 const filteredNodes = computed(() => {
@@ -81,9 +83,9 @@ const required = (message: string): { required: true; message: string; trigger: 
 	trigger: 'blur',
 });
 
-const editRules: FormRules = {
-	name: [required('请输入节点名称')],
-};
+const editRules = computed<FormRules>(() => ({
+	name: [required(t('nodes.editDialog.nameRequired'))],
+}));
 
 const {
 	visible: editVisible,
@@ -116,9 +118,9 @@ async function submitEdit(): Promise<void> {
 				enabled: editForm.value.enabled,
 			});
 			closeEdit();
-			showSuccess('节点已更新');
+			showSuccess(t('nodes.editDialog.updated'));
 		},
-		(error) => showError(error, '节点更新失败'),
+		(error) => showError(error, t('nodes.editDialog.updateFailed')),
 	);
 	if (saved) await reload();
 }
@@ -128,13 +130,13 @@ const rotateAction = useAsyncAction(
 		const result = await nodesApi.rotateAgentToken(node.id);
 		agentToken.value = result.agent_token;
 		tokenVisible.value = true;
-		showSuccess('Agent token 已轮换');
+		showSuccess(t('nodes.rotate.success'));
 	},
-	{ onError: (error) => showError(error, 'Agent token 轮换失败') },
+	{ onError: (error) => showError(error, t('nodes.rotate.failed')) },
 );
 
 async function rotateAgentToken(node: Node): Promise<void> {
-	if (!(await confirmAction(`轮换「${node.name}」的 Agent token？`))) return;
+	if (!(await confirmAction(t('nodes.rotate.confirm', { name: node.name })))) return;
 	await rotateAction.runFor(node.id, node);
 }
 
@@ -163,9 +165,9 @@ const createEnrollAction = useAsyncAction(
 		enrollCreateVisible.value = false;
 		enrollToken.value = result.token;
 		enrollResultVisible.value = true;
-		showSuccess('一次性部署命令已生成（24 小时内有效）');
+		showSuccess(t('nodes.enroll.generatedSuccess'));
 	},
-	{ onError: (error) => showError(error, '生成部署 Token 失败') },
+	{ onError: (error) => showError(error, t('nodes.enroll.createFailed')) },
 );
 
 async function loadEnrollmentTokens(): Promise<void> {
@@ -174,7 +176,7 @@ async function loadEnrollmentTokens(): Promise<void> {
 		const page = await nodesApi.listEnrollmentTokens();
 		enrollTokens.value = page.items;
 	} catch (error) {
-		showError(error, '部署 Token 加载失败');
+		showError(error, t('nodes.enroll.listLoadFailed'));
 	} finally {
 		enrollTokensLoading.value = false;
 	}
@@ -188,27 +190,27 @@ async function openEnrollList(): Promise<void> {
 const revokeEnrollAction = useAsyncAction(
 	async (token: NodeEnrollmentToken) => {
 		await nodesApi.revokeEnrollmentToken(token.id);
-		showSuccess('部署 Token 已作废');
+		showSuccess(t('nodes.enroll.revokeSuccess'));
 		await loadEnrollmentTokens();
 	},
-	{ onError: (error) => showError(error, '作废 Token 失败') },
+	{ onError: (error) => showError(error, t('nodes.enroll.revokeFailed')) },
 );
 
 async function revokeEnrollToken(token: NodeEnrollmentToken): Promise<void> {
-	if (!(await confirmAction('确定作废该一次性部署 Token？'))) return;
+	if (!(await confirmAction(t('nodes.enroll.revokeConfirm')))) return;
 	await revokeEnrollAction.runFor(token.id, token);
 }
 
 function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string; type: 'success' | 'info' | 'warning' | 'danger' } {
 	switch (status) {
 		case 'active':
-			return { label: '可用', type: 'success' };
+			return { label: t('status.enrollment.active'), type: 'success' };
 		case 'used':
-			return { label: '已使用', type: 'info' };
+			return { label: t('status.enrollment.used'), type: 'info' };
 		case 'expired':
-			return { label: '已过期', type: 'warning' };
+			return { label: t('status.enrollment.expired'), type: 'warning' };
 		case 'revoked':
-			return { label: '已作废', type: 'danger' };
+			return { label: t('status.enrollment.revoked'), type: 'danger' };
 	}
 }
 
@@ -234,13 +236,13 @@ const deleteAction = useAsyncAction(
 		});
 		deleteDialogVisible.value = false;
 		if (res) {
-			showSuccess('已下发远程卸载指令，等待节点确认');
+			showSuccess(t('nodes.delete.uninstallQueued'));
 		} else {
-			showSuccess('节点已删除');
+			showSuccess(t('nodes.delete.deleted'));
 		}
 		await reload();
 	},
-	{ onError: (error) => showError(error, '删除节点失败') },
+	{ onError: (error) => showError(error, t('nodes.delete.failed')) },
 );
 
 async function submitDeleteNode(): Promise<void> {
@@ -254,28 +256,28 @@ async function submitDeleteNode(): Promise<void> {
 		<PageToolbar spread>
 			<template #left>
 				<div class="filters">
-					<el-input v-model="search" placeholder="搜索节点名称…" clearable class="search-input" />
+					<el-input v-model="search" :placeholder="t('nodes.searchPlaceholder')" clearable class="search-input" />
 					<el-select v-model="statusFilter" class="status-select">
-						<el-option label="全部状态" value="all" />
-						<el-option label="在线" value="online" />
-						<el-option label="异常" value="degraded" />
-						<el-option label="离线" value="offline" />
-						<el-option label="停用" value="disabled" />
+						<el-option :label="t('common.allStatuses')" value="all" />
+						<el-option :label="t('status.node.online')" value="online" />
+						<el-option :label="t('status.node.degraded')" value="degraded" />
+						<el-option :label="t('status.node.offline')" value="offline" />
+						<el-option :label="t('status.node.disabled')" value="disabled" />
 					</el-select>
 				</div>
 			</template>
-			<el-button :loading="loading" @click="refresh">刷新</el-button>
-			<el-button @click="openEnrollList">部署 Token</el-button>
-			<el-button type="primary" @click="openEnrollCreate">一键部署节点</el-button>
+			<el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
+			<el-button @click="openEnrollList">{{ t('nodes.enrollmentTokens') }}</el-button>
+			<el-button type="primary" @click="openEnrollCreate">{{ t('nodes.deployNode') }}</el-button>
 		</PageToolbar>
 
-		<el-table v-loading="loading" :data="filteredNodes" empty-text="暂无节点">
-			<el-table-column label="名称" min-width="170">
+		<el-table v-loading="loading" :data="filteredNodes" :empty-text="t('nodes.empty')">
+			<el-table-column :label="t('common.name')" min-width="170">
 				<template #default="{ row }">
 					<RouterLink :to="`/nodes/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="状态" width="110">
+			<el-table-column :label="t('common.status')" width="130">
 				<template #default="{ row }">
 					<StatusBadge
 						:label="nodeStatusDescriptor(row.status as Node['status']).label"
@@ -283,52 +285,52 @@ async function submitDeleteNode(): Promise<void> {
 					/>
 				</template>
 			</el-table-column>
-			<el-table-column label="心跳间隔" width="100">
+			<el-table-column :label="t('nodes.columns.heartbeatInterval')" width="105">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.heartbeat_interval_seconds }}s</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="最近心跳" width="175">
+			<el-table-column :label="t('nodes.columns.lastHeartbeat')" width="180">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.last_seen_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="Agent" width="120">
+			<el-table-column :label="t('nodes.columns.agent')" width="120">
 				<template #default="{ row }">
 					<span class="mono">{{ row.agent_version ?? '—' }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="Xray" width="120">
+			<el-table-column :label="t('nodes.columns.xray')" width="120">
 				<template #default="{ row }">
 					<span class="mono">{{ row.xray_version ?? '—' }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="CPU" width="85">
+			<el-table-column :label="t('nodes.columns.cpu')" width="85">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatPercent(row.sys?.cpu) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="内存" width="85">
+			<el-table-column :label="t('nodes.columns.memory')" width="95">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatPercent(row.sys?.mem) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="负载" width="85">
+			<el-table-column :label="t('nodes.columns.load')" width="85">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.sys ? row.sys.load.toFixed(2) : '—' }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="启用" width="95">
+			<el-table-column :label="t('common.enabled')" width="105">
 				<template #default="{ row }">
-					<StatusBadge :label="row.enabled ? '启用' : '停用'" :type="row.enabled ? 'success' : 'info'" />
+					<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="260" fixed="right">
+			<el-table-column :label="t('common.actions')" width="280" fixed="right">
 				<template #default="{ row }">
 					<RouterLink :to="`/nodes/${row.id}`" custom v-slot="{ navigate }">
-						<el-button link type="primary" @click="navigate">详情</el-button>
+						<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
 					</RouterLink>
-					<el-button link type="primary" @click="openEdit(row.id)">编辑</el-button>
+					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
 					<el-button
 						link
 						type="primary"
@@ -336,102 +338,114 @@ async function submitDeleteNode(): Promise<void> {
 						:loading="rotateAction.isRunning(row.id)"
 						@click="rotateAgentToken(row as Node)"
 					>
-						轮换 Token
+						{{ t('nodes.actions.rotateToken') }}
 					</el-button>
 					<el-button link type="danger" :loading="deleteAction.isRunning(row.id)" @click="openDeleteDialog(row as Node)">
-						{{ row.status === 'uninstalling' ? '强制删除' : '删除' }}
+						{{ row.status === 'uninstalling' ? t('common.forceDelete') : t('common.delete') }}
 					</el-button>
 				</template>
 			</el-table-column>
 		</el-table>
 	</el-card>
 
-	<el-dialog v-model="editVisible" title="编辑节点" width="520px" :close-on-click-modal="false" destroy-on-close>
-		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="120px">
-			<el-form-item label="名称" prop="name">
+	<el-dialog v-model="editVisible" :title="t('nodes.editDialog.title')" width="520px" :close-on-click-modal="false" destroy-on-close>
+		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="150px">
+			<el-form-item :label="t('common.name')" prop="name">
 				<el-input v-model="editForm.name" />
 			</el-form-item>
-			<el-form-item label="心跳间隔" prop="heartbeat_interval_seconds">
+			<el-form-item :label="t('nodes.editDialog.heartbeatInterval')" prop="heartbeat_interval_seconds">
 				<el-input-number v-model="editForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
 			</el-form-item>
-			<el-form-item label="启用" prop="enabled">
+			<el-form-item :label="t('common.enabled')" prop="enabled">
 				<el-switch v-model="editForm.enabled" />
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="closeEdit">取消</el-button>
-			<el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button>
+			<el-button @click="closeEdit">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="saving" @click="submitEdit">{{ t('common.save') }}</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="tokenVisible" title="Agent Token" width="560px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog v-model="tokenVisible" :title="t('nodes.rotate.dialogTitle')" width="560px" :close-on-click-modal="false" destroy-on-close>
 		<el-input :model-value="agentToken" readonly class="mono">
 			<template #append>
-				<el-button @click="copyText(agentToken)">复制</el-button>
+				<el-button @click="copyText(agentToken)">{{ t('common.copy') }}</el-button>
 			</template>
 		</el-input>
 	</el-dialog>
 
-	<el-dialog v-model="enrollCreateVisible" title="一键部署节点" width="540px" :close-on-click-modal="false" destroy-on-close>
-		<el-form :model="enrollForm" label-width="120px">
-			<el-form-item label="名称前缀">
-				<el-input v-model="enrollForm.name_prefix" placeholder="可选，如 edge（留空则使用服务器主机名）" />
+	<el-dialog
+		v-model="enrollCreateVisible"
+		:title="t('nodes.enroll.createTitle')"
+		width="560px"
+		:close-on-click-modal="false"
+		destroy-on-close
+	>
+		<el-form :model="enrollForm" label-width="160px">
+			<el-form-item :label="t('nodes.enroll.namePrefix')">
+				<el-input v-model="enrollForm.name_prefix" :placeholder="t('nodes.enroll.namePrefixPlaceholder')" />
 			</el-form-item>
-			<el-form-item label="默认 SNI">
+			<el-form-item :label="t('nodes.enroll.defaultSni')">
 				<el-input v-model="enrollForm.default_sni" placeholder="www.microsoft.com" />
 			</el-form-item>
-			<el-form-item label="默认端口">
+			<el-form-item :label="t('nodes.enroll.defaultPort')">
 				<el-input-number v-model="enrollForm.default_port" :min="1" :max="65535" />
 			</el-form-item>
-			<el-form-item label="Fingerprint">
+			<el-form-item :label="t('nodes.enroll.fingerprint')">
 				<el-select v-model="enrollForm.default_fingerprint">
 					<el-option v-for="fp in ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random']" :key="fp" :label="fp" :value="fp" />
 				</el-select>
 			</el-form-item>
-			<el-form-item label="心跳间隔 (s)">
+			<el-form-item :label="t('nodes.enroll.heartbeatIntervalSec')">
 				<el-input-number v-model="enrollForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
 			</el-form-item>
 		</el-form>
 		<template #footer>
-			<el-button @click="enrollCreateVisible = false">取消</el-button>
+			<el-button @click="enrollCreateVisible = false">{{ t('common.cancel') }}</el-button>
 			<el-button type="primary" :loading="createEnrollAction.isRunning('create')" @click="createEnrollAction.runFor('create')">
-				生成部署命令
+				{{ t('nodes.enroll.generateCommand') }}
 			</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="enrollResultVisible" title="节点一键部署命令" width="680px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog
+		v-model="enrollResultVisible"
+		:title="t('nodes.enroll.resultTitle')"
+		width="680px"
+		:close-on-click-modal="false"
+		destroy-on-close
+	>
 		<el-alert type="info" :closable="false" show-icon class="dialog-alert">
-			该一次性 Token 仅展示一次，默认 24 小时有效且使用一次后立即失效。执行后将自动安装缺失的 Xray、生成 REALITY 密钥并注册上线。
+			{{ t('nodes.enroll.resultAlert') }}
 		</el-alert>
 		<pre class="command-box mono">{{ enrollCommand }}</pre>
 		<template #footer>
-			<el-button @click="enrollResultVisible = false">关闭</el-button>
-			<el-button type="primary" @click="copyText(enrollCommand)">复制命令</el-button>
+			<el-button @click="enrollResultVisible = false">{{ t('common.close') }}</el-button>
+			<el-button type="primary" @click="copyText(enrollCommand)">{{ t('nodes.enroll.copyCommand') }}</el-button>
 		</template>
 	</el-dialog>
 
-	<el-dialog v-model="enrollListVisible" title="一次性部署 Token" width="760px" destroy-on-close>
-		<el-table v-loading="enrollTokensLoading" :data="enrollTokens" empty-text="暂无部署 Token">
-			<el-table-column label="状态" width="100">
+	<el-dialog v-model="enrollListVisible" :title="t('nodes.enroll.listTitle')" width="780px" destroy-on-close>
+		<el-table v-loading="enrollTokensLoading" :data="enrollTokens" :empty-text="t('nodes.enroll.listEmpty')">
+			<el-table-column :label="t('common.status')" width="110">
 				<template #default="{ row }">
 					<StatusBadge :label="enrollStatusTag(row.status).label" :type="enrollStatusTag(row.status).type" />
 				</template>
 			</el-table-column>
-			<el-table-column label="名称前缀" width="110">
+			<el-table-column :label="t('nodes.enroll.colPrefix')" width="120">
 				<template #default="{ row }">{{ row.name_prefix ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column label="默认 SNI / 端口" min-width="180">
+			<el-table-column :label="t('nodes.enroll.colDefaultSniPort')" min-width="180">
 				<template #default="{ row }">
 					<span class="mono">{{ row.default_sni }}:{{ row.default_port }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="过期时间" width="175">
+			<el-table-column :label="t('nodes.enroll.colExpiresAt')" width="180">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="操作" width="90" fixed="right">
+			<el-table-column :label="t('common.actions')" width="100" fixed="right">
 				<template #default="{ row }">
 					<el-button
 						v-if="row.status === 'active'"
@@ -440,7 +454,7 @@ async function submitDeleteNode(): Promise<void> {
 						:loading="revokeEnrollAction.isRunning(row.id)"
 						@click="revokeEnrollToken(row as NodeEnrollmentToken)"
 					>
-						作废
+						{{ t('nodes.actions.revoke') }}
 					</el-button>
 					<span v-else>—</span>
 				</template>
@@ -448,31 +462,28 @@ async function submitDeleteNode(): Promise<void> {
 		</el-table>
 	</el-dialog>
 
-	<el-dialog v-model="deleteDialogVisible" title="删除节点" width="480px" destroy-on-close>
+	<el-dialog v-model="deleteDialogVisible" :title="t('nodes.delete.title')" width="500px" destroy-on-close>
 		<p class="delete-confirm">
-			确认删除节点「<strong>{{ deletingNode?.name }}</strong
-			>」？该操作不可恢复。
+			{{ t('nodes.delete.confirmPrefix') }}<strong>{{ deletingNode?.name }}</strong
+			>{{ t('nodes.delete.confirmSuffix') }}
 		</p>
-		<el-form label-width="180px" class="delete-form">
-			<el-form-item v-if="deletingNode?.last_seen_at !== null && deletingNode?.status !== 'uninstalling'" label="仅从面板强制删除">
+		<el-form label-width="220px" class="delete-form">
+			<el-form-item
+				v-if="deletingNode?.last_seen_at !== null && deletingNode?.status !== 'uninstalling'"
+				:label="t('nodes.delete.forceLabel')"
+			>
 				<el-switch v-model="deleteForce" />
 			</el-form-item>
-			<el-form-item v-if="!deleteForce" label="同时卸载 Xray-core">
+			<el-form-item v-if="!deleteForce" :label="t('nodes.delete.removeXrayLabel')">
 				<el-switch v-model="deleteRemoveXray" />
 			</el-form-item>
 		</el-form>
-		<el-alert
-			v-if="!deleteForce"
-			type="info"
-			:closable="false"
-			show-icon
-			title="节点将在下次心跳时收到卸载指令，自动停止并清理本机 Agent 后从面板移除。"
-		/>
-		<el-alert v-else type="warning" :closable="false" show-icon title="将立即从控制面板删除该节点记录，不会等待节点回传卸载确认。" />
+		<el-alert v-if="!deleteForce" type="info" :closable="false" show-icon :title="t('nodes.delete.uninstallHint')" />
+		<el-alert v-else type="warning" :closable="false" show-icon :title="t('nodes.delete.forceHint')" />
 		<template #footer>
-			<el-button @click="deleteDialogVisible = false">取消</el-button>
+			<el-button @click="deleteDialogVisible = false">{{ t('common.cancel') }}</el-button>
 			<el-button type="danger" :loading="deletingNode ? deleteAction.isRunning(deletingNode.id) : false" @click="submitDeleteNode">
-				{{ deleteForce ? '强制删除' : '确认卸载并删除' }}
+				{{ deleteForce ? t('common.forceDelete') : t('nodes.delete.confirmUninstallAndDelete') }}
 			</el-button>
 		</template>
 	</el-dialog>
@@ -491,7 +502,7 @@ async function submitDeleteNode(): Promise<void> {
 }
 
 .status-select {
-	width: 120px;
+	width: 140px;
 }
 
 .dialog-alert {

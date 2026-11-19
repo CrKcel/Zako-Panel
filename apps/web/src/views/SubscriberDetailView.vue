@@ -13,10 +13,13 @@ import { useAsyncResource } from '../composables/useAsyncResource';
 import { trafficLimitLabel, usageCycleLabel } from '../domain/subscriber';
 import { subscriberStatusDescriptor } from '../domain/status';
 import { DAY_SECONDS, trafficChartData, trafficWindow } from '../domain/traffic';
+import { useI18n } from '../i18n';
 import { showError } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
 const TrafficChart = defineAsyncComponent(() => import('../components/TrafficChart.vue'));
+
+const { t } = useI18n();
 
 interface SubscriberTraffic {
 	totals: TrafficSummary;
@@ -33,12 +36,12 @@ const {
 	reload: reloadSubscriber,
 } = useAsyncResource<SubscriberDetail | null>(() => subscribersApi.get(subscriberId.value), {
 	initialValue: null,
-	onError: (error) => showError(error, '订阅用户加载失败'),
+	onError: (error) => showError(error, t('subscribers.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
-	onError: (error) => showError(error, '节点加载失败'),
+	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
 const {
@@ -54,7 +57,7 @@ const {
 		]);
 		return { totals, byNode };
 	},
-	{ initialValue: null, onError: (error) => showError(error, '流量加载失败') },
+	{ initialValue: null, onError: (error) => showError(error, t('traffic.loadError')) },
 );
 
 const grantVisible = ref(false);
@@ -93,9 +96,9 @@ async function refresh(): Promise<void> {
 	<div v-loading="loading">
 		<PageToolbar spread>
 			<template #left>
-				<el-button @click="backToList">返回列表</el-button>
+				<el-button @click="backToList">{{ t('subscriberDetail.backToList') }}</el-button>
 			</template>
-			<el-button :loading="loading" @click="refresh">刷新</el-button>
+			<el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
 		</PageToolbar>
 
 		<el-card shadow="never" class="ui-section">
@@ -110,7 +113,7 @@ async function refresh(): Promise<void> {
 				</div>
 			</template>
 			<el-descriptions :column="3" border>
-				<el-descriptions-item label="状态">
+				<el-descriptions-item :label="t('common.status')">
 					<StatusBadge
 						v-if="subscriber"
 						:label="subscriberStatusDescriptor(subscriber.status).label"
@@ -118,17 +121,17 @@ async function refresh(): Promise<void> {
 					/>
 					<span v-else>—</span>
 				</el-descriptions-item>
-				<el-descriptions-item label="邮箱">{{ subscriber?.email ?? '—' }}</el-descriptions-item>
-				<el-descriptions-item label="额度">
+				<el-descriptions-item :label="t('subscriberDetail.email')">{{ subscriber?.email ?? '—' }}</el-descriptions-item>
+				<el-descriptions-item :label="t('subscriberDetail.quota')">
 					<span class="tnum">{{ limitLabel }}</span>
 				</el-descriptions-item>
-				<el-descriptions-item label="周期">
+				<el-descriptions-item :label="t('subscriberDetail.cycle')">
 					<span class="tnum">{{ cycleLabel }}</span>
 				</el-descriptions-item>
-				<el-descriptions-item label="到期">
+				<el-descriptions-item :label="t('subscriberDetail.expiresAt')">
 					<span class="tnum">{{ formatTimestamp(subscriber?.expires_at) }}</span>
 				</el-descriptions-item>
-				<el-descriptions-item label="创建时间">
+				<el-descriptions-item :label="t('subscriberDetail.createdAt')">
 					<span class="tnum">{{ formatTimestamp(subscriber?.created_at) }}</span>
 				</el-descriptions-item>
 			</el-descriptions>
@@ -137,8 +140,8 @@ async function refresh(): Promise<void> {
 		<el-card shadow="never" class="ui-section">
 			<template #header>
 				<div class="ui-card-header">
-					<span class="ui-card-title">授权节点</span>
-					<el-button type="primary" @click="openGrant">编辑</el-button>
+					<span class="ui-card-title">{{ t('subscriberDetail.grantedNodes') }}</span>
+					<el-button type="primary" @click="openGrant">{{ t('common.edit') }}</el-button>
 				</div>
 			</template>
 			<div v-if="grantedNodes.length > 0" class="node-tags">
@@ -146,10 +149,10 @@ async function refresh(): Promise<void> {
 					{{ node.name }}
 				</RouterLink>
 			</div>
-			<span v-else class="empty-muted">暂无授权节点</span>
+			<span v-else class="empty-muted">{{ t('subscriberDetail.noGrantedNodes') }}</span>
 		</el-card>
 
-		<TrafficTotalsCard :summary="traffic?.totals ?? null" :loading="trafficLoading" title="近 24 小时流量">
+		<TrafficTotalsCard :summary="traffic?.totals ?? null" :loading="trafficLoading" :title="t('subscriberDetail.trafficLast24h')">
 			<TrafficChart v-if="chart.categories.length > 0" :categories="chart.categories" :series="chart.series" class="chart" />
 		</TrafficTotalsCard>
 	</div>

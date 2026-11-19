@@ -1,4 +1,5 @@
 import type { DistributionSkipReason, NodeStatus, SubscriberBlockReason, SubscriberStatus, Subscription } from '@zako/contracts';
+import { t, type MessageKey } from '../i18n';
 
 export type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger';
 
@@ -7,55 +8,57 @@ export interface StatusDescriptor {
 	tag: TagType;
 }
 
-const NODE_STATUS: Record<NodeStatus, StatusDescriptor> = {
-	online: { label: '在线', tag: 'success' },
-	degraded: { label: '异常', tag: 'warning' },
-	offline: { label: '离线', tag: 'info' },
-	disabled: { label: '停用', tag: 'danger' },
-	uninstalling: { label: '正在卸载', tag: 'warning' },
+const NODE_STATUS_META: Record<NodeStatus, { key: MessageKey; tag: TagType }> = {
+	online: { key: 'status.node.online', tag: 'success' },
+	degraded: { key: 'status.node.degraded', tag: 'warning' },
+	offline: { key: 'status.node.offline', tag: 'info' },
+	disabled: { key: 'status.node.disabled', tag: 'danger' },
+	uninstalling: { key: 'status.node.uninstalling', tag: 'warning' },
 };
 
-const SUBSCRIBER_STATUS: Record<SubscriberStatus, StatusDescriptor> = {
-	active: { label: '正常', tag: 'success' },
-	limited: { label: '超限', tag: 'warning' },
-	expired: { label: '已到期', tag: 'danger' },
-	disabled: { label: '停用', tag: 'info' },
+const SUBSCRIBER_STATUS_META: Record<SubscriberStatus, { key: MessageKey; tag: TagType }> = {
+	active: { key: 'status.subscriber.active', tag: 'success' },
+	limited: { key: 'status.subscriber.limited', tag: 'warning' },
+	expired: { key: 'status.subscriber.expired', tag: 'danger' },
+	disabled: { key: 'status.subscriber.disabled', tag: 'info' },
 };
 
-const DISTRIBUTION_SKIP_REASON: Record<DistributionSkipReason, string> = {
-	disabled: '节点停用',
-	offline: '心跳过期',
-	unhealthy: 'Xray 不健康',
-	not_selected: '未在档案选择中',
-	no_endpoint: '无可用端点',
+const DISTRIBUTION_SKIP_REASON_KEY: Record<DistributionSkipReason, MessageKey> = {
+	disabled: 'status.distributionSkip.disabled',
+	offline: 'status.distributionSkip.offline',
+	unhealthy: 'status.distributionSkip.unhealthy',
+	not_selected: 'status.distributionSkip.not_selected',
+	no_endpoint: 'status.distributionSkip.no_endpoint',
 };
 
-const SUBSCRIBER_BLOCK_REASON: Record<SubscriberBlockReason, string> = {
-	inactive: '用户未启用',
-	expired: '用户已到期',
-	over_quota: '流量已超额',
+const SUBSCRIBER_BLOCK_REASON_KEY: Record<SubscriberBlockReason, MessageKey> = {
+	inactive: 'status.subscriberBlock.inactive',
+	expired: 'status.subscriberBlock.expired',
+	over_quota: 'status.subscriberBlock.over_quota',
 };
 
 export function nodeStatusDescriptor(status: NodeStatus): StatusDescriptor {
-	return NODE_STATUS[status];
+	const meta = NODE_STATUS_META[status];
+	return { label: t(meta.key), tag: meta.tag };
 }
 
 export function subscriberStatusDescriptor(status: SubscriberStatus): StatusDescriptor {
-	return SUBSCRIBER_STATUS[status];
+	const meta = SUBSCRIBER_STATUS_META[status];
+	return { label: t(meta.key), tag: meta.tag };
 }
 
 export function distributionSkipReasonLabel(reason: DistributionSkipReason): string {
-	return DISTRIBUTION_SKIP_REASON[reason];
+	return t(DISTRIBUTION_SKIP_REASON_KEY[reason]);
 }
 
 export function subscriberBlockReasonLabel(reason: SubscriberBlockReason): string {
-	return SUBSCRIBER_BLOCK_REASON[reason];
+	return t(SUBSCRIBER_BLOCK_REASON_KEY[reason]);
 }
 
 /** Health flags are nullable until the Agent reports them. */
 export function healthDescriptor(healthy: boolean | null | undefined): StatusDescriptor {
-	if (healthy === true) return { label: '正常', tag: 'success' };
-	if (healthy === false) return { label: '异常', tag: 'danger' };
+	if (healthy === true) return { label: t('status.health.healthy'), tag: 'success' };
+	if (healthy === false) return { label: t('status.health.unhealthy'), tag: 'danger' };
 	return { label: '—', tag: 'info' };
 }
 
@@ -64,7 +67,9 @@ export function subscriptionStatusDescriptor(
 	subscription: Pick<Subscription, 'revoked_at' | 'expires_at'>,
 	nowMs = Date.now(),
 ): StatusDescriptor {
-	if (subscription.revoked_at !== null) return { label: '已撤销', tag: 'danger' };
-	if (subscription.expires_at !== null && subscription.expires_at * 1000 <= nowMs) return { label: '已到期', tag: 'warning' };
-	return { label: '有效', tag: 'success' };
+	if (subscription.revoked_at !== null) return { label: t('status.subscription.revoked'), tag: 'danger' };
+	if (subscription.expires_at !== null && subscription.expires_at * 1000 <= nowMs) {
+		return { label: t('status.subscription.expired'), tag: 'warning' };
+	}
+	return { label: t('status.subscription.active'), tag: 'success' };
 }

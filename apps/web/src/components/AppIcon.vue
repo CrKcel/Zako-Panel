@@ -13,7 +13,8 @@ export type IconName =
 	| 'copy'
 	| 'arrow-up'
 	| 'arrow-down'
-	| 'activity';
+	| 'activity'
+	| 'globe';
 
 withDefaults(
 	defineProps<{
@@ -102,6 +103,12 @@ withDefaults(
 		<template v-else-if="name === 'activity'">
 			<circle cx="12" cy="12" r="9" />
 			<polyline points="12 7 12 12 15 14" />
+		</template>
+		<template v-else-if="name === 'globe'">
+			<circle cx="12" cy="12" r="9" />
+			<path d="M3 12h18" />
+			<path d="M12 3a14 14 0 0 1 0 18" />
+			<path d="M12 3a14 14 0 0 0 0 18" />
 		</template>
 	</svg>
 </template>

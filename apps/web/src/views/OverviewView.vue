@@ -11,8 +11,11 @@ import { useAsyncResource } from '../composables/useAsyncResource';
 import { usePolling } from '../composables/usePolling';
 import { nodeStatusDescriptor } from '../domain/status';
 import { DAY_SECONDS, trafficWindow } from '../domain/traffic';
+import { useI18n } from '../i18n';
 import { showError } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
+
+const { t } = useI18n();
 
 const {
 	data: nodes,
@@ -21,7 +24,7 @@ const {
 } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	immediate: false,
 	initialValue: [],
-	onError: (error) => showError(error, '节点加载失败'),
+	onError: (error) => showError(error, t('overview.loadNodesError')),
 });
 
 const {
@@ -31,16 +34,16 @@ const {
 } = useAsyncResource<TrafficSummary | null>(() => trafficApi.summary({ ...trafficWindow(DAY_SECONDS), groupBy: 'site' }), {
 	immediate: false,
 	initialValue: null,
-	onError: (error) => showError(error, '流量加载失败'),
+	onError: (error) => showError(error, t('overview.loadTrafficError')),
 });
 
 const stats = computed<Array<{ label: string; value: number; tone: StatTone }>>(() => {
 	const count = (status: Node['status']): number => nodes.value.filter((node) => node.status === status).length;
 	return [
-		{ label: '节点总数', value: nodes.value.length, tone: 'primary' },
-		{ label: '在线节点', value: count('online'), tone: 'success' },
-		{ label: '异常节点', value: count('degraded'), tone: 'warning' },
-		{ label: '离线节点', value: count('offline'), tone: 'danger' },
+		{ label: t('overview.totalNodes'), value: nodes.value.length, tone: 'primary' },
+		{ label: t('overview.onlineNodes'), value: count('online'), tone: 'success' },
+		{ label: t('overview.degradedNodes'), value: count('degraded'), tone: 'warning' },
+		{ label: t('overview.offlineNodes'), value: count('offline'), tone: 'danger' },
 	];
 });
 
@@ -63,22 +66,22 @@ const { refresh } = usePolling(async () => {
 		<StatCard v-for="stat in stats" :key="stat.label" :label="stat.label" :value="stat.value" :tone="stat.tone" />
 	</div>
 
-	<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" title="近 24 小时流量" />
+	<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" :title="t('overview.trafficLast24h')" />
 
 	<el-card shadow="never">
 		<template #header>
 			<div class="ui-card-header">
-				<span class="ui-card-title">最近异常</span>
-				<el-button size="small" :loading="nodeLoading || trafficLoading" @click="refresh">刷新</el-button>
+				<span class="ui-card-title">{{ t('overview.recentIssues') }}</span>
+				<el-button size="small" :loading="nodeLoading || trafficLoading" @click="refresh">{{ t('common.refresh') }}</el-button>
 			</div>
 		</template>
-		<el-table v-loading="nodeLoading" :data="anomalies" empty-text="所有节点运行正常">
-			<el-table-column label="节点" min-width="180">
+		<el-table v-loading="nodeLoading" :data="anomalies" :empty-text="t('overview.allNodesHealthy')">
+			<el-table-column :label="t('overview.node')" min-width="180">
 				<template #default="{ row }">
 					<RouterLink :to="`/nodes/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column label="状态" width="110">
+			<el-table-column :label="t('common.status')" width="130">
 				<template #default="{ row }">
 					<StatusBadge
 						:label="nodeStatusDescriptor(row.status as Node['status']).label"
@@ -86,12 +89,12 @@ const { refresh } = usePolling(async () => {
 					/>
 				</template>
 			</el-table-column>
-			<el-table-column label="最近心跳" width="180">
+			<el-table-column :label="t('overview.lastHeartbeat')" width="180">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.last_seen_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column label="错误" min-width="260">
+			<el-table-column :label="t('overview.error')" min-width="260">
 				<template #default="{ row }">
 					<span :class="{ 'error-text': Boolean(row.last_config_error) }">{{ row.last_config_error ?? '—' }}</span>
 				</template>

@@ -39,5 +39,5 @@ export function renderClashDocument(
 	document.proxies = proxies;
 	document['proxy-groups'] = proxyGroups.length > 0 ? proxyGroups : defaultProxyGroups(proxyNames);
 	document.rules = rules.length > 0 ? rules : DEFAULT_RULES;
-	return stringify(document, { lineWidth: 0 });
+	return stringify(document, { lineWidth: 0, aliasDuplicateObjects: false });
 }

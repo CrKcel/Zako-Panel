@@ -653,10 +653,12 @@ export interface components {
         ProxyGroup: {
             name: string;
             /** @enum {string} */
-            type: "select" | "url-test" | "fallback" | "load-balance";
+            type: "select" | "url-test" | "fallback" | "load-balance" | "relay" | "smart";
             proxies?: string[];
             url?: string;
             interval?: number;
+        } & {
+            [key: string]: unknown;
         };
         Profile: {
             id: string;

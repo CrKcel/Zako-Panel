@@ -11,8 +11,10 @@ import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import {
 	buildProfilePayload,
+	DEFAULT_MIHOMO_YAML_TEMPLATE,
 	emptyProfileForm,
 	profileFormFrom,
+	PROXY_GROUP_TYPES,
 	type ProfileFormError,
 	type ProfileFormState,
 } from '../domain/profile-form';
@@ -23,16 +25,34 @@ import { formatTimestamp } from '../utils/format';
 
 const { t } = useI18n();
 
-const PARSE_ERROR_KEY: Record<ProfileFormError, 'profiles.form.clashBaseError' | 'profiles.form.proxyGroupsError'> = {
-	clash_base: 'profiles.form.clashBaseError',
-	proxy_groups: 'profiles.form.proxyGroupsError',
-};
-
 const form = ref<ProfileFormState>(emptyProfileForm());
 const formRef = ref<FormInstance>();
+const yamlError = ref('');
 const previewVisible = ref(false);
 const preview = ref<ClashPreview | null>(null);
 const previewName = ref('');
+
+function formatFormError(error: ProfileFormError): string {
+	switch (error.code) {
+		case 'yamlSyntax':
+			return t('profiles.form.yamlSyntaxError', { message: error.message });
+		case 'yamlRoot':
+			return t('profiles.form.yamlRootError');
+		case 'proxyGroupsArray':
+			return t('profiles.form.proxyGroupsArrayError');
+		case 'proxyGroupItem':
+			return t('profiles.form.proxyGroupItemError', {
+				index: error.index,
+				types: PROXY_GROUP_TYPES.join(', '),
+			});
+		case 'proxyGroupProxies':
+			return t('profiles.form.proxyGroupProxiesError', { index: error.index });
+		case 'rulesArray':
+			return t('profiles.form.rulesArrayError');
+		case 'ruleEmpty':
+			return t('profiles.form.ruleEmptyError', { index: error.index });
+	}
+}
 
 const {
 	data: profiles,
@@ -62,21 +82,31 @@ const {
 	submit: submitDialog,
 } = useCrudDialog({
 	reset: () => {
+		yamlError.value = '';
 		form.value = emptyProfileForm();
 	},
 	load: async (id) => {
+		yamlError.value = '';
 		form.value = profileFormFrom(await profilesApi.get(id));
 	},
 	onError: (error) => showError(error, t('profiles.loadError')),
 });
 
+function fillDefaultTemplate(): void {
+	yamlError.value = '';
+	form.value.clash_yaml = DEFAULT_MIHOMO_YAML_TEMPLATE;
+}
+
 async function submit(): Promise<void> {
 	if (!(await formRef.value?.validate().catch(() => false))) return;
 	const result = buildProfilePayload(form.value);
 	if (!result.ok) {
-		showValidationError(t(PARSE_ERROR_KEY[result.error]));
+		const message = formatFormError(result.error);
+		yamlError.value = message;
+		showValidationError(message);
 		return;
 	}
+	yamlError.value = '';
 	const profileId = editingId.value;
 	const saved = await submitDialog(
 		async () => {
@@ -185,7 +215,7 @@ async function remove(profile: Profile): Promise<void> {
 	<el-dialog
 		v-model="dialogVisible"
 		:title="editingId === null ? t('profiles.create') : t('profiles.edit')"
-		width="740px"
+		width="780px"
 		:close-on-click-modal="false"
 		destroy-on-close
 	>
@@ -210,14 +240,22 @@ async function remove(profile: Profile): Promise<void> {
 			<el-form-item :label="t('profiles.form.onlineOnly')" prop="online_only">
 				<el-switch v-model="form.online_only" />
 			</el-form-item>
-			<el-form-item label="clash_base" prop="clash_base">
-				<el-input v-model="form.clash_base" type="textarea" :rows="5" class="code-input" />
-			</el-form-item>
-			<el-form-item label="proxy_groups" prop="proxy_groups">
-				<el-input v-model="form.proxy_groups" type="textarea" :rows="6" class="code-input" />
-			</el-form-item>
-			<el-form-item label="rules" prop="rules">
-				<el-input v-model="form.rules" type="textarea" :rows="6" class="code-input" />
+			<el-form-item :label="t('profiles.form.clashYaml')" prop="clash_yaml">
+				<div class="yaml-editor-wrap">
+					<div class="editor-toolbar">
+						<el-button size="small" @click="fillDefaultTemplate">{{ t('profiles.form.loadTemplate') }}</el-button>
+						<span class="hint">{{ t('profiles.form.yamlHint') }}</span>
+					</div>
+					<el-input
+						v-model="form.clash_yaml"
+						type="textarea"
+						:rows="16"
+						class="code-input"
+						:placeholder="DEFAULT_MIHOMO_YAML_TEMPLATE"
+						@input="yamlError = ''"
+					/>
+					<div v-if="yamlError" class="yaml-error">{{ yamlError }}</div>
+				</div>
 			</el-form-item>
 		</el-form>
 		<template #footer>
@@ -261,6 +299,32 @@ async function remove(profile: Profile): Promise<void> {
 <style scoped>
 .full-width {
 	width: 100%;
+}
+
+.yaml-editor-wrap {
+	width: 100%;
+}
+
+.editor-toolbar {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.hint {
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text-muted);
+}
+
+.yaml-error {
+	margin-top: 6px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--tone-danger-text);
+	font-family: var(--font-mono);
+	white-space: pre-wrap;
 }
 
 .code-input :deep(textarea) {

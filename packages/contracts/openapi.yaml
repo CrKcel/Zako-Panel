@@ -1783,13 +1783,14 @@ components:
           enum: [tcp]
     ProxyGroup:
       type: object
+      additionalProperties: true
       required: [name, type]
       properties:
         name:
           type: string
         type:
           type: string
-          enum: [select, url-test, fallback, load-balance]
+          enum: [select, url-test, fallback, load-balance, relay, smart]
         proxies:
           type: array
           items:

@@ -55,13 +55,15 @@ export const updateNodeSchema = z
 	})
 	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
 
-export const proxyGroupSchema = z.object({
-	name: z.string().trim().min(1).max(64),
-	type: z.enum(['select', 'url-test', 'fallback', 'load-balance']),
-	proxies: z.array(z.string()).optional(),
-	url: z.string().optional(),
-	interval: z.number().int().positive().optional(),
-});
+export const proxyGroupSchema = z
+	.object({
+		name: z.string().trim().min(1).max(64),
+		type: z.enum(['select', 'url-test', 'fallback', 'load-balance', 'relay', 'smart']),
+		proxies: z.array(z.string()).optional(),
+		url: z.string().optional(),
+		interval: z.number().int().positive().optional(),
+	})
+	.passthrough();
 
 export const createProfileSchema = z.object({
 	name: z.string().trim().min(1).max(64),

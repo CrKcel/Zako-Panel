@@ -1,5 +1,8 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+import { renderClashDocument } from '../src/renderers/clash';
+import { createProfileSchema } from '../src/routes/schemas';
 import { createProfile, deleteProfile, getProfile, listProfiles, updateProfile } from '../src/services/profile-service';
 import { seedNode, seedProfile, seedSubscriber, seedSubscription, testToken } from './helpers';
 
@@ -98,5 +101,36 @@ describe('profile management', () => {
 		const removable = await seedProfile({ name: 'Removable' });
 		await deleteProfile(env.DB, removable);
 		await expect(getProfile(env.DB, removable)).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('preserves Mihomo proxy-group fields and types through validation and rendering', async () => {
+		const parsed = createProfileSchema.parse({
+			name: 'Mihomo',
+			clash_base: { 'mixed-port': 7890, mode: 'rule' },
+			proxy_groups: [
+				{ name: 'PROXY', type: 'select', proxies: ['AUTO'], 'include-all': true },
+				{
+					name: 'AUTO',
+					type: 'url-test',
+					'include-all': true,
+					filter: '(?i)hk',
+					url: 'https://www.gstatic.com/generate_204',
+					interval: 300,
+					tolerance: 50,
+				},
+				{ name: 'SMART', type: 'smart', 'include-all': true },
+			],
+			rules: ['MATCH,PROXY'],
+		});
+
+		const created = await createProfile(env.DB, parsed);
+		expect(created.proxy_groups).toEqual(parsed.proxy_groups);
+
+		const rendered = parse(
+			renderClashDocument(created.clash_base, [{ name: 'HK-01', type: 'vless' }], created.proxy_groups, created.rules),
+		) as Record<string, unknown>;
+		expect(rendered['proxy-groups']).toEqual(parsed.proxy_groups);
+		expect(rendered['mixed-port']).toBe(7890);
+		expect(rendered.rules).toEqual(['MATCH,PROXY']);
 	});
 });

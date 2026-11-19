@@ -18,9 +18,9 @@ import {
 import type { ListQuery, Paginated } from '../types';
 import { toProfile, toProfileDetail } from './profile-mapping';
 
-const MAX_RULES = 200;
+const MAX_RULES = 2000;
 const MAX_RULE_LENGTH = 512;
-const MAX_GROUPS = 50;
+const MAX_GROUPS = 100;
 
 function profileNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Profile not found', 404);

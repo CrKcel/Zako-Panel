@@ -22,6 +22,9 @@ export interface NodeRow {
 	applied_config_version: number;
 	last_config_error: string | null;
 	last_config_at: number | null;
+	desired_agent_version: string | null;
+	last_update_error: string | null;
+	last_update_at: number | null;
 	uninstall_requested_at: number | null;
 	uninstall_remove_xray: number;
 	created_at: number;
@@ -32,6 +35,8 @@ export interface NodeRuntimeRow {
 	id: string;
 	heartbeat_interval_seconds: number;
 	desired_config_version: number;
+	desired_agent_version: string | null;
+	agent_version: string | null;
 	uninstall_requested_at: number | null;
 	uninstall_remove_xray: number;
 }
@@ -65,7 +70,8 @@ export interface NodeHeartbeatInput {
 const NODE_COLUMNS = `id, name, enabled, heartbeat_interval_seconds, last_seen_at,
 	xray_healthy, stats_healthy, agent_version, xray_version, sys_json,
 	desired_config_version, applied_config_version, last_config_error,
-	last_config_at, uninstall_requested_at, uninstall_remove_xray, created_at, updated_at`;
+	last_config_at, desired_agent_version, last_update_error, last_update_at,
+	uninstall_requested_at, uninstall_remove_xray, created_at, updated_at`;
 
 export async function findAgentAuthById(db: D1Database, nodeId: string): Promise<AgentAuthRow | null> {
 	const row = await db
@@ -83,7 +89,7 @@ export async function findNodeById(db: D1Database, nodeId: string): Promise<Node
 export async function findNodeRuntimeById(db: D1Database, nodeId: string): Promise<NodeRuntimeRow | null> {
 	const row = await db
 		.prepare(
-			'SELECT id, heartbeat_interval_seconds, desired_config_version, uninstall_requested_at, uninstall_remove_xray FROM nodes WHERE id = ? LIMIT 1',
+			'SELECT id, heartbeat_interval_seconds, desired_config_version, desired_agent_version, agent_version, uninstall_requested_at, uninstall_remove_xray FROM nodes WHERE id = ? LIMIT 1',
 		)
 		.bind(nodeId)
 		.first<NodeRuntimeRow>();
@@ -161,6 +167,58 @@ export async function markNodeUninstalling(db: D1Database, nodeId: string, remov
 export async function deleteNodeById(db: D1Database, nodeId: string): Promise<number> {
 	const result = await db.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
 	return result.meta.changes;
+}
+
+export async function setDesiredAgentVersion(db: D1Database, nodeId: string, targetVersion: string, now: number): Promise<void> {
+	await db
+		.prepare(
+			`UPDATE nodes
+			 SET desired_agent_version = ?,
+			     last_update_error = NULL,
+			     updated_at = ?
+			 WHERE id = ?`,
+		)
+		.bind(targetVersion, now, nodeId)
+		.run();
+}
+
+export async function recordAgentUpdateOutcome(
+	db: D1Database,
+	nodeId: string,
+	input: {
+		status: 'applied' | 'failed';
+		targetVersion: string;
+		reportedAt: number;
+		error: string | null;
+		now: number;
+	},
+): Promise<void> {
+	if (input.status === 'applied') {
+		await db
+			.prepare(
+				`UPDATE nodes
+				 SET agent_version = ?,
+				     desired_agent_version = CASE WHEN desired_agent_version = ? THEN NULL ELSE desired_agent_version END,
+				     last_update_error = NULL,
+				     last_update_at = ?,
+				     updated_at = ?
+				 WHERE id = ?`,
+			)
+			.bind(input.targetVersion, input.targetVersion, input.reportedAt, input.now, nodeId)
+			.run();
+		return;
+	}
+	await db
+		.prepare(
+			`UPDATE nodes
+			 SET desired_agent_version = CASE WHEN desired_agent_version = ? THEN NULL ELSE desired_agent_version END,
+			     last_update_error = ?,
+			     last_update_at = ?,
+			     updated_at = ?
+			 WHERE id = ?`,
+		)
+		.bind(input.targetVersion, input.error, input.reportedAt, input.now, nodeId)
+		.run();
 }
 
 export function updateNodeHeartbeatStatement(db: D1Database, input: NodeHeartbeatInput): D1PreparedStatement {

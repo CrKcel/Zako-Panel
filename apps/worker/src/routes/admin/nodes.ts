@@ -11,6 +11,7 @@ import {
 	listEndpoints,
 	listNodeClients,
 	listNodes,
+	requestNodeAgentUpdate,
 	rotateAgentToken,
 	updateEndpoint,
 	updateNode,
@@ -22,6 +23,7 @@ import {
 	deleteNodeQuerySchema,
 	listQuerySchema,
 	pathId,
+	requestNodeAgentUpdateSchema,
 	updateEndpointSchema,
 	updateNodeSchema,
 } from '../schemas';
@@ -66,6 +68,13 @@ nodeRoutes.delete('/:nodeId', async (c) => {
 nodeRoutes.post('/:nodeId/agent-token/rotate', async (c) => {
 	const nodeId = pathId(c, 'nodeId');
 	return ok(c, await rotateAgentToken(c.env.DB, nodeId));
+});
+
+nodeRoutes.post('/:nodeId/agent-update', async (c) => {
+	const nodeId = pathId(c, 'nodeId');
+	const input = await readJson(c, requestNodeAgentUpdateSchema);
+	const node = await requestNodeAgentUpdate(c.env.DB, nodeId, input.target_version, c.get('admin')?.email ?? null);
+	return ok(c, node, 202);
 });
 
 nodeRoutes.get('/:nodeId/status', async (c) => {

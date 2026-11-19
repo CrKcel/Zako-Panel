@@ -1,4 +1,5 @@
 import type {
+	AgentUpdateResult,
 	CreateEndpointRequest,
 	CreateNodeRequest,
 	Endpoint,
@@ -31,6 +32,8 @@ import {
 	insertNodeStatement,
 	listNodeRows,
 	markNodeUninstalling,
+	recordAgentUpdateOutcome,
+	setDesiredAgentVersion,
 	updateAgentTokenHash,
 	updateNode as updateNodeRow,
 	type NodeRow,
@@ -88,6 +91,9 @@ export async function prepareNodeProvision(
 		applied_config_version: 0,
 		last_config_error: null,
 		last_config_at: null,
+		desired_agent_version: null,
+		last_update_error: null,
+		last_update_at: null,
 		uninstall_requested_at: null,
 		uninstall_remove_xray: 0,
 		created_at: params.now,
@@ -200,6 +206,9 @@ function toNode(row: NodeRow, now: number): Node {
 		applied_config_version: row.applied_config_version,
 		last_config_error: row.last_config_error,
 		last_config_at: row.last_config_at,
+		desired_agent_version: row.desired_agent_version,
+		last_update_error: row.last_update_error,
+		last_update_at: row.last_update_at,
 		uninstall_requested_at: row.uninstall_requested_at,
 		uninstall_remove_xray: row.uninstall_remove_xray === 1,
 		created_at: row.created_at,
@@ -487,4 +496,86 @@ export async function completeAgentUninstall(db: D1Database, nodeId: string, rea
 		detail_json: JSON.stringify({ reason, name: existing.name }),
 		created_at: now,
 	});
+}
+
+function normalizeAgentVersion(raw: string): string {
+	const trimmed = raw.trim().replace(/^[vV]/, '');
+	if (!/^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$/.test(trimmed)) {
+		throw new AppError('BAD_REQUEST', 'Invalid agent version format', 400);
+	}
+	return trimmed;
+}
+
+/**
+ * Sets desired_agent_version on a node so its agent receives a self_update
+ * directive on the next heartbeat.
+ */
+export async function requestNodeAgentUpdate(
+	db: D1Database,
+	nodeId: string,
+	targetVersion: string,
+	actorEmail: string | null,
+): Promise<Node> {
+	const existing = await findNodeById(db, nodeId);
+	if (!existing) throw nodeNotFound();
+	if (existing.uninstall_requested_at !== null) {
+		throw new AppError('CONFLICT', 'Node is uninstalling', 409);
+	}
+
+	const normalized = normalizeAgentVersion(targetVersion);
+	const now = nowSeconds();
+	await setDesiredAgentVersion(db, nodeId, normalized, now);
+	await insertAuditEvent(db, {
+		id: newId(),
+		actor_email: actorEmail,
+		action: 'node.agent_update_request',
+		target_type: 'node',
+		target_id: nodeId,
+		detail_json: JSON.stringify({ target_version: normalized, name: existing.name }),
+		created_at: now,
+	});
+	const updated = await findNodeById(db, nodeId);
+	if (!updated) throw nodeNotFound();
+	return toNode(updated, now);
+}
+
+/**
+ * Records the outcome of a node-side agent self-update attempt.
+ */
+export async function recordAgentUpdateResult(db: D1Database, nodeId: string, result: AgentUpdateResult): Promise<AgentUpdateResult> {
+	const existing = await findNodeById(db, nodeId);
+	if (!existing) throw nodeNotFound();
+
+	const normalized = normalizeAgentVersion(result.target_version);
+	const now = nowSeconds();
+	const errorText = result.error ? `${result.error.code}: ${result.error.message}`.slice(0, 512) : null;
+
+	await recordAgentUpdateOutcome(db, nodeId, {
+		status: result.status,
+		targetVersion: normalized,
+		reportedAt: result.reported_at,
+		error: errorText,
+		now,
+	});
+
+	await insertAuditEvent(db, {
+		id: newId(),
+		actor_email: null,
+		action: result.status === 'applied' ? 'node.agent_update_applied' : 'node.agent_update_failed',
+		target_type: 'node',
+		target_id: nodeId,
+		detail_json: JSON.stringify({
+			target_version: normalized,
+			status: result.status,
+			error: result.error ?? null,
+		}),
+		created_at: now,
+	});
+
+	return {
+		target_version: normalized,
+		status: result.status,
+		reported_at: result.reported_at,
+		error: result.error ?? null,
+	};
 }

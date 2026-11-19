@@ -91,5 +91,6 @@ Agent 不以 `root` 运行，而是用专用低权限用户 `zako-agent` 启动�
 - 私钥 `/etc/xray/reality.key` 和用户快照 `/var/lib/zako-agent/users.json` 权限都是 `0600`，仅 `zako-agent` 可读。
 - 重启 Xray 不靠 `sudo`，而是通过一条专用 polkit 规则（`/etc/polkit-1/rules.d/50-zako-agent-xray.rules`），只允许 `zako-agent` 执行 `systemctl restart xray.service`。
 - 远程自卸载同样通过该 polkit 规则授权：收到控制面 `uninstall` 指令后，Agent 向 `/api/v1/agent/uninstall` 回传确认，再触发以 `root` 运行的 `zako-agent-uninstall.service` 完成系统目录、systemd 单元、polkit 规则与服务账号的清理。
+- **Agent 自动更新（权限隔离 + 失败回滚）**：管理员通过 `POST /api/v1/admin/nodes/:nodeId/agent-update` 指定目标版本后，控制面在心跳响应中下发 `self_update` 指令。低权限 `zako-agent` 从同源 `/dl/agent/` 下载 `SHA256SUMS` 与对应架构归档、校验哈希、解压并执行 `--version` 预检，写入 `/var/lib/zako-agent/update/pending.json` 后通过 polkit 启动以 `root` 运行的 `zako-agent-update.service`（`zako-agent apply-update`）。提权单元备份旧二进制为 `.bak`、原子替换并重启 `zako-agent.service`，在观察期内校验服务存活；若启动失败则自动还原 `.bak` 并重启旧版本，同时通过 `/api/v1/agent/update/result` 回传状态并在 BoltDB 中抑制同一失败版本的重复尝试。
 
 > 节点上排查问题时，主要看 `journalctl -u zako-agent -f` 和 `journalctl -u xray -f`。

@@ -78,6 +78,9 @@ const (
 	// KeyFailedConfigVersion records the latest config version that failed to apply
 	// so the agent does not repeatedly restart Xray for the same broken version.
 	KeyFailedConfigVersion MetadataKey = "failed_config_version"
+	// KeyFailedAgentVersion records the latest agent version that failed to apply
+	// or rolled back so the agent does not repeatedly retry the same broken version.
+	KeyFailedAgentVersion MetadataKey = "failed_agent_version"
 )
 
 // Store is a BoltDB handle. It is safe for concurrent use by multiple goroutines
@@ -223,6 +226,44 @@ func (s *Store) SetMetaInt64(key MetadataKey, value int64) error {
 		return err
 	}
 	return nil
+}
+
+// MetaString returns the stored string value and whether the key exists.
+func (s *Store) MetaString(key MetadataKey) (value string, found bool, err error) {
+	err = s.View(func(tx *Tx) error {
+		if key == "" {
+			return errors.New("state: metadata key is required")
+		}
+		bucket, err := tx.bucket(bucketMeta)
+		if err != nil {
+			return err
+		}
+		raw := bucket.Get([]byte(key))
+		if raw == nil {
+			return nil
+		}
+		value = string(raw)
+		found = true
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return value, found, nil
+}
+
+// SetMetaString stores a string value atomically in its own transaction.
+func (s *Store) SetMetaString(key MetadataKey, value string) error {
+	if key == "" {
+		return errors.New("state: metadata key is required")
+	}
+	return s.Update(func(tx *Tx) error {
+		bucket, err := tx.bucket(bucketMeta)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(key), []byte(value))
+	})
 }
 
 func setMetaInt64(tx *Tx, key MetadataKey, value int64) error {

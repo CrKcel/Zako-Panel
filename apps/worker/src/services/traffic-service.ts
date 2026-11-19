@@ -40,18 +40,27 @@ async function responseFor(
 	runtime: NodeRuntimeRow,
 	ackReportId: string | null,
 	unknownUsers: number,
+	currentAgentVersion?: string,
 ): Promise<AgentReportResponse> {
-	const directives =
-		runtime.uninstall_requested_at !== null
-			? [
-					{
-						type: 'uninstall',
-						payload: {
-							remove_xray: runtime.uninstall_remove_xray === 1,
-						},
-					},
-				]
-			: [];
+	const directives: AgentReportResponse['directives'] = [];
+	if (runtime.uninstall_requested_at !== null) {
+		directives.push({
+			type: 'uninstall',
+			payload: {
+				remove_xray: runtime.uninstall_remove_xray === 1,
+			},
+		});
+	} else if (
+		runtime.desired_agent_version !== null &&
+		runtime.desired_agent_version !== (currentAgentVersion ?? runtime.agent_version ?? '')
+	) {
+		directives.push({
+			type: 'self_update',
+			payload: {
+				target_version: runtime.desired_agent_version,
+			},
+		});
+	}
 	return {
 		ack_report_id: ackReportId,
 		server_time: nowSeconds(),
@@ -104,7 +113,7 @@ export async function ingestReport(db: D1Database, nodeId: string, report: Agent
 	const mapped = new Map(mapping.map((row) => [row.xray_email, row]));
 
 	if (!traffic || payloadHash === null) {
-		return responseFor(db, runtime, null, 0);
+		return responseFor(db, runtime, null, 0, report.agent_version);
 	}
 
 	const unknownUsers = traffic.users.filter((user) => !mapped.has(user.xray_email)).length;
@@ -167,12 +176,12 @@ export async function ingestReport(db: D1Database, nodeId: string, report: Agent
 		const storedHash = await findReportHash(db, nodeId, traffic.report_id);
 		if (storedHash === null) throw error;
 		if (storedHash === payloadHash) {
-			return responseFor(db, runtime, traffic.report_id, unknownUsers);
+			return responseFor(db, runtime, traffic.report_id, unknownUsers, report.agent_version);
 		}
 		throw new AppError('REPORT_CONFLICT', 'Report id was already used with a different payload', 409);
 	}
 
-	return responseFor(db, runtime, traffic.report_id, unknownUsers);
+	return responseFor(db, runtime, traffic.report_id, unknownUsers, report.agent_version);
 }
 
 function invalidRange(message: string): AppError {

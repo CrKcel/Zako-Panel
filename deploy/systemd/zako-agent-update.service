@@ -1,0 +1,7 @@
+[Unit]
+Description=Zako Panel node agent self-updater
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/zako-agent apply-update --state-dir /var/lib/zako-agent --binary /usr/local/bin/zako-agent --unit zako-agent.service

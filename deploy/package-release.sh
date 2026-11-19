@@ -68,6 +68,7 @@ install -m 0755 "${REPO_ROOT}/deploy/lib/reality-key.sh" "${ROOT}/lib/reality-ke
 install -m 0755 "${REPO_ROOT}/deploy/lib/install-xray.sh" "${ROOT}/lib/install-xray.sh"
 install -m 0644 "${REPO_ROOT}/deploy/systemd/zako-agent.service" "${ROOT}/systemd/zako-agent.service"
 install -m 0644 "${REPO_ROOT}/deploy/systemd/zako-agent-uninstall.service" "${ROOT}/systemd/zako-agent-uninstall.service"
+install -m 0644 "${REPO_ROOT}/deploy/systemd/zako-agent-update.service" "${ROOT}/systemd/zako-agent-update.service"
 install -m 0644 "${REPO_ROOT}/deploy/polkit/50-zako-agent-xray.rules" "${ROOT}/polkit/50-zako-agent-xray.rules"
 install -m 0644 "${REPO_ROOT}/deploy/xray/config.example.json" "${ROOT}/xray/config.example.json"
 install -m 0755 "${REPO_ROOT}/deploy/xray/render-config.py" "${ROOT}/xray/render-config.py"

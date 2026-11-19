@@ -214,6 +214,20 @@ export const agentConfigResultSchema = z.object({
 		.optional(),
 });
 
+export const requestNodeAgentUpdateSchema = z.object({
+	target_version: z.string().trim().min(1).max(64),
+});
+
+export const agentUpdateResultSchema = z.object({
+	target_version: z.string().trim().min(1).max(64),
+	status: z.enum(['applied', 'failed']),
+	reported_at: unixSecondsSchema,
+	error: z
+		.object({ code: z.string().min(1).max(64), message: z.string().max(512) })
+		.nullable()
+		.optional(),
+});
+
 export const subscriptionEncodingSchema = z.object({
 	encoding: z.enum(['base64', 'plain']).default('base64'),
 });

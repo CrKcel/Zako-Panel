@@ -77,8 +77,10 @@ fi
 
 rm -f /etc/systemd/system/zako-agent.service \
 	/etc/systemd/system/zako-agent-uninstall.service \
+	/etc/systemd/system/zako-agent-update.service \
 	/etc/polkit-1/rules.d/50-zako-agent-xray.rules \
-	/usr/local/bin/zako-agent
+	/usr/local/bin/zako-agent \
+	/usr/local/bin/zako-agent.bak
 rm -rf "$(dirname -- "${CONFIG_PATH}")" /var/lib/zako-agent
 
 systemctl daemon-reload 2>/dev/null || true

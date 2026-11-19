@@ -27,6 +27,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/configsync"
 	"github.com/zako-panel/zako-agent/internal/initcmd"
 	"github.com/zako-panel/zako-agent/internal/reporter"
+	"github.com/zako-panel/zako-agent/internal/selfupdate"
 	"github.com/zako-panel/zako-agent/internal/state"
 	"github.com/zako-panel/zako-agent/internal/syncer"
 	"github.com/zako-panel/zako-agent/internal/sysinfo"
@@ -53,6 +54,9 @@ func run(logger *slog.Logger) error {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "uninstall" {
 		return uninstall.RunCLI(context.Background(), os.Args[2:], os.Stdout, os.Stderr)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "apply-update" {
+		return selfupdate.RunApplyCLI(context.Background(), os.Args[2:], os.Stdout, os.Stderr)
 	}
 
 	configPath := flag.String("config", "/etc/zako-agent/config.yaml", "path to the agent configuration file")
@@ -190,10 +194,26 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	updateManager, err := selfupdate.NewManager(selfupdate.Options{
+		BaseURL:        cfg.ControlPlaneURL,
+		CurrentVersion: version,
+		StateDir:       filepath.Dir(cfg.StatePath),
+		Client:         reporterClient,
+		Store:          store,
+		Logger:         logger.With("component", "selfupdate"),
+	})
+	if err != nil {
+		return err
+	}
+
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithCancel(sigCtx)
 	defer cancel()
+
+	if err := updateManager.ReportPendingOutcome(ctx); err != nil {
+		logger.Warn("report pending self-update outcome failed", "error", err)
+	}
 
 	var uninstallOnce sync.Once
 	reporterLoop, err := reporter.NewLoop(reporter.LoopOptions{
@@ -230,6 +250,12 @@ func run(logger *slog.Logger) error {
 						}()
 					})
 					return
+				}
+				if err := updateManager.ReportPendingOutcome(ctx); err != nil {
+					logger.Warn("report pending self-update outcome failed", "error", err)
+				}
+				if targetVersion, ok := selfupdate.ParseSelfUpdateDirective(resp.Directives); ok {
+					updateManager.Trigger(ctx, targetVersion)
 				}
 			}
 			userSyncer.Trigger()

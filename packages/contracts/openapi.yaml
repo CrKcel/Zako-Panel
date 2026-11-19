@@ -200,6 +200,44 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/admin/nodes/{nodeId}/agent-update:
+    post:
+      operationId: requestNodeAgentUpdate
+      tags: [admin]
+      summary: Request a node's agent to update to a target version
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestNodeAgentUpdateRequest'
+      responses:
+        '202':
+          description: Agent update requested; waiting for agent heartbeat and acknowledgement
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Node'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/admin/nodes/{nodeId}/agent-token/rotate:
     post:
       operationId: rotateAgentToken
@@ -1371,6 +1409,38 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/agent/update/result:
+    post:
+      operationId: reportAgentUpdateResult
+      tags: [agent]
+      summary: Report the outcome of an agent self-update
+      security:
+        - AgentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentUpdateResult'
+      responses:
+        '200':
+          description: Result accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentUpdateResult'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /sub/{token}/clash.yaml:
     get:
       operationId: getClashSubscription
@@ -1681,6 +1751,12 @@ components:
         last_config_error:
           type: [string, 'null']
         last_config_at:
+          type: [integer, 'null']
+        desired_agent_version:
+          type: [string, 'null']
+        last_update_error:
+          type: [string, 'null']
+        last_update_at:
           type: [integer, 'null']
         uninstall_requested_at:
           type: [integer, 'null']
@@ -2181,6 +2257,35 @@ components:
                 message:
                   type: string
             - type: 'null'
+    AgentUpdateResult:
+      type: object
+      required: [target_version, status, reported_at]
+      properties:
+        target_version:
+          type: string
+        status:
+          type: string
+          enum: [applied, failed]
+        reported_at:
+          type: integer
+        error:
+          oneOf:
+            - type: object
+              required: [code, message]
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+            - type: 'null'
+    RequestNodeAgentUpdateRequest:
+      type: object
+      required: [target_version]
+      properties:
+        target_version:
+          type: string
+          minLength: 1
+          maxLength: 64
     CreateNodeRequest:
       type: object
       required: [name, endpoint]

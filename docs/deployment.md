@@ -60,7 +60,9 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s
   ```
   脚本会在终端打印生成的公钥和 `short_id`。
-- **升级 Agent**：直接重跑一次不带 `--token` 的安装命令，然后重启服务即可：
+- **升级 Agent**：
+  - **远程自动更新**：调用 `POST /api/v1/admin/nodes/{nodeId}/agent-update`（传入 `target_version`），节点会在下次心跳收到 `self_update` 指令后自动从 `/dl/agent/` 下载校验、替换二进制并重启（失败自动回滚）。
+  - **手动升级**：直接重跑一次不带 `--token` 的安装命令，然后重启服务即可：
   ```bash
   sudo systemctl restart zako-agent
   ```

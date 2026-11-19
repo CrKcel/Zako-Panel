@@ -26,6 +26,7 @@ const (
 	DefaultBinaryPath        = "/usr/local/bin/zako-agent"
 	DefaultUnitPath          = "/etc/systemd/system/zako-agent.service"
 	DefaultUninstallUnitPath = "/etc/systemd/system/zako-agent-uninstall.service"
+	DefaultUpdateUnitPath    = "/etc/systemd/system/zako-agent-update.service"
 	DefaultPolkitRulePath    = "/etc/polkit-1/rules.d/50-zako-agent-xray.rules"
 	DefaultXrayUnitPath      = "/etc/systemd/system/xray.service"
 	DefaultXrayBinaryPath    = "/usr/local/bin/xray"
@@ -187,7 +188,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	for _, p := range []string{DefaultUnitPath, DefaultUninstallUnitPath, DefaultPolkitRulePath, DefaultBinaryPath} {
+	for _, p := range []string{DefaultUnitPath, DefaultUninstallUnitPath, DefaultUpdateUnitPath, DefaultPolkitRulePath, DefaultBinaryPath, DefaultBinaryPath + ".bak"} {
 		if err := opts.FS.Remove(p); err != nil {
 			return fmt.Errorf("remove %s: %w", p, err)
 		}

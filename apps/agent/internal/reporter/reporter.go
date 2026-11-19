@@ -26,6 +26,7 @@ const (
 	usersPath        = "/api/v1/agent/users"
 	configPath       = "/api/v1/agent/config"
 	configResultPath = "/api/v1/agent/config/result"
+	updateResultPath = "/api/v1/agent/update/result"
 	uninstallPath    = "/api/v1/agent/uninstall"
 	maxResponseSize  = 1 << 20
 )
@@ -144,6 +145,14 @@ type ConfigResult struct {
 type ConfigError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// UpdateResult reports the outcome of an agent self-update attempt.
+type UpdateResult struct {
+	TargetVersion string       `json:"target_version"`
+	Status        ConfigStatus `json:"status"`
+	ReportedAt    int64        `json:"reported_at"`
+	Error         *ConfigError `json:"error"`
 }
 
 // Meta carries the control plane request ID used for support and log correlation.
@@ -369,6 +378,21 @@ func (r *Reporter) ReportConfigResult(ctx context.Context, configResult *ConfigR
 	}
 	if err := result.httpError(); err != nil {
 		return fmt.Errorf("report config result: %w", err)
+	}
+	return nil
+}
+
+// ReportUpdateResult posts the outcome of an agent self-update attempt.
+func (r *Reporter) ReportUpdateResult(ctx context.Context, updateResult *UpdateResult) error {
+	if updateResult == nil {
+		return errors.New("reporter: update result is required")
+	}
+	result, err := r.do(ctx, http.MethodPost, updateResultPath, updateResult, nil)
+	if err != nil {
+		return fmt.Errorf("report update result: %w", err)
+	}
+	if err := result.httpError(); err != nil {
+		return fmt.Errorf("report update result: %w", err)
 	}
 	return nil
 }

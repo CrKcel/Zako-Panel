@@ -41,6 +41,23 @@ export interface paths {
         patch: operations["updateNode"];
         trace?: never;
     };
+    "/api/v1/admin/nodes/{nodeId}/agent-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a node's agent to update to a target version */
+        post: operations["requestNodeAgentUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/nodes/{nodeId}/agent-token/rotate": {
         parameters: {
             query?: never;
@@ -499,6 +516,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/update/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report the outcome of an agent self-update */
+        post: operations["reportAgentUpdateResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sub/{token}/clash.yaml": {
         parameters: {
             query?: never;
@@ -580,6 +614,9 @@ export interface components {
             applied_config_version: number;
             last_config_error?: string | null;
             last_config_at?: number | null;
+            desired_agent_version?: string | null;
+            last_update_error?: string | null;
+            last_update_at?: number | null;
             uninstall_requested_at?: number | null;
             uninstall_remove_xray?: boolean;
             created_at: number;
@@ -809,6 +846,19 @@ export interface components {
                 code: string;
                 message: string;
             } | null;
+        };
+        AgentUpdateResult: {
+            target_version: string;
+            /** @enum {string} */
+            status: "applied" | "failed";
+            reported_at: number;
+            error?: {
+                code: string;
+                message: string;
+            } | null;
+        };
+        RequestNodeAgentUpdateRequest: {
+            target_version: string;
         };
         CreateNodeRequest: {
             name: string;
@@ -1225,6 +1275,40 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    requestNodeAgentUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestNodeAgentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent update requested; waiting for agent heartbeat and acknowledgement */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Node"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     rotateAgentToken: {
@@ -2310,6 +2394,36 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    reportAgentUpdateResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUpdateResult"];
+            };
+        };
+        responses: {
+            /** @description Result accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentUpdateResult"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
         };
     };
     getClashSubscription: {

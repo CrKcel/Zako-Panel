@@ -21,5 +21,8 @@ polkit.addRule(function (action, subject) {
     if (action.lookup("unit") === "zako-agent-uninstall.service" && action.lookup("verb") === "start") {
         return polkit.Result.YES;
     }
+    if (action.lookup("unit") === "zako-agent-update.service" && action.lookup("verb") === "start") {
+        return polkit.Result.YES;
+    }
     return null;
 });

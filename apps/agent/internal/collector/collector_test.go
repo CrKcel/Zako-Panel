@@ -132,3 +132,30 @@ func TestNewCollectorValidatesDependencies(t *testing.T) {
 		t.Error("New accepted a nil handler")
 	}
 }
+
+func TestSampleOnceUpdatesHealthImmediately(t *testing.T) {
+	stats := &fakeStats{uptime: 5}
+	var samples int
+	collector := newTestCollector(t, stats, func(context.Context, Sample) error {
+		samples++
+		return nil
+	})
+
+	if !collector.SampleOnce(context.Background()) {
+		t.Fatal("SampleOnce() = false, want true when StatsReader succeeds")
+	}
+	if !collector.Healthy() {
+		t.Error("Healthy() = false after SampleOnce succeeded")
+	}
+	if samples != 1 {
+		t.Errorf("samples = %d, want 1", samples)
+	}
+
+	stats.setError(errors.New("xray starting"))
+	if collector.SampleOnce(context.Background()) {
+		t.Fatal("SampleOnce() = true, want false when StatsReader fails")
+	}
+	if collector.Healthy() {
+		t.Error("Healthy() = true after SampleOnce failed")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,7 @@ type Collector struct {
 	stats    xraycore.StatsReader
 	handle   Handler
 	logger   *slog.Logger
+	mu       sync.Mutex
 	healthy  atomic.Bool
 }
 
@@ -81,9 +83,19 @@ func (c *Collector) Healthy() bool {
 	return c.healthy.Load()
 }
 
+// SampleOnce runs one sample immediately and returns whether the StatsService
+// read succeeded.
+func (c *Collector) SampleOnce(ctx context.Context) bool {
+	c.runOnce(ctx)
+	return c.Healthy()
+}
+
 // runOnce samples and handles once. Health reflects the StatsService read only: a
 // handler failure is a local accounting problem, not a dead Xray.
 func (c *Collector) runOnce(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	sample, err := c.sample(ctx)
 	if err != nil {
 		// The reporter turns this into stats_healthy=false on the next heartbeat.

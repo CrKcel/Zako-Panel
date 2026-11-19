@@ -267,6 +267,11 @@ func run(logger *slog.Logger) error {
 		"xray_inbound_tag", cfg.XrayInboundTag,
 	)
 
+	// Warm up collector health and the accounting baseline before the first
+	// heartbeat fires, so a newly started node does not report degraded for a
+	// full heartbeat interval while waiting for the first 30s ticker.
+	primeCollector(ctx, collectorLoop, initialSampleAttempts, initialSampleRetryInterval)
+
 	var loops sync.WaitGroup
 	runLoop := func(name string, loop func(context.Context) error) {
 		loops.Add(1)
@@ -289,6 +294,39 @@ func run(logger *slog.Logger) error {
 	loops.Wait()
 	logger.Info("agent stopped")
 	return nil
+}
+
+const (
+	initialSampleAttempts      = 5
+	initialSampleRetryInterval = 500 * time.Millisecond
+)
+
+type initialSampler interface {
+	SampleOnce(context.Context) bool
+}
+
+// primeCollector establishes initial StatsService health and traffic baselines
+// before the reporter starts, retrying briefly in case xray.service is still
+// binding its loopback API port.
+func primeCollector(ctx context.Context, sampler initialSampler, attempts int, retryInterval time.Duration) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		if sampler.SampleOnce(ctx) || attempt == attempts {
+			return
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 // readToken trims the trailing newline commonly left by echo and rejects an empty

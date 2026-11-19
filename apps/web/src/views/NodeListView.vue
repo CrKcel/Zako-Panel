@@ -2,19 +2,18 @@
 import type { CreateNodeEnrollmentTokenRequest, Node, NodeEnrollmentToken } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
-import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
+import NodeCard from '../components/NodeCard.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
-import { nodeStatusDescriptor } from '../domain/status';
 import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
-import { formatPercent, formatTimestamp } from '../utils/format';
+import { formatTimestamp } from '../utils/format';
 
 interface EditForm {
 	name: string;
@@ -74,6 +73,13 @@ const filteredNodes = computed(() => {
 		return true;
 	});
 });
+
+const onlineCount = computed(() => nodes.value.filter((node) => node.status === 'online').length);
+
+function clearFilters(): void {
+	search.value = '';
+	statusFilter.value = 'all';
+}
 
 const { refresh } = usePolling(reload, 30_000);
 
@@ -252,101 +258,48 @@ async function submitDeleteNode(): Promise<void> {
 </script>
 
 <template>
-	<el-card shadow="never">
-		<PageToolbar spread>
-			<template #left>
-				<div class="filters">
-					<el-input v-model="search" :placeholder="t('nodes.searchPlaceholder')" clearable class="search-input" />
-					<el-select v-model="statusFilter" class="status-select">
-						<el-option :label="t('common.allStatuses')" value="all" />
-						<el-option :label="t('status.node.online')" value="online" />
-						<el-option :label="t('status.node.degraded')" value="degraded" />
-						<el-option :label="t('status.node.offline')" value="offline" />
-						<el-option :label="t('status.node.disabled')" value="disabled" />
-					</el-select>
-				</div>
-			</template>
-			<el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
-			<el-button @click="openEnrollList">{{ t('nodes.enrollmentTokens') }}</el-button>
-			<el-button type="primary" @click="openEnrollCreate">{{ t('nodes.deployNode') }}</el-button>
-		</PageToolbar>
+	<PageToolbar spread>
+		<template #left>
+			<div class="filters">
+				<el-input v-model="search" :placeholder="t('nodes.searchPlaceholder')" clearable class="search-input" />
+				<el-select v-model="statusFilter" class="status-select">
+					<el-option :label="t('common.allStatuses')" value="all" />
+					<el-option :label="t('status.node.online')" value="online" />
+					<el-option :label="t('status.node.degraded')" value="degraded" />
+					<el-option :label="t('status.node.offline')" value="offline" />
+					<el-option :label="t('status.node.disabled')" value="disabled" />
+					<el-option :label="t('status.node.uninstalling')" value="uninstalling" />
+				</el-select>
+				<span v-if="nodes.length > 0" class="nodes-summary tnum">
+					{{ t('nodes.summary', { total: nodes.length, online: onlineCount }) }}
+				</span>
+			</div>
+		</template>
+		<el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
+		<el-button @click="openEnrollList">{{ t('nodes.enrollmentTokens') }}</el-button>
+		<el-button type="primary" @click="openEnrollCreate">{{ t('nodes.deployNode') }}</el-button>
+	</PageToolbar>
 
-		<el-table v-loading="loading" :data="filteredNodes" :empty-text="t('nodes.empty')">
-			<el-table-column :label="t('common.name')" min-width="170">
-				<template #default="{ row }">
-					<RouterLink :to="`/nodes/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.status')" width="130">
-				<template #default="{ row }">
-					<StatusBadge
-						:label="nodeStatusDescriptor(row.status as Node['status']).label"
-						:type="nodeStatusDescriptor(row.status as Node['status']).tag"
-					/>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.heartbeatInterval')" width="105">
-				<template #default="{ row }">
-					<span class="tnum">{{ row.heartbeat_interval_seconds }}s</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.lastHeartbeat')" width="180">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatTimestamp(row.last_seen_at) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.agent')" width="120">
-				<template #default="{ row }">
-					<span class="mono">{{ row.agent_version ?? '—' }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.xray')" width="120">
-				<template #default="{ row }">
-					<span class="mono">{{ row.xray_version ?? '—' }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.cpu')" width="85">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatPercent(row.sys?.cpu) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.memory')" width="95">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatPercent(row.sys?.mem) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.columns.load')" width="85">
-				<template #default="{ row }">
-					<span class="tnum">{{ row.sys ? row.sys.load.toFixed(2) : '—' }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.enabled')" width="105">
-				<template #default="{ row }">
-					<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.actions')" width="280" fixed="right">
-				<template #default="{ row }">
-					<RouterLink :to="`/nodes/${row.id}`" custom v-slot="{ navigate }">
-						<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
-					</RouterLink>
-					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
-					<el-button
-						link
-						type="primary"
-						:disabled="row.status === 'uninstalling'"
-						:loading="rotateAction.isRunning(row.id)"
-						@click="rotateAgentToken(row as Node)"
-					>
-						{{ t('nodes.actions.rotateToken') }}
-					</el-button>
-					<el-button link type="danger" :loading="deleteAction.isRunning(row.id)" @click="openDeleteDialog(row as Node)">
-						{{ row.status === 'uninstalling' ? t('common.forceDelete') : t('common.delete') }}
-					</el-button>
-				</template>
-			</el-table-column>
-		</el-table>
-	</el-card>
+	<div v-loading="loading" class="nodes-stage">
+		<div v-if="filteredNodes.length > 0" class="nodes-grid">
+			<NodeCard
+				v-for="node in filteredNodes"
+				:key="node.id"
+				:node="node"
+				:rotating="rotateAction.isRunning(node.id)"
+				:deleting="deleteAction.isRunning(node.id)"
+				@edit="openEdit"
+				@rotate-token="rotateAgentToken"
+				@delete="openDeleteDialog"
+			/>
+		</div>
+		<el-card v-else-if="!loading" shadow="never" class="empty-card">
+			<el-empty :description="nodes.length === 0 ? t('nodes.empty') : t('nodes.emptyFiltered')">
+				<el-button v-if="nodes.length === 0" type="primary" @click="openEnrollCreate">{{ t('nodes.deployNode') }}</el-button>
+				<el-button v-else @click="clearFilters">{{ t('nodes.clearFilters') }}</el-button>
+			</el-empty>
+		</el-card>
+	</div>
 
 	<el-dialog v-model="editVisible" :title="t('nodes.editDialog.title')" width="520px" :close-on-click-modal="false" destroy-on-close>
 		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="150px">
@@ -503,6 +456,26 @@ async function submitDeleteNode(): Promise<void> {
 
 .status-select {
 	width: 140px;
+}
+
+.nodes-summary {
+	font-size: 12.5px;
+	color: var(--text-muted);
+	margin-left: 4px;
+}
+
+.nodes-stage {
+	min-height: 200px;
+}
+
+.nodes-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+	gap: 16px;
+}
+
+.empty-card {
+	padding: 12px 0;
 }
 
 .dialog-alert {

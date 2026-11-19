@@ -5,11 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zako-panel/zako-agent/internal/reporter"
 )
@@ -96,10 +100,13 @@ func TestRunKeepsXrayAndUserWhenXrayRemains(t *testing.T) {
 		Runner:     runner,
 		FS:         fs,
 		Geteuid:    func() int { return 0 },
-		NotifyFunc: func(_ context.Context, configPath string) error {
+		NotifyFunc: func(_ context.Context, configPath, reason string) error {
 			notified = true
 			if configPath != DefaultConfigPath {
 				t.Fatalf("configPath = %q, want %q", configPath, DefaultConfigPath)
+			}
+			if reason != reporter.UninstallReasonNodeCLI {
+				t.Fatalf("reason = %q, want %q", reason, reporter.UninstallReasonNodeCLI)
 			}
 			return nil
 		},
@@ -137,7 +144,7 @@ func TestRunRemovesXrayAndContinuesOnNotifyFailure(t *testing.T) {
 		Runner:     runner,
 		FS:         fs,
 		Geteuid:    func() int { return 0 },
-		NotifyFunc: func(_ context.Context, _ string) error {
+		NotifyFunc: func(_ context.Context, _, _ string) error {
 			return errors.New("panel unreachable")
 		},
 	})
@@ -184,6 +191,10 @@ func TestTriggerFromDirective(t *testing.T) {
 	if err := TriggerFromDirective(context.Background(), true, DefaultStateDir, runner, fs); err != nil {
 		t.Fatalf("TriggerFromDirective failed: %v", err)
 	}
+	ackMarker := filepath.Join(DefaultStateDir, PanelDirectiveMarkerName)
+	if _, ok := fs.written[ackMarker]; !ok {
+		t.Fatalf("expected ack marker %s to be written", ackMarker)
+	}
 	marker := filepath.Join(DefaultStateDir, RemoveXrayMarkerName)
 	if _, ok := fs.written[marker]; !ok {
 		t.Fatalf("expected marker %s to be written", marker)
@@ -191,5 +202,147 @@ func TestTriggerFromDirective(t *testing.T) {
 	want := []fakeCall{{name: "systemctl", args: []string{"start", "--no-block", UninstallUnitName}}}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %+v, want %+v", runner.calls, want)
+	}
+}
+
+type accessDeniedRunner struct{}
+
+func (accessDeniedRunner) Run(_ context.Context, name string, args ...string) error {
+	return errors.New("systemctl start --no-block zako-agent-uninstall.service: exit status 4 (Failed to start zako-agent-uninstall.service: Access denied)")
+}
+
+func TestTriggerFromDirectiveAccessDeniedCleansMarkers(t *testing.T) {
+	fs := newFakeFS()
+
+	err := TriggerFromDirective(context.Background(), true, DefaultStateDir, accessDeniedRunner{}, fs)
+	if err == nil {
+		t.Fatal("expected error when systemctl start fails")
+	}
+	if !strings.Contains(err.Error(), "polkitd") {
+		t.Fatalf("expected polkitd hint in error, got %v", err)
+	}
+	ackMarker := filepath.Join(DefaultStateDir, PanelDirectiveMarkerName)
+	marker := filepath.Join(DefaultStateDir, RemoveXrayMarkerName)
+	if fs.Exists(ackMarker) || fs.Exists(marker) {
+		t.Fatalf("expected markers to be cleaned up on trigger failure")
+	}
+}
+
+func TestRunLocalOnlyWithPanelMarkerNotifiesControlPlane(t *testing.T) {
+	runner := &fakeRunner{}
+	ackMarker := filepath.Join(DefaultStateDir, PanelDirectiveMarkerName)
+	fs := newFakeFS(DefaultXrayUnitPath, ackMarker)
+	var gotReason string
+
+	err := Run(context.Background(), Options{
+		ConfigPath: DefaultConfigPath,
+		LocalOnly:  true,
+		Runner:     runner,
+		FS:         fs,
+		Geteuid:    func() int { return 0 },
+		NotifyFunc: func(_ context.Context, _ string, reason string) error {
+			gotReason = reason
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if gotReason != reporter.UninstallReasonPanelDirective {
+		t.Fatalf("reason = %q, want %q", gotReason, reporter.UninstallReasonPanelDirective)
+	}
+	if fs.Exists(ackMarker) {
+		t.Fatalf("expected ack marker to be removed")
+	}
+}
+
+func TestRunLocalOnlyWithoutMarkerSkipsNotify(t *testing.T) {
+	runner := &fakeRunner{}
+	fs := newFakeFS(DefaultXrayUnitPath)
+	notified := false
+
+	err := Run(context.Background(), Options{
+		ConfigPath: DefaultConfigPath,
+		LocalOnly:  true,
+		Runner:     runner,
+		FS:         fs,
+		Geteuid:    func() int { return 0 },
+		NotifyFunc: func(_ context.Context, _, _ string) error {
+			notified = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if notified {
+		t.Fatal("expected local-only uninstall without marker to skip control plane notification")
+	}
+}
+
+func TestRunCLIRejectsInvalidReason(t *testing.T) {
+	err := RunCLI(context.Background(), []string{"--reason", "bogus"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid --reason") {
+		t.Fatalf("expected invalid --reason error, got %v", err)
+	}
+}
+
+func TestDirectiveCoordinatorRetriesOnFailureAndStopsOnSuccess(t *testing.T) {
+	var attempts atomic.Int32
+	dispatched := make(chan struct{}, 2)
+	done := make(chan struct{}, 4)
+
+	coord := &DirectiveCoordinator{
+		StateDir: DefaultStateDir,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Trigger: func(_ context.Context, _ bool, _ string) error {
+			n := attempts.Add(1)
+			done <- struct{}{}
+			if n == 1 {
+				return errors.New("Access denied")
+			}
+			return nil
+		},
+		OnDispatched: func() {
+			dispatched <- struct{}{}
+		},
+	}
+
+	coord.Handle(false)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first attempt")
+	}
+	// Give run() a moment to clear inProgress.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		coord.mu.Lock()
+		busy := coord.inProgress
+		coord.mu.Unlock()
+		if !busy {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("OnDispatched must not run when trigger fails")
+	default:
+	}
+
+	// Second attempt should be accepted and call OnDispatched.
+	coord.Handle(false)
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OnDispatched on retry")
+	}
+
+	// Subsequent directive after success must be ignored.
+	coord.Handle(false)
+	time.Sleep(20 * time.Millisecond)
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
 	}
 }

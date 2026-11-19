@@ -9,11 +9,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zako-panel/zako-agent/internal/config"
@@ -33,6 +35,7 @@ const (
 	DefaultXrayShareDir      = "/usr/local/share/xray"
 	DefaultXrayConfigDir     = "/etc/xray"
 	RemoveXrayMarkerName     = "uninstall-remove-xray"
+	PanelDirectiveMarkerName = "uninstall-ack-panel"
 	ServiceUser              = "zako-agent"
 	ServiceGroup             = "zako-agent"
 	UninstallUnitName        = "zako-agent-uninstall.service"
@@ -94,12 +97,13 @@ type Options struct {
 	ConfigPath string
 	RemoveXray bool
 	LocalOnly  bool
+	Reason     string
 	Stdout     io.Writer
 	Stderr     io.Writer
 	Runner     Runner
 	FS         FS
 	Geteuid    func() int
-	NotifyFunc func(ctx context.Context, configPath string) error
+	NotifyFunc func(ctx context.Context, configPath, reason string) error
 }
 
 // RunCLI parses `zako-agent uninstall` flags and executes the uninstall.
@@ -110,17 +114,24 @@ func RunCLI(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	configPath := fs.String("config", DefaultConfigPath, "path to the agent configuration file")
 	removeXray := fs.Bool("remove-xray", false, "also stop and remove Xray-core and /etc/xray")
 	localOnly := fs.Bool("local-only", false, "skip notifying the control plane before local cleanup")
+	reason := fs.String("reason", "", "uninstall reason reported to the control plane (node_cli or panel_directive)")
 	_ = fs.Bool("yes", true, "confirm uninstallation without prompting")
 	_ = fs.Bool("y", true, "confirm uninstallation without prompting")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	switch *reason {
+	case "", reporter.UninstallReasonNodeCLI, reporter.UninstallReasonPanelDirective:
+	default:
+		return fmt.Errorf("invalid --reason %q: must be %q or %q", *reason, reporter.UninstallReasonNodeCLI, reporter.UninstallReasonPanelDirective)
+	}
 
 	return Run(ctx, Options{
 		ConfigPath: *configPath,
 		RemoveXray: *removeXray,
 		LocalOnly:  *localOnly,
+		Reason:     *reason,
 		Stdout:     stdout,
 		Stderr:     stderr,
 	})
@@ -159,9 +170,26 @@ func Run(ctx context.Context, opts Options) error {
 		stateDir = filepath.Dir(cfg.StatePath)
 	}
 
-	if !opts.LocalOnly {
+	// Older zako-agent-uninstall.service units pass --local-only; the marker written
+	// by TriggerFromDirective ensures panel-initiated uninstalls still notify the
+	// control plane from the privileged unit after polkit authorization succeeds.
+	ackMarkerPath := filepath.Join(stateDir, PanelDirectiveMarkerName)
+	panelDirectiveAck := opts.FS.Exists(ackMarkerPath)
+	if panelDirectiveAck {
+		_ = opts.FS.Remove(ackMarkerPath)
+	}
+	reason := opts.Reason
+	if reason == "" {
+		if panelDirectiveAck {
+			reason = reporter.UninstallReasonPanelDirective
+		} else {
+			reason = reporter.UninstallReasonNodeCLI
+		}
+	}
+
+	if !opts.LocalOnly || panelDirectiveAck {
 		notifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := opts.NotifyFunc(notifyCtx, opts.ConfigPath)
+		err := opts.NotifyFunc(notifyCtx, opts.ConfigPath, reason)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "[zako-agent] warning: failed to notify control plane (%v); continuing local cleanup\n", err)
@@ -215,7 +243,10 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-func notifyControlPlane(ctx context.Context, configPath string) error {
+func notifyControlPlane(ctx context.Context, configPath, reason string) error {
+	if reason == "" {
+		reason = reporter.UninstallReasonNodeCLI
+	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -232,7 +263,7 @@ func notifyControlPlane(ctx context.Context, configPath string) error {
 	if err != nil {
 		return err
 	}
-	return rep.NotifyUninstall(ctx, reporter.UninstallReasonNodeCLI)
+	return rep.NotifyUninstall(ctx, reason)
 }
 
 // ParseUninstallDirective checks whether the report response directives include
@@ -253,8 +284,8 @@ func ParseUninstallDirective(directives []reporter.Directive) (triggered bool, r
 	return false, false
 }
 
-// TriggerFromDirective writes the optional remove-xray marker into the writable
-// state directory and starts the root-owned uninstall oneshot unit via polkit.
+// TriggerFromDirective writes the directive markers into the writable state
+// directory and starts the root-owned uninstall oneshot unit via polkit.
 func TriggerFromDirective(ctx context.Context, removeXray bool, stateDir string, runner Runner, fs FS) error {
 	if stateDir == "" {
 		stateDir = DefaultStateDir
@@ -265,16 +296,88 @@ func TriggerFromDirective(ctx context.Context, removeXray bool, stateDir string,
 	if fs == nil {
 		fs = osFS{}
 	}
+	ackMarkerPath := filepath.Join(stateDir, PanelDirectiveMarkerName)
+	if err := fs.WriteFile(ackMarkerPath, []byte("1\n"), 0o600); err != nil {
+		return fmt.Errorf("write uninstall ack marker: %w", err)
+	}
 	markerPath := filepath.Join(stateDir, RemoveXrayMarkerName)
 	if removeXray {
 		if err := fs.WriteFile(markerPath, []byte("1\n"), 0o600); err != nil {
+			_ = fs.Remove(ackMarkerPath)
 			return fmt.Errorf("write uninstall marker: %w", err)
 		}
 	} else {
 		_ = fs.Remove(markerPath)
 	}
 	if err := runner.Run(ctx, "systemctl", "start", "--no-block", UninstallUnitName); err != nil {
+		_ = fs.Remove(ackMarkerPath)
+		_ = fs.Remove(markerPath)
+		msg := err.Error()
+		if strings.Contains(msg, "Access denied") || strings.Contains(msg, "Interactive authentication required") {
+			return fmt.Errorf("start %s: %w (ensure polkitd is installed and %s exists)", UninstallUnitName, err, DefaultPolkitRulePath)
+		}
 		return fmt.Errorf("start %s: %w", UninstallUnitName, err)
 	}
 	return nil
+}
+
+// DirectiveCoordinator deduplicates in-flight panel uninstall triggers while
+// allowing retries on subsequent heartbeats if starting the unit fails.
+type DirectiveCoordinator struct {
+	StateDir     string
+	Trigger      func(ctx context.Context, removeXray bool, stateDir string) error
+	OnDispatched func()
+	Logger       *slog.Logger
+
+	mu         sync.Mutex
+	inProgress bool
+	dispatched bool
+}
+
+// Handle schedules local uninstallation when a directive is received. It calls
+// OnDispatched only after the privileged uninstall unit is successfully started;
+// failures leave the coordinator ready to retry on the next heartbeat.
+func (c *DirectiveCoordinator) Handle(removeXray bool) {
+	c.mu.Lock()
+	if c.inProgress || c.dispatched {
+		c.mu.Unlock()
+		return
+	}
+	c.inProgress = true
+	c.mu.Unlock()
+
+	go c.run(removeXray)
+}
+
+func (c *DirectiveCoordinator) run(removeXray bool) {
+	logger := c.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	triggerFn := c.Trigger
+	if triggerFn == nil {
+		triggerFn = func(ctx context.Context, rx bool, dir string) error {
+			return TriggerFromDirective(ctx, rx, dir, nil, nil)
+		}
+	}
+
+	logger.Info("uninstall directive received", "remove_xray", removeXray)
+	trigCtx, trigCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := triggerFn(trigCtx, removeXray, c.StateDir)
+	trigCancel()
+
+	c.mu.Lock()
+	c.inProgress = false
+	if err == nil {
+		c.dispatched = true
+	}
+	c.mu.Unlock()
+
+	if err != nil {
+		logger.Error("trigger uninstall unit failed; keeping agent running for retry", "error", err)
+		return
+	}
+	if c.OnDispatched != nil {
+		c.OnDispatched()
+	}
 }

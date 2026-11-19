@@ -215,7 +215,11 @@ func run(logger *slog.Logger) error {
 		logger.Warn("report pending self-update outcome failed", "error", err)
 	}
 
-	var uninstallOnce sync.Once
+	uninstallCoord := &uninstall.DirectiveCoordinator{
+		StateDir:     filepath.Dir(cfg.StatePath),
+		OnDispatched: cancel,
+		Logger:       logger.With("component", "uninstall"),
+	}
 	reporterLoop, err := reporter.NewLoop(reporter.LoopOptions{
 		Client:            reporterClient,
 		Store:             store,
@@ -232,23 +236,7 @@ func run(logger *slog.Logger) error {
 		OnResponse: func(resp *reporter.Response) {
 			if resp != nil {
 				if triggered, removeXray := uninstall.ParseUninstallDirective(resp.Directives); triggered {
-					uninstallOnce.Do(func() {
-						go func() {
-							logger.Info("uninstall directive received", "remove_xray", removeXray)
-							ackCtx, ackCancel := context.WithTimeout(context.Background(), 10*time.Second)
-							if err := reporterClient.NotifyUninstall(ackCtx, reporter.UninstallReasonPanelDirective); err != nil {
-								logger.Warn("uninstall ack failed; continuing local cleanup", "error", err)
-							}
-							ackCancel()
-
-							trigCtx, trigCancel := context.WithTimeout(context.Background(), 15*time.Second)
-							if err := uninstall.TriggerFromDirective(trigCtx, removeXray, filepath.Dir(cfg.StatePath), nil, nil); err != nil {
-								logger.Error("trigger uninstall unit failed", "error", err)
-							}
-							trigCancel()
-							cancel()
-						}()
-					})
+					uninstallCoord.Handle(removeXray)
 					return
 				}
 				if err := updateManager.ReportPendingOutcome(ctx); err != nil {

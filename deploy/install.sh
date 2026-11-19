@@ -250,6 +250,23 @@ if [[ -f "${SCRIPT_DIR}/systemd/zako-agent-update.service" ]]; then
 	install -m 0644 -o root -g root "${SCRIPT_DIR}/systemd/zako-agent-update.service" "${UPDATE_UNIT_PATH}"
 fi
 
+# Ensure polkitd is present so /etc/polkit-1/rules.d exists and the unprivileged
+# agent can authorize xray restarts, self-updates, and remote uninstalls.
+ensure_polkit_installed() {
+	if [[ -d /etc/polkit-1/rules.d ]]; then
+		return 0
+	fi
+	if ! command -v apt-get >/dev/null 2>&1; then
+		die "/etc/polkit-1/rules.d is missing and apt-get is unavailable; install polkitd first"
+	fi
+	log "installing polkitd for systemd unit authorization"
+	DEBIAN_FRONTEND=noninteractive apt-get update -qq || die "apt-get update failed while installing polkitd"
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq polkitd || die "failed to install polkitd"
+	if [[ ! -d /etc/polkit-1/rules.d ]]; then
+		die "/etc/polkit-1/rules.d is still missing after installing polkitd"
+	fi
+}
+
 # The agent applies user sets through HandlerService and restarts xray.service only
 # when a hot update fails. The unit runs unprivileged, so the restart is authorized
 # by a polkit rule limited to that one unit instead of a sudoers entry or root.
@@ -257,13 +274,10 @@ polkit_rule="${SCRIPT_DIR}/polkit/50-zako-agent-xray.rules"
 if [[ ! -f "${polkit_rule}" ]]; then
 	die "polkit rule not found at ${polkit_rule}"
 fi
-if [[ -d /etc/polkit-1/rules.d ]]; then
-	install -d -m 0755 /etc/polkit-1/rules.d
-	install -m 0644 -o root -g root "${polkit_rule}" "${POLKIT_RULE}"
-	log "installed ${POLKIT_RULE} (zako-agent may restart xray.service)"
-else
-	warn "/etc/polkit-1/rules.d is missing; install polkit or user sync will not be able to restart xray"
-fi
+ensure_polkit_installed
+install -d -m 0755 /etc/polkit-1/rules.d
+install -m 0644 -o root -g root "${polkit_rule}" "${POLKIT_RULE}"
+log "installed ${POLKIT_RULE} (zako-agent may restart xray, update, and uninstall)"
 
 systemctl daemon-reload
 systemctl enable zako-agent.service

@@ -196,7 +196,7 @@ async function refresh(): Promise<void> {
 
 .node-pill:hover {
 	background: var(--accent-primary-soft);
-	border-color: #bfdbfe;
+	border-color: var(--accent-primary-border);
 	color: var(--accent-primary);
 }
 

@@ -370,7 +370,7 @@ defineExpose({ reload: loadConfigs });
 
 .hint {
 	font-size: 12px;
-	color: #6b7280;
+	color: var(--text-muted);
 }
 
 .json-editor :deep(textarea) {
@@ -382,7 +382,7 @@ defineExpose({ reload: loadConfigs });
 .json-error {
 	margin-top: 8px;
 	font-size: 12px;
-	color: #dc2626;
+	color: var(--tone-danger);
 }
 
 .detail-meta {
@@ -391,11 +391,11 @@ defineExpose({ reload: loadConfigs });
 	gap: 4px;
 	margin-bottom: 12px;
 	font-size: 12px;
-	color: #4b5563;
+	color: var(--text-secondary);
 }
 
 .error-text {
-	color: #dc2626;
+	color: var(--tone-danger);
 }
 
 .compare-grid {
@@ -412,7 +412,7 @@ defineExpose({ reload: loadConfigs });
 	margin-bottom: 6px;
 	font-size: 13px;
 	font-weight: 600;
-	color: #374151;
+	color: var(--text-secondary);
 }
 
 .json-preview {
@@ -420,11 +420,12 @@ defineExpose({ reload: loadConfigs });
 	padding: 12px;
 	max-height: 460px;
 	overflow: auto;
-	background: #f9fafb;
-	border: 1px solid #e5e7eb;
+	background: var(--bg-muted);
+	border: 1px solid var(--border-color);
 	border-radius: 6px;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-size: 12px;
 	line-height: 1.45;
+	color: var(--text-primary);
 }
 </style>

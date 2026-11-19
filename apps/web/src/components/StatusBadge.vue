@@ -35,42 +35,42 @@ defineProps<{
 }
 
 .is-success {
-	background: #f0fdf4;
-	color: #15803d;
+	background: var(--tone-success-soft);
+	color: var(--tone-success-text);
 }
 .is-success .status-dot {
-	background: #16a34a;
+	background: var(--tone-success);
 }
 
 .is-warning {
-	background: #fffbeb;
-	color: #b45309;
+	background: var(--tone-warning-soft);
+	color: var(--tone-warning-text);
 }
 .is-warning .status-dot {
-	background: #d97706;
+	background: var(--tone-warning);
 }
 
 .is-danger {
-	background: #fef2f2;
-	color: #b91c1c;
+	background: var(--tone-danger-soft);
+	color: var(--tone-danger-text);
 }
 .is-danger .status-dot {
-	background: #dc2626;
+	background: var(--tone-danger);
 }
 
 .is-primary {
-	background: #eff6ff;
-	color: #1d4ed8;
+	background: var(--accent-primary-soft);
+	color: var(--accent-primary-hover);
 }
 .is-primary .status-dot {
-	background: #2563eb;
+	background: var(--accent-primary);
 }
 
 .is-info {
-	background: #f1f5f9;
-	color: #475569;
+	background: var(--tone-info-soft);
+	color: var(--tone-info-text);
 }
 .is-info .status-dot {
-	background: #64748b;
+	background: var(--tone-info);
 }
 </style>

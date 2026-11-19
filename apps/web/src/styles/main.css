@@ -8,9 +8,11 @@
 	/* Borders */
 	--border-color: #e2e8f0;
 	--border-subtle: #f1f5f9;
+	--border-hover: #cbd5e1;
 
 	/* Text */
 	--text-primary: #0f172a;
+	--text-table: #1e293b;
 	--text-secondary: #475569;
 	--text-muted: #64748b;
 	--text-placeholder: #94a3b8;
@@ -19,21 +21,32 @@
 	--accent-primary: #2563eb;
 	--accent-primary-hover: #1d4ed8;
 	--accent-primary-soft: #eff6ff;
+	--accent-primary-border: #bfdbfe;
 
 	--tone-success: #16a34a;
+	--tone-success-text: #15803d;
 	--tone-success-soft: #f0fdf4;
 	--tone-warning: #d97706;
+	--tone-warning-text: #b45309;
 	--tone-warning-soft: #fffbeb;
 	--tone-danger: #dc2626;
+	--tone-danger-text: #b91c1c;
 	--tone-danger-soft: #fef2f2;
 	--tone-info: #64748b;
+	--tone-info-text: #475569;
 	--tone-info-soft: #f1f5f9;
+
+	/* Brand Mark & Overlays */
+	--brand-mark-bg: var(--text-primary);
+	--brand-mark-fg: #ffffff;
+	--backdrop-color: rgba(15, 23, 42, 0.35);
 
 	/* Radii & Shadows */
 	--radius-sm: 6px;
 	--radius-md: 10px;
 	--radius-lg: 12px;
 	--shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+	--shadow-dialog: 0 12px 32px rgba(15, 23, 42, 0.08);
 
 	/* Typography */
 	--font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
@@ -76,6 +89,90 @@
 	color-scheme: light;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+}
+
+html.dark {
+	/* Surface & Canvas */
+	--bg-canvas: #0b1120;
+	--bg-surface: #111a2e;
+	--bg-subtle: #1e293b;
+	--bg-muted: #162033;
+
+	/* Borders */
+	--border-color: #243247;
+	--border-subtle: #1b263b;
+	--border-hover: #3b4d68;
+
+	/* Text */
+	--text-primary: #f1f5f9;
+	--text-table: #e2e8f0;
+	--text-secondary: #cbd5e1;
+	--text-muted: #94a3b8;
+	--text-placeholder: #64748b;
+
+	/* Brand & Semantic */
+	--accent-primary: #3b82f6;
+	--accent-primary-hover: #60a5fa;
+	--accent-primary-soft: rgba(59, 130, 246, 0.16);
+	--accent-primary-border: rgba(96, 165, 250, 0.35);
+
+	--tone-success: #22c55e;
+	--tone-success-text: #4ade80;
+	--tone-success-soft: rgba(34, 197, 94, 0.16);
+	--tone-warning: #f59e0b;
+	--tone-warning-text: #fbbf24;
+	--tone-warning-soft: rgba(245, 158, 11, 0.16);
+	--tone-danger: #ef4444;
+	--tone-danger-text: #f87171;
+	--tone-danger-soft: rgba(239, 68, 68, 0.16);
+	--tone-info: #94a3b8;
+	--tone-info-text: #cbd5e1;
+	--tone-info-soft: rgba(148, 163, 184, 0.14);
+
+	/* Brand Mark & Overlays */
+	--brand-mark-bg: var(--accent-primary);
+	--brand-mark-fg: #ffffff;
+	--backdrop-color: rgba(2, 6, 23, 0.65);
+
+	/* Shadows */
+	--shadow-xs: 0 1px 2px rgba(2, 6, 23, 0.35);
+	--shadow-dialog: 0 16px 40px rgba(2, 6, 23, 0.6);
+
+	/* Element Plus Dark Overrides */
+	--el-color-primary: #3b82f6;
+	--el-color-primary-light-3: #2f65bf;
+	--el-color-primary-light-5: #264f95;
+	--el-color-primary-light-7: #1d3969;
+	--el-color-primary-light-8: #182e52;
+	--el-color-primary-light-9: #14243e;
+	--el-color-primary-dark-2: #60a5fa;
+
+	--el-color-success: #22c55e;
+	--el-color-warning: #f59e0b;
+	--el-color-danger: #ef4444;
+	--el-color-info: #94a3b8;
+
+	--el-bg-color: var(--bg-surface);
+	--el-bg-color-page: var(--bg-canvas);
+	--el-bg-color-overlay: #172238;
+	--el-text-color-primary: var(--text-primary);
+	--el-text-color-regular: var(--text-secondary);
+	--el-text-color-secondary: var(--text-muted);
+	--el-text-color-placeholder: var(--text-placeholder);
+	--el-border-color: var(--border-color);
+	--el-border-color-light: var(--border-color);
+	--el-border-color-lighter: var(--border-subtle);
+	--el-border-color-darker: var(--border-hover);
+	--el-fill-color-blank: var(--bg-surface);
+	--el-fill-color-light: var(--bg-muted);
+	--el-fill-color-lighter: var(--bg-subtle);
+	--el-fill-color: #1e293b;
+	--el-fill-color-dark: #273549;
+	--el-fill-color-darker: #334155;
+	--el-mask-color: rgba(11, 17, 32, 0.72);
+	--el-card-bg-color: var(--bg-surface);
+
+	color-scheme: dark;
 }
 
 * {
@@ -122,11 +219,13 @@ body {
 
 /* Clean flat table */
 .el-table {
-	--el-table-header-bg-color: #f8fafc;
-	--el-table-header-text-color: #475569;
-	--el-table-text-color: #1e293b;
-	--el-table-border-color: #f1f5f9;
-	--el-table-row-hover-bg-color: #f8fafc;
+	--el-table-bg-color: var(--bg-surface);
+	--el-table-tr-bg-color: var(--bg-surface);
+	--el-table-header-bg-color: var(--bg-muted);
+	--el-table-header-text-color: var(--text-secondary);
+	--el-table-text-color: var(--text-table);
+	--el-table-border-color: var(--border-subtle);
+	--el-table-row-hover-bg-color: var(--bg-muted);
 	font-size: 13.5px;
 }
 
@@ -148,21 +247,20 @@ body {
 }
 
 .el-button--default {
-	border-color: var(--border-color);
-	color: var(--text-primary);
-}
-
-.el-button--default:hover {
-	background: var(--bg-subtle);
-	border-color: #cbd5e1;
-	color: var(--text-primary);
+	--el-button-bg-color: var(--bg-surface);
+	--el-button-border-color: var(--border-color);
+	--el-button-text-color: var(--text-primary);
+	--el-button-hover-bg-color: var(--bg-subtle);
+	--el-button-hover-border-color: var(--border-hover);
+	--el-button-hover-text-color: var(--text-primary);
 }
 
 /* Clean dialogs */
 .el-dialog {
+	background: var(--bg-surface);
 	border-radius: var(--radius-lg);
 	border: 1px solid var(--border-color);
-	box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+	box-shadow: var(--shadow-dialog);
 }
 
 .el-dialog__header {
@@ -188,8 +286,8 @@ body {
 
 /* Clean descriptions */
 .el-descriptions__label.el-descriptions__cell.is-bordered-label {
-	background: #f8fafc;
-	color: #475569;
+	background: var(--bg-muted);
+	color: var(--text-secondary);
 	font-weight: 500;
 }
 

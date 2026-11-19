@@ -44,6 +44,10 @@ export const zhCN = {
 		openNavigation: '打开导航',
 		controlPanel: '控制面板',
 		switchLanguage: '切换语言',
+		switchTheme: '切换主题',
+		themeSystem: '跟随系统',
+		themeLight: '浅色',
+		themeDark: '深色',
 	},
 	status: {
 		node: {
@@ -492,6 +496,10 @@ export const enUS: Messages = {
 		openNavigation: 'Open navigation',
 		controlPanel: 'Control Panel',
 		switchLanguage: 'Switch language',
+		switchTheme: 'Switch theme',
+		themeSystem: 'System',
+		themeLight: 'Light',
+		themeDark: 'Dark',
 	},
 	status: {
 		node: {

@@ -3,11 +3,13 @@ import { computed, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useI18n, type Locale, type MessageKey } from '../i18n';
 import { syncDocumentTitle } from '../router';
+import { isThemePreference, useTheme, type ThemePreference } from '../theme';
 import AppIcon, { type IconName } from './AppIcon.vue';
 
 const route = useRoute();
 const mobileOpen = ref(false);
 const { locale, localeOptions, setLocale, t } = useI18n();
+const { preference, themeOptions, setTheme } = useTheme();
 
 const items = computed<Array<{ path: string; label: string; icon: IconName }>>(() => [
 	{ path: '/', label: t('nav.overview'), icon: 'overview' },
@@ -28,9 +30,27 @@ const title = computed(() => (route.meta.titleKey ? t(route.meta.titleKey as Mes
 
 const currentLocaleLabel = computed(() => localeOptions.find((option) => option.value === locale.value)?.label ?? locale.value);
 
+const THEME_ICONS: Record<ThemePreference, IconName> = {
+	system: 'monitor',
+	light: 'sun',
+	dark: 'moon',
+};
+
+const currentThemeIcon = computed<IconName>(() => THEME_ICONS[preference.value]);
+const currentThemeLabel = computed(() => {
+	const option = themeOptions.find((item) => item.value === preference.value);
+	return option ? t(option.labelKey) : '';
+});
+
 function handleLocaleCommand(command: string | number | Record<string, unknown>): void {
 	if (command === 'zh-CN' || command === 'en-US') {
 		setLocale(command as Locale);
+	}
+}
+
+function handleThemeCommand(command: string | number | Record<string, unknown>): void {
+	if (typeof command === 'string' && isThemePreference(command)) {
+		setTheme(command);
 	}
 }
 
@@ -88,10 +108,31 @@ watch(
 						<h1 class="page-title">{{ title }}</h1>
 					</div>
 					<div class="header-right">
+						<el-dropdown trigger="click" @command="handleThemeCommand">
+							<button type="button" class="header-trigger" :aria-label="t('nav.switchTheme')">
+								<AppIcon :name="currentThemeIcon" :size="15" />
+								<span class="trigger-label">{{ currentThemeLabel }}</span>
+							</button>
+							<template #dropdown>
+								<el-dropdown-menu>
+									<el-dropdown-item
+										v-for="option in themeOptions"
+										:key="option.value"
+										:command="option.value"
+										:class="{ 'is-selected-option': preference === option.value }"
+									>
+										<span class="dropdown-option">
+											<AppIcon :name="THEME_ICONS[option.value]" :size="14" />
+											<span>{{ t(option.labelKey) }}</span>
+										</span>
+									</el-dropdown-item>
+								</el-dropdown-menu>
+							</template>
+						</el-dropdown>
 						<el-dropdown trigger="click" @command="handleLocaleCommand">
-							<button type="button" class="lang-trigger" :aria-label="t('nav.switchLanguage')">
+							<button type="button" class="header-trigger" :aria-label="t('nav.switchLanguage')">
 								<AppIcon name="globe" :size="15" />
-								<span>{{ currentLocaleLabel }}</span>
+								<span class="trigger-label">{{ currentLocaleLabel }}</span>
 							</button>
 							<template #dropdown>
 								<el-dropdown-menu>
@@ -99,7 +140,7 @@ watch(
 										v-for="option in localeOptions"
 										:key="option.value"
 										:command="option.value"
-										:class="{ 'is-selected-locale': locale === option.value }"
+										:class="{ 'is-selected-option': locale === option.value }"
 									>
 										{{ option.label }}
 									</el-dropdown-item>
@@ -152,8 +193,8 @@ watch(
 	width: 26px;
 	height: 26px;
 	border-radius: 7px;
-	background: var(--text-primary);
-	color: #ffffff;
+	background: var(--brand-mark-bg);
+	color: var(--brand-mark-fg);
 	font-size: 13px;
 	font-weight: 700;
 	display: inline-flex;
@@ -254,7 +295,7 @@ watch(
 	gap: 10px;
 }
 
-.lang-trigger {
+.header-trigger {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -274,13 +315,19 @@ watch(
 		color 0.15s ease;
 }
 
-.lang-trigger:hover {
+.header-trigger:hover {
 	background: var(--bg-subtle);
-	border-color: #cbd5e1;
+	border-color: var(--border-hover);
 	color: var(--text-primary);
 }
 
-:deep(.is-selected-locale) {
+.dropdown-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+:deep(.is-selected-option) {
 	color: var(--accent-primary);
 	font-weight: 600;
 }
@@ -343,7 +390,7 @@ watch(
 		display: block;
 		position: fixed;
 		inset: 0;
-		background: rgba(15, 23, 42, 0.35);
+		background: var(--backdrop-color);
 		z-index: 25;
 	}
 
@@ -357,6 +404,12 @@ watch(
 
 	.main {
 		padding: 16px;
+	}
+}
+
+@media (max-width: 520px) {
+	.trigger-label {
+		display: none;
 	}
 }
 </style>

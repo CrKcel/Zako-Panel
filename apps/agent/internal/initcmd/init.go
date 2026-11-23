@@ -32,6 +32,10 @@ import (
 	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
+// maxEnrollEndpoints mirrors the panel's per-enrollment endpoint limit, which its
+// request schema enforces before the service sees the payload.
+const maxEnrollEndpoints = 16
+
 // Options configures a single enrollment run.
 type Options struct {
 	PanelURL       string
@@ -151,9 +155,18 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 		return nil, err
 	}
 
-	endpoints, err := enrollEndpoints(prepared.Endpoints)
-	if err != nil {
-		return nil, err
+	endpoints, dropped := enrollEndpoints(prepared.Endpoints)
+	if dropped > 0 {
+		// The panel validates each protocol payload and rejects the whole enrollment
+		// when one is not expressible, so an adopted inbound the panel cannot describe
+		// is reported and left unmanaged instead of aborting the install.
+		fmt.Fprintf(os.Stderr, "init: %d adopted inbound(s) cannot be described by the panel and stay unmanaged\n", dropped)
+	}
+	if len(endpoints) > maxEnrollEndpoints {
+		// The panel accepts a bounded endpoint list; reporting more fails the whole
+		// enrollment with a payload the node can never make acceptable.
+		fmt.Fprintf(os.Stderr, "init: reporting the first %d of %d adopted inbound(s)\n", maxEnrollEndpoints, len(endpoints))
+		endpoints = endpoints[:maxEnrollEndpoints]
 	}
 	resp, err := rep.Enroll(ctx, &reporter.EnrollRequest{
 		Name:         nodeName,
@@ -234,12 +247,16 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 	return out, nil
 }
 
-func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) ([]reporter.EnrollEndpoint, error) {
+// enrollEndpoints maps adopted endpoints onto the enrollment payload and reports how
+// many were left out because the panel has no payload for their protocol. The
+// panel rejects the whole enrollment on one unknown protocol, so dropping the entry
+// keeps the node's other inbounds manageable.
+func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) ([]reporter.EnrollEndpoint, int) {
 	result := make([]reporter.EnrollEndpoint, 0, len(endpoints))
 	for _, endpoint := range endpoints {
-		params, err := enrollParams(endpoint)
-		if err != nil {
-			return nil, err
+		params, ok := enrollParams(endpoint)
+		if !ok {
+			continue
 		}
 		result = append(result, reporter.EnrollEndpoint{
 			Name:     endpoint.Name,
@@ -248,13 +265,13 @@ func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) ([]reporter.EnrollE
 			Params:   params,
 		})
 	}
-	return result, nil
+	return result, len(endpoints) - len(result)
 }
 
 // enrollParams maps an adopted endpoint onto the panel's payload for its protocol.
 // The panel validates the payload per protocol, so an unknown protocol is an error
 // instead of a generic parameter object.
-func enrollParams(endpoint xrayconfig.ManagedEndpoint) (reporter.EnrollEndpointParams, error) {
+func enrollParams(endpoint xrayconfig.ManagedEndpoint) (reporter.EnrollEndpointParams, bool) {
 	switch endpoint.Protocol {
 	case xraycore.ProtocolVlessReality:
 		return reporter.VlessRealityParams{
@@ -264,7 +281,7 @@ func enrollParams(endpoint xrayconfig.ManagedEndpoint) (reporter.EnrollEndpointP
 			Fingerprint: endpoint.Params.Fingerprint,
 			Flow:        endpoint.Params.Flow,
 			Network:     endpoint.Params.Network,
-		}, nil
+		}, true
 	case xraycore.ProtocolVmess:
 		return reporter.VmessParams{
 			Security: endpoint.Params.Security,
@@ -272,18 +289,18 @@ func enrollParams(endpoint xrayconfig.ManagedEndpoint) (reporter.EnrollEndpointP
 			Network:  endpoint.Params.Network,
 			Path:     endpoint.Params.Path,
 			Host:     endpoint.Params.Host,
-		}, nil
+		}, true
 	case xraycore.ProtocolTrojan:
 		return reporter.TrojanParams{
 			SNI:     endpoint.Params.SNI,
 			Network: endpoint.Params.Network,
 			Path:    endpoint.Params.Path,
 			Host:    endpoint.Params.Host,
-		}, nil
+		}, true
 	case xraycore.ProtocolShadowsocks:
-		return reporter.ShadowsocksParams{Method: endpoint.Params.Method}, nil
+		return reporter.ShadowsocksParams{Method: endpoint.Params.Method}, true
 	default:
-		return nil, fmt.Errorf("init: unsupported endpoint protocol %q", endpoint.Protocol)
+		return nil, false
 	}
 }
 

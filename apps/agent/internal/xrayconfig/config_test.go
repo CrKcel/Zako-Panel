@@ -457,6 +457,29 @@ func TestManagedInboundTargetsReportsProtocols(t *testing.T) {
 	}
 }
 
+// An adopted document keeps the clients the node already served, so the renderer
+// replaces them. ManagedClientEmails is how the syncer notices that the file still
+// grants an account the panel does not, which only a restart can revoke.
+func TestManagedClientEmailsReportsOnlyManagedInbounds(t *testing.T) {
+	document := `{"inbounds": [
+	  {"tag": "vless-reality", "port": 443, "protocol": "vless",
+	   "settings": {"clients": [{"id": "a", "email": "u_managed", "level": 0}]},
+	   "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {}}},
+	  {"tag": "ss", "port": 8388, "protocol": "shadowsocks",
+	   "settings": {"method": "aes-256-gcm", "clients": [{"password": "p", "email": "u_ss", "level": 0}]}},
+	  {"tag": "vless-tls", "port": 8443, "protocol": "vless",
+	   "settings": {"clients": [{"id": "b", "email": "u_operator", "level": 0}]},
+	   "streamSettings": {"network": "tcp", "security": "tls"}}
+	]}`
+	got := ManagedClientEmails([]byte(document))
+	if !reflect.DeepEqual(got, []string{"u_managed", "u_ss"}) {
+		t.Errorf("ManagedClientEmails = %v, want the managed inbounds' clients only", got)
+	}
+	if got := ManagedClientEmails([]byte(`[]`)); len(got) != 0 {
+		t.Errorf("ManagedClientEmails on a non-object document = %v, want none", got)
+	}
+}
+
 func TestEndpointsFromDocumentMapsProtocolParams(t *testing.T) {
 	const privateKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 	publicKey, err := PublicKeyFromPrivateKey(privateKey)

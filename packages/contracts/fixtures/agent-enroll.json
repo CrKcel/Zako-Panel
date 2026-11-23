@@ -41,7 +41,7 @@
 			}
 		},
 		{
-			"name": "ss-2022",
+			"name": "ss-gcm",
 			"protocol": "shadowsocks",
 			"port": 9001,
 			"params": {

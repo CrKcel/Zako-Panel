@@ -23,7 +23,7 @@
 		},
 		{
 			"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2EA",
-			"name": "ss-2022",
+			"name": "ss-gcm",
 			"protocol": "shadowsocks",
 			"port": 9001
 		}

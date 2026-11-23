@@ -80,6 +80,7 @@ Agent 内部按以下状态流转：`IDLE → DOWNLOADING → VERIFYING → REND
 - **防篡改**：下载完先比对 SHA-256 哈希，对不上直接中止，不会往 Xray 里塞。
 - **防失联**：替换前会留一份已知健康的旧配置备份。不管是 `xray run -test` 报错、重启超时，还是重启后观察期健康检查失败，都会自动还原旧配置并把错误信息报回面板。
 - **结果幂等**：同一版本无论成功还是失败，都会带着版本号上报；旧版本的延迟结果不会覆盖控制面较新的状态。
+- **受管入站必须带 Tag**：控制面按 Agent 的判定规则（协议 + 传输 + TLS）校验，受管入站缺 Tag 直接以 `422` 拒绝，因为 `HandlerService` 只能按 Tag 定位入站；Agent 不接管的入站不受此限制，原样保留。
 
 ---
 
@@ -87,18 +88,19 @@ Agent 内部按以下状态流转：`IDLE → DOWNLOADING → VERIFYING → REND
 
 安装时 `zako-agent init` 读取节点已有的 Xray/V2Ray 配置；存在则沿用该文件，不存在时写入内置默认模板。
 
-- 面板管理四类 Xray 入站：VLESS + REALITY（TCP）、VMess、Trojan 和 Shadowsocks。注册时按协议把端口与传输参数上报（VLESS 还上报 REALITY 公钥、Short ID 和 Fingerprint），面板据此自动创建 Endpoint。
+- 面板管理四类 Xray 入站：VLESS + REALITY（TCP）、VMess、Trojan 和 Shadowsocks。注册时按协议把端口与传输参数上报（VLESS 还上报 REALITY 公钥、Short ID 和 Fingerprint），面板据此自动创建 Endpoint。一次注册最多上报 16 个端点，超出的入站继续服务但不受面板管理。
 - 无法用面板参数表达清楚的入站保持原样、不参与渲染：例如 VMess 的 REALITY/XTLS 传输、Trojan 没有 TLS SNI、Shadowsocks-2022 方法、以及 kcp 等面板不渲染的传输。这样即使节点上已有手工维护的同类入站，也不会被覆盖。
 - Hysteria2 不是 Xray 协议，Agent 不接管也不参与用户同步；它的接入端点由管理员在后台手工创建。
 - 已有配置没有任何受管入站时，会在未被占用的端口追加一个默认 VLESS + REALITY 入站，其余配置不变。
 - 已有配置缺少 `api`、`stats`、Level 0 统计或 API 路由规则时只补缺失项，不覆盖已有值；这样接管后流量采集和用户热更新可以直接工作。
+- 接管已有配置时保留节点原有的入站客户端。这些邮箱不在面板授权名单里，同步时通过 `HandlerService.RemoveUser` 在对应入站上就地撤销，不需要重启 Xray；只在部分入站出现的邮箱不会被当成错误。
 - 热更新会按当前配置文件里的全部受管入站（Tag + 协议）逐个执行；任何一步失败都回退到重启并重写完整配置。
 
 ## 6. 节点权限隔离（最小特权）
 
 Agent 不以 `root` 运行，而是用专用低权限用户 `zako-agent` 启动（`NoNewPrivileges=true`）：
 
-- `/etc/xray` 目录属主为 `root:zako-agent`（权限 `0770`），允许 Agent 通过写临时文件 + rename 原子替换 `config.json`（`0640`）。
+- 配置目录属主为 `root:zako-agent`（权限 `0770`），允许 Agent 通过写临时文件 + rename 原子替换 `config.json`（`0640`）。安装脚本会接管 `/etc/xray`、`/usr/local/etc/xray`、`/etc/v2ray`、`/usr/local/etc/v2ray` 中最先找到的那个配置文件，因此这四个目录都在 systemd 单元的 `ReadWritePaths` 里，`ProtectSystem=strict` 才不会把接管后的路径变成只读。
 - 私钥 `/etc/xray/reality.key` 和用户快照 `/var/lib/zako-agent/users.json` 权限都是 `0600`，仅 `zako-agent` 可读。
 - 重启 Xray 不靠 `sudo`，而是通过一条专用 polkit 规则（`/etc/polkit-1/rules.d/50-zako-agent-xray.rules`），只允许 `zako-agent` 执行 `systemctl restart xray.service`。
 - 远程自卸载同样通过该 polkit 规则授权：收到控制面 `uninstall` 指令后，Agent 向 `/api/v1/agent/uninstall` 回传确认，再触发以 `root` 运行的 `zako-agent-uninstall.service` 完成系统目录、systemd 单元、polkit 规则与服务账号的清理。

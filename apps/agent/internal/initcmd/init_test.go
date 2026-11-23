@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -375,4 +376,115 @@ func findInbound(document map[string]any, tag string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// An adopted inbound whose parameters the panel cannot express must not abort the
+// enrollment: the panel rejects the whole payload on one unknown protocol, and a
+// failed install leaves an already-running node without an agent.
+func TestExecuteSkipsProtocolsThePanelCannotDescribe(t *testing.T) {
+	dir := t.TempDir()
+	_, publicKey := writeRealityKey(t, dir)
+
+	existing := `{
+	  "inbounds": [
+	    {"tag": "vless-reality", "port": 443, "protocol": "vless",
+	     "settings": {"clients": [], "decryption": "none"},
+	     "streamSettings": {"network": "tcp", "security": "reality",
+	       "realitySettings": {"dest": "cdn.example.com:443", "serverNames": ["cdn.example.com"],
+	         "privateKey": "", "shortIds": ["aabbccdd"], "fingerprint": "chrome"}}},
+	    {"tag": "ss-unsupported", "port": 9002, "protocol": "shadowsocks",
+	     "settings": {"method": "2022-blake3-aes-128-gcm", "clients": []}}
+	  ]
+	}`
+	xrayConfigPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(xrayConfigPath, []byte(existing), 0o640); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	server, body, _ := enrollServer(t, publicKey)
+	defer server.Close()
+
+	out, err := Execute(context.Background(), Options{
+		PanelURL:       server.URL,
+		Token:          "01J2Z6Q8Y3V9M4K7T1B5C0D2E0.one-time-secret",
+		NodeName:       "edge-partial",
+		Host:           "203.0.113.14",
+		ConfigPath:     filepath.Join(dir, "agent.yaml"),
+		TokenFile:      filepath.Join(dir, "token"),
+		RealityKeyPath: filepath.Join(dir, "reality.key"),
+		XrayConfigPath: xrayConfigPath,
+	}, server.Client())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.EndpointCount != 1 || len(out.Endpoints) != 1 || out.Endpoints[0].Protocol != "vless-reality" {
+		t.Errorf("endpoints = %+v, want the vless inbound only", out.Endpoints)
+	}
+	endpoints, _ := (*body)["endpoints"].([]any)
+	if len(endpoints) != 1 {
+		t.Fatalf("reported endpoints = %d, want the expressible one only", len(endpoints))
+	}
+
+	// The dropped inbound stays in the document untouched: the panel does not manage
+	// it, so its settings must survive the adoption.
+	data, err := os.ReadFile(xrayConfigPath)
+	if err != nil {
+		t.Fatalf("read adopted config: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode adopted config: %v", err)
+	}
+	inbound := findInbound(document, "ss-unsupported")
+	if inbound == nil {
+		t.Fatal("the unmanaged inbound was dropped from the document")
+	}
+	settings, _ := inbound["settings"].(map[string]any)
+	if settings["method"] != "2022-blake3-aes-128-gcm" {
+		t.Errorf("unmanaged inbound settings = %+v, want them unchanged", settings)
+	}
+}
+
+// The panel rejects an enrollment that reports more endpoints than its schema
+// allows, and the same payload would fail every retry. Adopting a node with many
+// inbounds has to stay enrollable.
+func TestExecuteReportsAtMostThePanelEndpointLimit(t *testing.T) {
+	dir := t.TempDir()
+	_, publicKey := writeRealityKey(t, dir)
+
+	var inbounds []string
+	inbounds = append(inbounds, `{"tag": "vless-reality", "port": 443, "protocol": "vless",
+		"settings": {"clients": [], "decryption": "none"},
+		"streamSettings": {"network": "tcp", "security": "reality",
+			"realitySettings": {"serverNames": ["cdn.example.com"], "privateKey": "", "shortIds": ["aabbccdd"]}}}`)
+	for port := 9000; port < 9000+maxEnrollEndpoints+2; port++ {
+		inbounds = append(inbounds, fmt.Sprintf(
+			`{"tag": "ss-%d", "port": %d, "protocol": "shadowsocks", "settings": {"method": "aes-256-gcm", "clients": []}}`,
+			port, port))
+	}
+	existing := `{"inbounds": [` + strings.Join(inbounds, ",") + `]}`
+	xrayConfigPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(xrayConfigPath, []byte(existing), 0o640); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	server, body, _ := enrollServer(t, publicKey)
+	defer server.Close()
+
+	if _, err := Execute(context.Background(), Options{
+		PanelURL:       server.URL,
+		Token:          "01J2Z6Q8Y3V9M4K7T1B5C0D2E0.one-time-secret",
+		NodeName:       "edge-many",
+		Host:           "203.0.113.15",
+		ConfigPath:     filepath.Join(dir, "agent.yaml"),
+		TokenFile:      filepath.Join(dir, "token"),
+		RealityKeyPath: filepath.Join(dir, "reality.key"),
+		XrayConfigPath: xrayConfigPath,
+	}, server.Client()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	endpoints, _ := (*body)["endpoints"].([]any)
+	if len(endpoints) != maxEnrollEndpoints {
+		t.Errorf("reported endpoints = %d, want the panel limit %d", len(endpoints), maxEnrollEndpoints)
+	}
 }

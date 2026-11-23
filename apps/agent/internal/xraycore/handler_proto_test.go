@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -326,5 +329,29 @@ func TestHandlerClientTargetsAreNormalized(t *testing.T) {
 
 	if err := client.SetInboundTargets(nil); err == nil {
 		t.Error("SetInboundTargets accepted an empty target list")
+	}
+}
+
+// Xray reports an unknown account per inbound. Revoking an email the panel no
+// longer grants must tolerate the inbounds that never held it, while a removal
+// that is expected to match must fail loudly: this is what the syncer relies on
+// to decide between a hot update and the restart fallback.
+func TestHandlerClientRemovalToleratesAbsentUsers(t *testing.T) {
+	missing := status.Error(codes.Unknown, `proxy/vmess/inbound: User u_gone not found.`)
+	if !isUserMissingError(missing) {
+		t.Error("isUserMissingError did not recognise an absent-user failure")
+	}
+	if isUserMissingError(status.Error(codes.Unknown, "proxy/vmess/inbound: failed to add user")) {
+		t.Error("isUserMissingError treated an unrelated failure as an absent user")
+	}
+
+	// A closed client has no connection, so both removal entry points fail with the
+	// same transport error instead of silently succeeding.
+	client := &HandlerClient{targets: []InboundTarget{vlessTarget()}}
+	if err := client.RemoveUserWherePresent(context.Background(), testEmail); err == nil {
+		t.Error("RemoveUserWherePresent succeeded without a connection")
+	}
+	if err := client.RemoveUserWherePresent(context.Background(), " "); err == nil {
+		t.Error("RemoveUserWherePresent accepted an empty email")
 	}
 }

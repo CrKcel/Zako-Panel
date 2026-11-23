@@ -134,6 +134,11 @@ describe('multi-protocol subscriptions', () => {
 			params: { sni: 'trojan.example.com', network: 'ws', path: '/tr', host: 'front.example.com' },
 		});
 		await seedEndpoint(nodeId, {
+			name: 'tr-grpc',
+			protocol: 'trojan',
+			params: { sni: 'trojan.example.com', network: 'grpc', path: 'trj', host: 'grpc.example.com' },
+		});
+		await seedEndpoint(nodeId, {
 			name: 'obfs',
 			protocol: 'hysteria2',
 			params: { ...DEFAULT_HYSTERIA2_PARAMS, obfs: 'salamander', obfs_password: 'obfs-secret' },
@@ -155,11 +160,28 @@ describe('multi-protocol subscriptions', () => {
 			'ws-opts': { path: '/tr', headers: { Host: 'front.example.com' } },
 		});
 		expect(proxyByName(document, 'Tuned-obfs')).toMatchObject({ obfs: 'salamander', 'obfs-password': 'obfs-secret' });
+		expect(proxyByName(document, 'Tuned-tr-grpc')).toMatchObject({
+			type: 'trojan',
+			network: 'grpc',
+			'grpc-opts': { 'grpc-service-name': 'trj' },
+		});
 
 		const uris = await fetchUriLines(token);
-		expect(decodeVmess(uriWithScheme(uris, 'vmess://'))).toMatchObject({ net: 'grpc', path: 'svc', host: '', tls: '', sni: '' });
-		expect(uriWithScheme(uris, 'trojan://')).toBe(
+		expect(decodeVmess(uriWithScheme(uris, 'vmess://'))).toMatchObject({
+			net: 'grpc',
+			// The v2rayN JSON form carries the gRPC mode in `type` and its service name
+			// in `path`; 'none' there imports as a plain TCP header mode.
+			type: 'gun',
+			path: 'svc',
+			host: '',
+			tls: '',
+			sni: '',
+		});
+		expect(uris.find((line) => line.startsWith('trojan://') && line.includes('type=ws'))).toBe(
 			`trojan://${client.uuid}@203.0.113.10:443?security=tls&sni=trojan.example.com&type=ws&path=%2Ftr&host=front.example.com#Tuned-ws`,
+		);
+		expect(uris.find((line) => line.startsWith('trojan://') && line.includes('type=grpc'))).toBe(
+			`trojan://${client.uuid}@203.0.113.10:443?security=tls&sni=trojan.example.com&type=grpc&serviceName=trj&authority=grpc.example.com#Tuned-tr-grpc`,
 		);
 		expect(uriWithScheme(uris, 'hysteria2://')).toBe(
 			`hysteria2://${client.uuid}@203.0.113.10:443/?sni=www.example.com&obfs=salamander&obfs-password=obfs-secret#Tuned-obfs`,

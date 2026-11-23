@@ -49,7 +49,7 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   --token <ONE_TIME_ENROLLMENT_TOKEN>
 ```
 
-脚本会识别节点上已有的 Xray/V2Ray 配置（`/etc/xray/config.json`、`/usr/local/etc/xray/config.json`、`/etc/v2ray/config.json` 等）：VLESS + REALITY、VMess、Trojan、Shadowsocks 入站被接管为面板接入端点，其他协议的入站保持原样；没有配置时写入默认模板。接入端点由节点上报后自动创建，面板侧不需要填写协议参数。Hysteria2 不走 Xray，端点需要在节点详情页手工创建。
+脚本会识别节点上已有的 Xray/V2Ray 配置（`/etc/xray/config.json`、`/usr/local/etc/xray/config.json`、`/etc/v2ray/config.json` 等）：VLESS + REALITY、VMess、Trojan、Shadowsocks 入站被接管为面板接入端点，其他协议的入站保持原样；没有配置时写入默认模板。接入端点由节点上报后自动创建，面板侧不需要填写协议参数。Hysteria2 不走 Xray，端点需要在节点详情页手工创建。一次注册最多上报 16 个接入端点，超出的入站在节点上继续提供代理但不受面板管理。
 
 常用可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--xray-mirror <镜像地址>`。
 

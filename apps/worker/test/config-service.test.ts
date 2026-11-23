@@ -70,7 +70,7 @@ describe('config service', () => {
 		expect(audit?.action).toBe('node.config.publish');
 	});
 
-	it('rejects definitions containing a REALITY privateKey or missing vless inbound', async () => {
+	it('rejects definitions containing a REALITY privateKey or no managed inbound', async () => {
 		const nodeId = await seedNode();
 
 		const withPrivateKey = structuredClone(SAMPLE_CONFIG);
@@ -114,6 +114,28 @@ describe('config service', () => {
 		expect(published.version).toBe(1);
 		const stored = published.definition.inbounds as Record<string, unknown>[];
 		expect(stored).toHaveLength(4);
+	});
+
+	it('requires a tag only on inbounds the node manages', async () => {
+		const nodeId = await seedNode();
+
+		// The node serves a shadow-boxed protocol only; no vless reality inbound exists.
+		const vmessOnly = {
+			inbounds: [
+				{ tag: 'vmess-ws', port: 8443, protocol: 'vmess', settings: { clients: [] }, streamSettings: { network: 'ws' } },
+				// Inbounds the agent leaves alone do not need a tag: this one is VMess over REALITY.
+				{ port: 2096, protocol: 'vmess', settings: { clients: [] }, streamSettings: { network: 'tcp', security: 'reality' } },
+			],
+		};
+		await expect(publishConfig(env.DB, nodeId, { definition: vmessOnly })).resolves.toMatchObject({ version: 1 });
+
+		const untaggedManaged = {
+			inbounds: [{ port: 8388, protocol: 'shadowsocks', settings: { method: 'aes-256-gcm' } }],
+		};
+		await expect(publishConfig(env.DB, nodeId, { definition: untaggedManaged })).rejects.toMatchObject({
+			status: 422,
+			code: 'VALIDATION_ERROR',
+		});
 	});
 
 	it('lists versions descending with cursor pagination and rolls back to a new version', async () => {

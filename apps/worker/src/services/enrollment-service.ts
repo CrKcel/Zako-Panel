@@ -206,7 +206,7 @@ export async function enrollNode(
 		throw new AppError('UNAUTHORIZED', 'Enrollment token is expired or already used', 401);
 	}
 
-	const nodeName = row.name_prefix ? `${row.name_prefix}-${input.name}`.slice(0, 64) : input.name;
+	const nodeName = truncateName(row.name_prefix ? `${row.name_prefix}-${input.name}` : input.name, 64);
 	// Pre-check name uniqueness before consuming the one-time token so a naming
 	// conflict does not burn the operator's enrollment token.
 	if (await findNodeByName(db, nodeName)) {

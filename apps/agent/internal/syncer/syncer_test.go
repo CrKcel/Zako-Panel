@@ -268,6 +268,20 @@ func (u *targetUsers) SetInboundTargets(targets []xraycore.InboundTarget) error 
 	return nil
 }
 
+// RemoveUserWherePresent mirrors *xraycore.HandlerClient: a removal that tolerates
+// an inbound without the account.
+func (u *targetUsers) RemoveUserWherePresent(_ context.Context, email string) error {
+	if err := u.rmErr[email]; err != nil {
+		return err
+	}
+	if _, found := u.live[email]; !found {
+		return nil
+	}
+	u.removed = append(u.removed, email)
+	delete(u.live, email)
+	return nil
+}
+
 // newTargetFixture builds a fixture whose user manager accepts targets. The restart
 // fallback still writes into the underlying fakeUsers through the applier.
 func newTargetFixture(t *testing.T) (*fixture, *targetUsers) {
@@ -311,6 +325,38 @@ func usersOf(version int64, entries map[string]string) *reporter.UsersResponse {
 		users = append(users, reporter.User{XrayEmail: email, VlessUUID: entries[email]})
 	}
 	return &reporter.UsersResponse{Version: version, Users: users}
+}
+
+func TestSyncOnceRevokesClientsTheConfigListsOutsideTheUserSet(t *testing.T) {
+	f, targets := newTargetFixture(t)
+	// Adoption keeps the node's existing clients: the document grants u_stale, while
+	// the panel grants u_a. The stale account has to be removed without a restart,
+	// because the converge path may not be able to validate the node's config.
+	f.config.static = []byte(strings.Replace(managedStaticConfig,
+		`"clients": []`,
+		`"clients": [{"id": "stale-uuid", "email": "u_stale", "level": 0}]`, 1))
+	f.users.live = map[string]string{"u_stale": "stale-uuid"}
+	f.fetcher.set(usersOf(7, map[string]string{"u_a": "uuid-a"}), false, nil)
+
+	if err := f.syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+
+	if !reflect.DeepEqual(targets.removed, []string{"u_stale"}) {
+		t.Errorf("removed = %v, want the account the panel does not grant", targets.removed)
+	}
+	if len(targets.added) != 1 || targets.added[0].Email != "u_a" {
+		t.Errorf("added = %+v, want the granted user", targets.added)
+	}
+	if len(f.applier.applied) != 0 {
+		t.Errorf("restart applies = %d, want a hot update", len(f.applier.applied))
+	}
+	if got := f.users.snapshot(); got != `["u_a"]` {
+		t.Errorf("live users = %s, want only the granted user", got)
+	}
+	if got := f.appliedVersion(t); got != 7 {
+		t.Errorf("applied version = %d, want 7", got)
+	}
 }
 
 func TestSyncOnceAppliesInitialSetAndPersistsIt(t *testing.T) {

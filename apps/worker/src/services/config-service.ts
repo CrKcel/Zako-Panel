@@ -51,10 +51,82 @@ function toConfigVersion(row: NodeConfigRow): ConfigVersion {
 	};
 }
 
+/** Transports the node renderer can express; an absent streamSettings means TCP. */
+const MANAGED_TRANSPORTS = new Set(['', 'tcp', 'ws', 'grpc']);
+
+/** Mirrors the ciphers `apps/agent/internal/xrayconfig` can pin on a client. */
+const SUPPORTED_SHADOWSOCKS_METHODS = new Set(['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305']);
+
+function objectField(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function textField(value: unknown): string {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+/** First entry of an Xray string array, which is how both SNI lists are shaped. */
+function firstText(value: unknown): string {
+	if (!Array.isArray(value)) return '';
+	for (const item of value) {
+		const text = textField(item);
+		if (text !== '') return text;
+	}
+	return '';
+}
+
+function tlsSNI(stream: Record<string, unknown>): string {
+	const tls = objectField(stream.tlsSettings);
+	return firstText(tls.serverNames) || textField(tls.serverName);
+}
+
+function shadowsocksMethod(settings: Record<string, unknown>): string {
+	if (typeof settings.method === 'string') {
+		return SUPPORTED_SHADOWSOCKS_METHODS.has(settings.method) ? settings.method : '';
+	}
+	for (const client of Array.isArray(settings.clients) ? settings.clients : []) {
+		const method = textField(objectField(client).method);
+		if (method === '') continue;
+		return SUPPORTED_SHADOWSOCKS_METHODS.has(method) ? method : '';
+	}
+	return '';
+}
+
+/**
+ * Answers whether the node manages an inbound, mirroring
+ * `apps/agent/internal/xrayconfig/adopt.go`: only the shapes above are rewritten,
+ * and everything else in a published document is carried through untouched. An
+ * inbound the agent leaves alone must not be required to carry a tag.
+ */
+function isManagedInbound(inbound: Record<string, unknown>): boolean {
+	const stream = objectField(inbound.streamSettings);
+	const network = textField(stream.network);
+	const transport = MANAGED_TRANSPORTS.has(network);
+	switch (inbound.protocol) {
+		case 'vless':
+			return textField(stream.security) === 'reality' && (network === '' || network === 'tcp');
+		case 'vmess': {
+			const security = textField(stream.security);
+			if (!transport) return false;
+			return security === '' || security === 'none' || (security === 'tls' && tlsSNI(stream) !== '');
+		}
+		case 'trojan': {
+			const security = textField(stream.security);
+			if (!transport || (security !== '' && security !== 'tls')) return false;
+			return tlsSNI(stream) !== '';
+		}
+		case 'shadowsocks':
+			return shadowsocksMethod(objectField(inbound.settings)) !== '';
+		default:
+			return false;
+	}
+}
+
 /**
  * Validates that the Xray config skeleton is safe to store on the control plane:
- * it must declare inbounds with exactly one VLESS inbound and must never carry
- * a REALITY privateKey (which stays exclusively on the node).
+ * it must declare at least one inbound the node manages, every managed inbound
+ * must carry a tag (HandlerService addresses it by tag), and it must never carry a
+ * REALITY privateKey (which stays exclusively on the node).
  */
 function validateConfigDefinition(definition: Record<string, unknown>): void {
 	const inbounds = definition.inbounds;
@@ -68,16 +140,7 @@ function validateConfigDefinition(definition: Record<string, unknown>): void {
 			throw new AppError('VALIDATION_ERROR', 'Each inbound entry must be a JSON object', 422);
 		}
 		const inbound = rawInbound as Record<string, unknown>;
-		const stream = inbound.streamSettings;
-		if (stream === null || typeof stream !== 'object' || Array.isArray(stream)) {
-			continue;
-		}
-		const streamSettings = stream as Record<string, unknown>;
-		const reality = streamSettings.realitySettings;
-		if (reality === null || typeof reality !== 'object' || Array.isArray(reality)) {
-			continue;
-		}
-		const privateKey = (reality as Record<string, unknown>).privateKey;
+		const privateKey = objectField(objectField(inbound.streamSettings).realitySettings).privateKey;
 		if (typeof privateKey === 'string' && privateKey.trim() !== '') {
 			throw new AppError(
 				'VALIDATION_ERROR',
@@ -85,19 +148,15 @@ function validateConfigDefinition(definition: Record<string, unknown>): void {
 				422,
 			);
 		}
-		// The panel owns every VLESS + REALITY inbound; other protocols are carried
-		// through untouched by the node. HandlerService addresses the inbound by tag,
-		// so a managed inbound without one could never receive users.
-		if (inbound.protocol === 'vless' && streamSettings.security === 'reality') {
-			if (typeof inbound.tag !== 'string' || inbound.tag.trim() === '') {
-				throw new AppError('VALIDATION_ERROR', 'Every vless reality inbound must have a tag', 422);
-			}
-			managedCount += 1;
+		if (!isManagedInbound(inbound)) continue;
+		if (textField(inbound.tag) === '') {
+			throw new AppError('VALIDATION_ERROR', `Every managed ${String(inbound.protocol)} inbound must have a tag`, 422);
 		}
+		managedCount += 1;
 	}
 
 	if (managedCount === 0) {
-		throw new AppError('VALIDATION_ERROR', 'Configuration must include a vless reality inbound', 422);
+		throw new AppError('VALIDATION_ERROR', 'Configuration must include at least one managed inbound', 422);
 	}
 }
 

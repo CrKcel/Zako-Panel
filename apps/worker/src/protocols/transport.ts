@@ -26,9 +26,22 @@ export function clashTransportOptions(params: TransportParams): Record<string, u
 	return {};
 }
 
-/** URI query entries for the transport; callers prepend their own TLS entries. */
+/**
+ * URI query entries for the transport; callers prepend their own TLS entries.
+ *
+ * gRPC shares its parameters with no other transport in the de-facto share-link
+ * formats: the service name is `serviceName` and the host is `authority`, while
+ * `path` and `host` belong to WebSocket and HTTP/2. A gRPC endpoint that only
+ * carried `path` imported with an empty service name in v2rayN, v2rayNG, sing-box
+ * and NekoBox.
+ */
 export function transportUriQuery(params: TransportParams): string[] {
 	const query = [`type=${encodeURIComponent(params.network)}`];
+	if (params.network === 'grpc') {
+		if (params.path !== '') query.push(`serviceName=${encodeURIComponent(params.path)}`);
+		if (params.host !== '') query.push(`authority=${encodeURIComponent(params.host)}`);
+		return query;
+	}
 	if (params.path !== '') query.push(`path=${encodeURIComponent(params.path)}`);
 	if (params.host !== '') query.push(`host=${encodeURIComponent(params.host)}`);
 	return query;

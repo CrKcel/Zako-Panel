@@ -152,15 +152,50 @@ func (c *HandlerClient) RemoveUser(ctx context.Context, email string) error {
 		return fmt.Errorf("xray: remove user: %w", err)
 	}
 	for _, target := range c.targets {
-		request := &alterInboundRequest{
-			Tag:       target.Tag,
-			Operation: &typedMessage{Type: removeUserOperationType, Value: operation},
-		}
-		if err := c.alterInbound(ctx, request); err != nil {
-			return fmt.Errorf("xray: remove user from inbound %q: %w", target.Tag, err)
+		if err := c.removeUserFrom(ctx, target, operation); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// RemoveUserWherePresent removes a client by email from the managed inbounds that
+// hold it. An inbound without the account is not an error: the caller is revoking
+// an email the panel does not grant, and an adopted config may list its clients on
+// one inbound only. Any other failure is still reported.
+func (c *HandlerClient) RemoveUserWherePresent(ctx context.Context, email string) error {
+	if strings.TrimSpace(email) == "" {
+		return errors.New("xray: remove user: email is required")
+	}
+	operation, err := encodeRemoveUserOperation(&removeUserOperation{Email: email})
+	if err != nil {
+		return fmt.Errorf("xray: remove user: %w", err)
+	}
+	for _, target := range c.targets {
+		if err := c.removeUserFrom(ctx, target, operation); err != nil && !isUserMissingError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *HandlerClient) removeUserFrom(ctx context.Context, target InboundTarget, operation []byte) error {
+	request := &alterInboundRequest{
+		Tag:       target.Tag,
+		Operation: &typedMessage{Type: removeUserOperationType, Value: operation},
+	}
+	if err := c.alterInbound(ctx, request); err != nil {
+		return fmt.Errorf("xray: remove user from inbound %q: %w", target.Tag, err)
+	}
+	return nil
+}
+
+// userMissingMarker is the fragment Xray's inbound handlers put in the gRPC error
+// for an unknown account: "<protocol>: User <email> not found."
+const userMissingMarker = "not found."
+
+func isUserMissingError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), userMissingMarker)
 }
 
 func (c *HandlerClient) alterInbound(ctx context.Context, request *alterInboundRequest) error {

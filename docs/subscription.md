@@ -50,6 +50,10 @@
 
 **凭据模型**：一个“用户-节点”授权只生成一份凭据（`node_clients.vless_uuid`）。VLESS 和 VMess 把它当 UUID 下发，Trojan、Shadowsocks 和 Hysteria2 把它原样当密码下发，因此同一个用户在同一节点的所有协议共用这一个值，不需要额外的凭据表。
 
+Hysteria2 不走 Xray，Agent 也不会把它写进节点配置：面板只负责把它渲染进订阅，节点上的 Hysteria2 服务需要管理员用同一份凭据（`node_clients.vless_uuid`）自行配置。
+
+传输参数在 Clash 与 URI 里的字段名不同：gRPC 在 URI 中用 `serviceName` 和 `authority`（Clash 对应 `grpc-opts.grpc-service-name`），WebSocket 用 `path` 和 `host`。
+
 协议适配器定义在 `apps/worker/src/protocols/`：每个协议一个文件，负责参数校验（Zod）、Clash 代理项和 URI 渲染，通过注册表统一接入。新增协议只需新增适配器并注册；需要 Agent 接管的协议还要同时加进 `AGENT_PROTOCOLS`。
 
 ---

@@ -646,7 +646,11 @@ export interface components {
          * @enum {string}
          */
         AgentEndpointProtocol: "vless-reality" | "vmess" | "trojan" | "shadowsocks";
-        /** @description Parameter object matching the endpoint protocol. */
+        /**
+         * @description Parameter object matching the endpoint protocol. `anyOf` is required here:
+         *     the protocol-specific shapes are not disjoint (TLS VMess params satisfy the
+         *     Trojan shape as well), so `oneOf` would reject every VMess payload.
+         */
         ProtocolParams: components["schemas"]["VlessRealityParams"] | components["schemas"]["VmessParams"] | components["schemas"]["TrojanParams"] | components["schemas"]["ShadowsocksParams"] | components["schemas"]["Hysteria2Params"];
         VlessRealityParams: {
             sni: string;

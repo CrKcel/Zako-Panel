@@ -14,8 +14,10 @@ TimeoutStopSec=30s
 UMask=0077
 
 # The agent needs no privileges: it only opens outbound HTTPS, loopback gRPC and
-# files below the two writable paths. /etc/xray may be absent until Xray is
-# installed, so that entry is optional for startup.
+# files below the writable paths. The agent rewrites the Xray config through a
+# same-directory temporary file, and the installer adopts the first config it finds
+# in any of the conventional layouts, so every candidate directory has to stay
+# writable here too. A '-' prefix keeps the unit valid when a directory is absent.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
@@ -27,7 +29,7 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
-ReadWritePaths=/var/lib/zako-agent -/etc/xray
+ReadWritePaths=/var/lib/zako-agent -/etc/xray -/usr/local/etc/xray -/etc/v2ray -/usr/local/etc/v2ray
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

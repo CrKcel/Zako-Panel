@@ -65,7 +65,9 @@ export const vmessAdapter: ProtocolAdapter = {
 			aid: '0',
 			scy: 'auto',
 			net: params.network,
-			type: 'none',
+			// The v2rayN JSON form reuses `type` for the header obfuscation of tcp and
+			// for the gRPC mode; `path` carries the WS path and the gRPC service name.
+			type: params.network === 'grpc' ? 'gun' : 'none',
 			host: params.host,
 			path: params.path,
 			tls: tls ? 'tls' : '',

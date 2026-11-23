@@ -206,6 +206,36 @@ func ManagedInboundTargets(document []byte) ([]xraycore.InboundTarget, error) {
 	return targets, nil
 }
 
+// ManagedClientEmails returns the client emails declared on every managed inbound.
+// The render path replaces those lists with the panel user set, so an email here
+// that the panel does not grant is a leftover: adopting a config keeps its clients
+// and a running Xray keeps serving them until it reloads the rewritten document.
+// The syncer revokes those accounts through HandlerService instead of waiting for
+// a restart, which the fallback path cannot always perform.
+// A document that cannot be decoded yields no emails; the render path rejects it
+// before this inspection is reached.
+func ManagedClientEmails(document []byte) []string {
+	var root map[string]any
+	if err := json.Unmarshal(document, &root); err != nil {
+		return nil
+	}
+	var emails []string
+	for _, inbound := range managedInbounds(root) {
+		settings, _ := inbound["settings"].(map[string]any)
+		clients, _ := settings["clients"].([]any)
+		for _, raw := range clients {
+			client, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if email, _ := client["email"].(string); email != "" {
+				emails = append(emails, email)
+			}
+		}
+	}
+	return emails
+}
+
 func defaultDocument(privateKey, shortID string) ([]byte, error) {
 	var root map[string]any
 	if err := json.Unmarshal(defaultTemplate, &root); err != nil {

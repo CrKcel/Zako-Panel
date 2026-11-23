@@ -268,10 +268,16 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		return err
 	}
 	diff := diffUsers(stored.Users, response.Users)
+	// The document's managed inbounds can still list clients the panel no longer
+	// grants: adopting a config keeps them, and a hot update only knows the users it
+	// added itself. Revoking them through HandlerService is the only path that works
+	// without a restart, which matters because the agent cannot validate a config
+	// whose TLS certificates only root may read.
+	stale := staleManagedClients(static, response.Users)
 
 	switch {
-	case !diff.empty():
-		if err := s.hotUpdate(ctx, diff); err != nil {
+	case !diff.empty() || len(stale) > 0:
+		if err := s.hotUpdate(ctx, diff, stale); err != nil {
 			s.logger.Warn("hot update failed; converging by config restart", "error", err)
 			return s.applyWithRestart(ctx, response.Users, response.Version, rendered)
 		}
@@ -287,6 +293,26 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		// when the state write failed after a successful apply.
 		return s.advanceVersion(response.Version)
 	}
+}
+
+// staleManagedClients returns the emails the document's managed inbounds grant
+// that the Worker does not. Adoption preserves the node's existing clients, so this
+// is the set the panel revoked by taking the inbound over.
+func staleManagedClients(static []byte, target []reporter.User) []string {
+	granted := make(map[string]bool, len(target))
+	for _, user := range target {
+		granted[user.XrayEmail] = true
+	}
+	var stale []string
+	seen := make(map[string]bool)
+	for _, email := range xrayconfig.ManagedClientEmails(static) {
+		if granted[email] || seen[email] {
+			continue
+		}
+		seen[email] = true
+		stale = append(stale, email)
+	}
+	return stale
 }
 
 // refreshTargets points the hot-update manager at the inbounds the current
@@ -316,10 +342,23 @@ func (s *Syncer) refreshTargets(static []byte) error {
 // hotUpdate mutates the running inbound. Removals run first: a UUID change is a
 // removal plus an addition, and Xray rejects an addition while the old account
 // still occupies the email.
-func (s *Syncer) hotUpdate(ctx context.Context, diff userDiff) error {
+//
+// staleRevocations are the emails the config document grants but the panel does
+// not. They can exist on some managed inbounds only, so they are removed where
+// present; a reconcilable diff must be exact, because a missing account there means
+// the running Xray and the persisted set disagree.
+func (s *Syncer) hotUpdate(ctx context.Context, diff userDiff, staleRevocations []string) error {
+	absentTolerant, tolerates := s.users.(xraycore.AbsentUserRemover)
 	for _, email := range diff.removed {
 		if err := s.users.RemoveUser(ctx, email); err != nil {
 			return fmt.Errorf("remove user %q: %w", email, err)
+		}
+	}
+	if tolerates {
+		for _, email := range staleRevocations {
+			if err := absentTolerant.RemoveUserWherePresent(ctx, email); err != nil {
+				return fmt.Errorf("revoke client %q: %w", email, err)
+			}
 		}
 	}
 	for _, user := range diff.added {

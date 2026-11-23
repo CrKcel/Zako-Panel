@@ -89,4 +89,13 @@ type UserManager interface {
 	RemoveUser(ctx context.Context, email string) error
 }
 
+// AbsentUserRemover is implemented by user managers that can also run a removal
+// that tolerates an inbound without that account. An email can exist on some
+// managed inbounds only — a config adopted from the node lists its clients per
+// inbound — so a plain RemoveUser would abort on the first inbound that never had
+// it and leave the account revoked on the others.
+type AbsentUserRemover interface {
+	RemoveUserWherePresent(ctx context.Context, email string) error
+}
+
 var _ UserManager = (*HandlerClient)(nil)

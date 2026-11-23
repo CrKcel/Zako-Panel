@@ -15,7 +15,13 @@ import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
-import { emptyEndpointFormValue, endpointFormValueFrom, endpointRequestBody, type EndpointFormValue } from '../domain/endpoint-form';
+import {
+	emptyEndpointFormValue,
+	endpointFormValueFrom,
+	endpointParamsSummary,
+	endpointRequestBody,
+	type EndpointFormValue,
+} from '../domain/endpoint-form';
 import { healthDescriptor, nodeStatusDescriptor } from '../domain/status';
 import { DAY_SECONDS, trafficWindow } from '../domain/traffic';
 import { useI18n } from '../i18n';
@@ -68,11 +74,26 @@ const { refresh } = usePolling(async () => {
 const endpointForm = ref<EndpointFormValue>(emptyEndpointFormValue());
 const endpointFormRef = ref<FormInstance>();
 
+const vlessRealitySelected = computed(() => endpointForm.value.protocol === 'vless-reality');
+
+/** vless-reality, trojan and hysteria2 always run TLS; vmess only when its security is tls. */
+const sniRequired = computed(() => {
+	const { protocol, security } = endpointForm.value;
+	if (protocol === 'shadowsocks') return false;
+	if (protocol === 'vmess') return security !== 'none';
+	return true;
+});
+
+const obfsPasswordRequired = computed(() => endpointForm.value.protocol === 'hysteria2' && endpointForm.value.obfs === 'salamander');
+
 const endpointRules = computed<FormRules>(() => ({
 	name: [{ required: true, message: t('nodeDetail.endpoints.nameRequired'), trigger: 'blur' }],
 	host: [{ required: true, message: t('nodeDetail.endpoints.hostRequired'), trigger: 'blur' }],
-	sni: [{ required: true, message: t('nodeDetail.endpoints.sniRequired'), trigger: 'blur' }],
-	public_key: [{ required: true, message: t('nodeDetail.endpoints.publicKeyRequired'), trigger: 'blur' }],
+	sni: sniRequired.value ? [{ required: true, message: t('nodeDetail.endpoints.sniRequired'), trigger: 'blur' }] : [],
+	public_key: vlessRealitySelected.value ? [{ required: true, message: t('nodeDetail.endpoints.publicKeyRequired'), trigger: 'blur' }] : [],
+	obfs_password: obfsPasswordRequired.value
+		? [{ required: true, message: t('nodeDetail.endpoints.obfsPasswordRequired'), trigger: 'blur' }]
+		: [],
 }));
 
 const {
@@ -290,24 +311,9 @@ async function submitDeleteNode(): Promise<void> {
 						<span class="tnum">{{ row.port }}</span>
 					</template>
 				</el-table-column>
-				<el-table-column :label="t('nodeDetail.endpoints.sni')" min-width="160">
+				<el-table-column :label="t('nodeDetail.endpoints.params')" min-width="260">
 					<template #default="{ row }">
-						<span class="mono">{{ row.params.sni }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('nodeDetail.endpoints.publicKey')" min-width="180">
-					<template #default="{ row }">
-						<span class="mono">{{ row.params.public_key }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('nodeDetail.endpoints.shortId')" width="120">
-					<template #default="{ row }">
-						<span class="mono">{{ row.params.short_id || '—' }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('nodeDetail.endpoints.fingerprint')" width="120">
-					<template #default="{ row }">
-						<span class="mono">{{ row.params.fingerprint }}</span>
+						<span class="mono">{{ endpointParamsSummary(row as Endpoint) }}</span>
 					</template>
 				</el-table-column>
 				<el-table-column :label="t('common.status')" width="105">
@@ -378,7 +384,7 @@ async function submitDeleteNode(): Promise<void> {
 		destroy-on-close
 	>
 		<el-form ref="endpointFormRef" :model="endpointForm" :rules="endpointRules" label-width="140px">
-			<EndpointFormFields v-model="endpointForm" />
+			<EndpointFormFields v-model="endpointForm" :editing="editingEndpointId !== null" />
 		</el-form>
 		<template #footer>
 			<el-button @click="closeEndpoint">{{ t('common.cancel') }}</el-button>

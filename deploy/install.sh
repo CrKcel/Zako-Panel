@@ -79,9 +79,9 @@ Options:
   --host <host>        Public IP or domain (auto-detected if omitted)
   --xray-mirror <url>  Override Xray-core download base URL
 
-Existing Xray/V2Ray configuration is adopted as-is: VLESS + REALITY inbounds
-become panel endpoints and other protocols are left untouched. A node without a
-configuration receives the default template.
+Existing Xray/V2Ray configuration is adopted as-is: VLESS + REALITY, VMess,
+Trojan and Shadowsocks inbounds become panel endpoints and other protocols are
+left untouched. A node without a configuration receives the default template.
 EOF
 }
 

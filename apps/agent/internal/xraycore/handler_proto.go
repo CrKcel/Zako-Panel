@@ -20,6 +20,13 @@ import (
 //	  User { uint32 level = 1; string email = 2; xray.common.serial.TypedMessage account = 3; }
 //	proxy/vless/account.proto:
 //	  Account { string id = 1; string flow = 2; string encryption = 3; }
+//	proxy/vmess/account.proto:
+//	  Account { string id = 1; ... }  (alterId is not a field: 0 was its proto3 default)
+//	proxy/trojan/config.proto:
+//	  Account { string password = 1; }
+//	proxy/shadowsocks/config.proto:
+//	  Account { string password = 1; CipherType cipher_type = 2; bool iv_check = 3; }
+//	  CipherType { UNKNOWN = 0; AES_128_GCM = 5; AES_256_GCM = 6; CHACHA20_POLY1305 = 7; }
 //
 // The operation is a TypedMessage, not a protobuf oneof: Xray resolves the
 // embedded message by its full protobuf name and rejects an unknown one. The type
@@ -32,6 +39,9 @@ const (
 	addUserOperationType    = "xray.app.proxyman.command.AddUserOperation"
 	removeUserOperationType = "xray.app.proxyman.command.RemoveUserOperation"
 	vlessAccountType        = "xray.proxy.vless.Account"
+	vmessAccountType        = "xray.proxy.vmess.Account"
+	trojanAccountType       = "xray.proxy.trojan.Account"
+	shadowsocksAccountType  = "xray.proxy.shadowsocks.Account"
 )
 
 type typedMessage struct {
@@ -49,6 +59,28 @@ type vlessAccount struct {
 	ID         string
 	Flow       string
 	Encryption string
+}
+
+type vmessAccount struct {
+	ID string
+}
+
+type trojanAccount struct {
+	Password string
+}
+
+// shadowsocksCipher mirrors xray.proxy.shadowsocks.CipherType.
+type shadowsocksCipher uint64
+
+const (
+	shadowsocksCipherAES128GCM        shadowsocksCipher = 5
+	shadowsocksCipherAES256GCM        shadowsocksCipher = 6
+	shadowsocksCipherChaCha20Poly1305 shadowsocksCipher = 7
+)
+
+type shadowsocksAccount struct {
+	Password string
+	Cipher   shadowsocksCipher
 }
 
 type addUserOperation struct {
@@ -152,6 +184,118 @@ func encodeVlessAccount(account *vlessAccount) ([]byte, error) {
 		out = appendStringField(out, 3, account.Encryption)
 	}
 	return out, nil
+}
+
+func encodeVmessAccount(account *vmessAccount) ([]byte, error) {
+	if account.ID == "" {
+		return nil, fmt.Errorf("vmess account: id is required")
+	}
+	var out []byte
+	out = appendStringField(out, 1, account.ID)
+	return out, nil
+}
+
+func encodeTrojanAccount(account *trojanAccount) ([]byte, error) {
+	if account.Password == "" {
+		return nil, fmt.Errorf("trojan account: password is required")
+	}
+	var out []byte
+	out = appendStringField(out, 1, account.Password)
+	return out, nil
+}
+
+func encodeShadowsocksAccount(account *shadowsocksAccount) ([]byte, error) {
+	if account.Password == "" {
+		return nil, fmt.Errorf("shadowsocks account: password is required")
+	}
+	if account.Cipher == 0 {
+		return nil, fmt.Errorf("shadowsocks account: cipher is required")
+	}
+	var out []byte
+	out = appendStringField(out, 1, account.Password)
+	out = protowire.AppendTag(out, 2, protowire.VarintType)
+	out = protowire.AppendVarint(out, uint64(account.Cipher))
+	return out, nil
+}
+
+// shadowsocksCipherFor maps the panel method names onto Xray's CipherType. The
+// Supported set matches the panel's: ShadowSocks-2022 methods carry a fixed-length
+// base64 key instead of the node-client secret.
+func shadowsocksCipherFor(method string) (shadowsocksCipher, bool) {
+	switch method {
+	case "aes-128-gcm":
+		return shadowsocksCipherAES128GCM, true
+	case "aes-256-gcm":
+		return shadowsocksCipherAES256GCM, true
+	case "chacha20-ietf-poly1305":
+		return shadowsocksCipherChaCha20Poly1305, true
+	default:
+		return 0, false
+	}
+}
+
+// encodeAddUserRequest builds the AlterInbound request for one target. The account
+// encoding depends on the inbound protocol, and an unknown protocol fails here so
+// the syncer converges through the config-restart path instead of sending a
+// message Xray cannot resolve.
+func encodeAddUserRequest(target InboundTarget, user User) (*alterInboundRequest, error) {
+	account, err := encodeUserAccount(target, user)
+	if err != nil {
+		return nil, err
+	}
+	operation, err := encodeAddUserOperation(&addUserOperation{
+		User: protocolUser{
+			Level:   0,
+			Email:   user.Email,
+			Account: account,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &alterInboundRequest{
+		Tag:       target.Tag,
+		Operation: &typedMessage{Type: addUserOperationType, Value: operation},
+	}, nil
+}
+
+func encodeUserAccount(target InboundTarget, user User) (*typedMessage, error) {
+	switch target.Protocol {
+	case ProtocolVlessReality:
+		flow := user.Flow
+		if flow == "" {
+			flow = FlowVision
+		}
+		encoded, err := encodeVlessAccount(&vlessAccount{ID: user.UUID, Flow: flow})
+		if err != nil {
+			return nil, err
+		}
+		return &typedMessage{Type: vlessAccountType, Value: encoded}, nil
+	case ProtocolVmess:
+		encoded, err := encodeVmessAccount(&vmessAccount{ID: user.UUID})
+		if err != nil {
+			return nil, err
+		}
+		return &typedMessage{Type: vmessAccountType, Value: encoded}, nil
+	case ProtocolTrojan:
+		encoded, err := encodeTrojanAccount(&trojanAccount{Password: user.UUID})
+		if err != nil {
+			return nil, err
+		}
+		return &typedMessage{Type: trojanAccountType, Value: encoded}, nil
+	case ProtocolShadowsocks:
+		cipher, ok := shadowsocksCipherFor(target.Method)
+		if !ok {
+			return nil, fmt.Errorf("shadowsocks account: unsupported method %q", target.Method)
+		}
+		encoded, err := encodeShadowsocksAccount(&shadowsocksAccount{Password: user.UUID, Cipher: cipher})
+		if err != nil {
+			return nil, err
+		}
+		return &typedMessage{Type: shadowsocksAccountType, Value: encoded}, nil
+	default:
+		return nil, fmt.Errorf("user account: unknown inbound protocol %q", target.Protocol)
+	}
 }
 
 func decodeAlterInboundRequest(data []byte, request *alterInboundRequest) error {
@@ -357,6 +501,94 @@ func decodeVlessAccount(data []byte, account *vlessAccount) error {
 			return fmt.Errorf("vless account: skip field %d: %w", number, protowire.ParseError(consumed))
 		}
 		data = data[consumed:]
+	}
+	return nil
+}
+
+func decodeVmessAccount(data []byte, account *vmessAccount) error {
+	for len(data) > 0 {
+		number, wireType, length := protowire.ConsumeTag(data)
+		if length < 0 {
+			return fmt.Errorf("vmess account: consume tag: %w", protowire.ParseError(length))
+		}
+		data = data[length:]
+
+		if number == 1 && wireType == protowire.BytesType {
+			value, consumed := protowire.ConsumeString(data)
+			if consumed < 0 {
+				return fmt.Errorf("vmess account: consume id: %w", protowire.ParseError(consumed))
+			}
+			account.ID = value
+			data = data[consumed:]
+			continue
+		}
+
+		consumed := protowire.ConsumeFieldValue(number, wireType, data)
+		if consumed < 0 {
+			return fmt.Errorf("vmess account: skip field %d: %w", number, protowire.ParseError(consumed))
+		}
+		data = data[consumed:]
+	}
+	return nil
+}
+
+func decodeTrojanAccount(data []byte, account *trojanAccount) error {
+	for len(data) > 0 {
+		number, wireType, length := protowire.ConsumeTag(data)
+		if length < 0 {
+			return fmt.Errorf("trojan account: consume tag: %w", protowire.ParseError(length))
+		}
+		data = data[length:]
+
+		if number == 1 && wireType == protowire.BytesType {
+			value, consumed := protowire.ConsumeString(data)
+			if consumed < 0 {
+				return fmt.Errorf("trojan account: consume password: %w", protowire.ParseError(consumed))
+			}
+			account.Password = value
+			data = data[consumed:]
+			continue
+		}
+
+		consumed := protowire.ConsumeFieldValue(number, wireType, data)
+		if consumed < 0 {
+			return fmt.Errorf("trojan account: skip field %d: %w", number, protowire.ParseError(consumed))
+		}
+		data = data[consumed:]
+	}
+	return nil
+}
+
+func decodeShadowsocksAccount(data []byte, account *shadowsocksAccount) error {
+	for len(data) > 0 {
+		number, wireType, length := protowire.ConsumeTag(data)
+		if length < 0 {
+			return fmt.Errorf("shadowsocks account: consume tag: %w", protowire.ParseError(length))
+		}
+		data = data[length:]
+
+		switch {
+		case number == 1 && wireType == protowire.BytesType:
+			value, consumed := protowire.ConsumeString(data)
+			if consumed < 0 {
+				return fmt.Errorf("shadowsocks account: consume password: %w", protowire.ParseError(consumed))
+			}
+			account.Password = value
+			data = data[consumed:]
+		case number == 2 && wireType == protowire.VarintType:
+			value, consumed := protowire.ConsumeVarint(data)
+			if consumed < 0 {
+				return fmt.Errorf("shadowsocks account: consume cipher: %w", protowire.ParseError(consumed))
+			}
+			account.Cipher = shadowsocksCipher(value)
+			data = data[consumed:]
+		default:
+			consumed := protowire.ConsumeFieldValue(number, wireType, data)
+			if consumed < 0 {
+				return fmt.Errorf("shadowsocks account: skip field %d: %w", number, protowire.ParseError(consumed))
+			}
+			data = data[consumed:]
+		}
 	}
 	return nil
 }

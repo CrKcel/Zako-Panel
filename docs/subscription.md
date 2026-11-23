@@ -36,23 +36,41 @@
 
 ---
 
-## 3. 一次订阅请求的处理步骤
+## 3. 支持的协议与凭据
+
+每个 Endpoint 创建时确定协议，之后不可修改；参数按协议校验，存在 `endpoints.params_json` 里。
+
+| 协议 | Clash `type` | URI | 节点侧 |
+| --- | --- | --- | --- |
+| `vless-reality` | `vless` | `vless://` | Agent 接管 Xray 入站 |
+| `vmess` | `vmess` | `vmess://`（Base64 JSON） | Agent 接管 Xray 入站 |
+| `trojan` | `trojan` | `trojan://` | Agent 接管 Xray 入站 |
+| `shadowsocks` | `ss` | `ss://` | Agent 接管 Xray 入站 |
+| `hysteria2` | `hysteria2` | `hysteria2://` | 非 Xray 协议，端点由管理员手工创建 |
+
+**凭据模型**：一个“用户-节点”授权只生成一份凭据（`node_clients.vless_uuid`）。VLESS 和 VMess 把它当 UUID 下发，Trojan、Shadowsocks 和 Hysteria2 把它原样当密码下发，因此同一个用户在同一节点的所有协议共用这一个值，不需要额外的凭据表。
+
+协议适配器定义在 `apps/worker/src/protocols/`：每个协议一个文件，负责参数校验（Zod）、Clash 代理项和 URI 渲染，通过注册表统一接入。新增协议只需新增适配器并注册；需要 Agent 接管的协议还要同时加进 `AGENT_PROTOCOLS`。
+
+---
+
+## 4. 一次订阅请求的处理步骤
 
 1. **识别订阅**：从 URL 取出 `{token}`，算 SHA-256 哈希查 `subscriptions` 表。找不到或已撤销/过期 → 返回 `401` 或 `403`。
 2. **检查用户**：确认对应 `subscriber` 没被停用、没过期、当月没超流量 → 不满足返回 `403`。
 3. **批量取数据**：一次查出订阅档案（Profile）的模板规则、关联节点、用户授权节点以及当月已用流量。
-4. **筛选与重名处理**：按第 2 节的条件过滤出最终 Endpoint 列表。如果一个节点只有一个 Endpoint，节点显示名直接用节点名；有多个 Endpoint，则拼接成 `节点名-端点名`，保证不重名。
+4. **筛选与重名处理**：按第 2 节的条件过滤出最终 Endpoint 列表。如果一个节点只有一个 Endpoint，节点显示名直接用节点名；有多个 Endpoint，则拼接成 `节点名-端点名`，保证不重名。协议参数无法通过校验（比如历史数据不再满足新 schema）的 Endpoint 直接跳过。
 5. **渲染输出**：
-   - **Clash.Meta YAML**（`/clash.yaml`）：把筛选后的节点转成 VLESS + REALITY 的 `proxies`，再结合档案里存的 `clash_base_json`、`proxy_groups_json`、`rules_json` 拼成完整 YAML（所有敏感凭据会做唯一性校验）。
-   - **通用 URI**（`/uri`）：生成标准 `vless://` 链接，换行拼接后默认做 Base64 编码；带 `?encoding=plain` 则直接返回明文。
+   - **Clash.Meta YAML**（`/clash.yaml`）：把筛选后的 Endpoint 按各自协议渲染成 `proxies`，再结合档案里存的 `clash_base_json`、`proxy_groups_json`、`rules_json` 拼成完整 YAML（所有敏感凭据会做唯一性校验）。
+   - **通用 URI**（`/uri`）：按协议生成标准 URI（`vless://`、`vmess://`、`trojan://`、`ss://`、`hysteria2://`），换行拼接后默认做 Base64 编码；带 `?encoding=plain` 则直接返回明文。
 
 ---
 
-## 4. 响应头约定
+## 5. 响应头约定
 
 | 响应头 | 值 / 用途 |
 | --- | --- |
 | `Content-Type` | Clash 返回 `application/yaml; charset=utf-8`；URI 返回 `text/plain; charset=utf-8` |
 | `subscription-userinfo` | `upload=...; download=...; total=...; expire=...`，让客户端直接显示已用流量、总配额（`0` 表示不限）和到期时间 |
 | `profile-update-interval` | `6`，建议客户端每 6 小时自动更新一次订阅 |
-| `Cache-Control` | `private, no-store`，禁止 CDN 或代理缓存带有用户 UUID 的订阅内容 |
+| `Cache-Control` | `private, no-store`，禁止 CDN 或代理缓存带有用户凭据的订阅内容 |

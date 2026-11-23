@@ -4,9 +4,21 @@ import { AppError } from '../src/lib/errors';
 import { sha256Hex } from '../src/lib/hash';
 import { parseAgentToken } from '../src/lib/token';
 import { createEnrollmentToken, enrollNode } from '../src/services/enrollment-service';
-import { disableEndpoint, getNodeStatus, listEndpoints, listNodeClients, listNodes, rotateAgentToken } from '../src/services/node-service';
+import {
+	createEndpoint,
+	disableEndpoint,
+	getNodeStatus,
+	listEndpoints,
+	listNodeClients,
+	listNodes,
+	rotateAgentToken,
+	updateEndpoint,
+} from '../src/services/node-service';
 import { getClashSubscription } from '../src/services/subscription-service';
 import {
+	DEFAULT_PARAMS,
+	DEFAULT_TROJAN_PARAMS,
+	DEFAULT_VMESS_PARAMS,
 	nowSeconds,
 	readMeta,
 	seedEndpoint,
@@ -166,5 +178,54 @@ describe('endpoints', () => {
 	it('returns 404 for an endpoint that does not belong to the node', async () => {
 		const nodeId = await seedNode({ name: 'endpoint-owner-2' });
 		await expect(disableEndpoint(env.DB, nodeId, '01J2Z6Q8Y3V9M4K7T1B5C0D2E6')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+	});
+
+	it('creates an endpoint with the requested protocol and stores validated params', async () => {
+		const nodeId = await seedNode({ name: 'protocol-owner' });
+		const created = await createEndpoint(env.DB, nodeId, {
+			name: 'vmess-ws',
+			host: '198.51.100.9',
+			port: 8443,
+			protocol: 'vmess',
+			params: { ...DEFAULT_VMESS_PARAMS, unknown_field: 'dropped' },
+		});
+		expect(created.protocol).toBe('vmess');
+		expect(created.params).toEqual(DEFAULT_VMESS_PARAMS);
+
+		const listed = await listEndpoints(env.DB, nodeId);
+		expect(listed).toHaveLength(1);
+		expect(listed[0]).toMatchObject({ protocol: 'vmess', host: '198.51.100.9', port: 8443 });
+	});
+
+	it('rejects params that do not satisfy the protocol schema', async () => {
+		const nodeId = await seedNode({ name: 'invalid-params' });
+		await expect(
+			createEndpoint(env.DB, nodeId, {
+				name: 'obfs',
+				host: '198.51.100.10',
+				port: 443,
+				protocol: 'hysteria2',
+				params: { sni: 'www.example.com', obfs: 'salamander', obfs_password: '' },
+			}),
+		).rejects.toMatchObject({ status: 422, code: 'VALIDATION_ERROR' });
+
+		const rows = await env.DB.prepare('SELECT id FROM endpoints WHERE node_id = ?').bind(nodeId).all();
+		expect(rows.results).toHaveLength(0);
+	});
+
+	it('validates updated params against the stored protocol and keeps the protocol', async () => {
+		const nodeId = await seedNode({ name: 'update-protocol' });
+		const endpointId = await seedEndpoint(nodeId, { name: 'trojan', protocol: 'trojan' });
+
+		const updated = await updateEndpoint(env.DB, nodeId, endpointId, {
+			params: { ...DEFAULT_TROJAN_PARAMS, sni: 'other.example.com' },
+		});
+		expect(updated.protocol).toBe('trojan');
+		expect(updated.params).toMatchObject({ sni: 'other.example.com' });
+
+		await expect(updateEndpoint(env.DB, nodeId, endpointId, { params: DEFAULT_PARAMS })).rejects.toMatchObject({
+			status: 422,
+			code: 'VALIDATION_ERROR',
+		});
 	});
 });

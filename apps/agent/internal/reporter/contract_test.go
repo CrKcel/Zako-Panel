@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -157,23 +158,124 @@ func TestConfigFixture(t *testing.T) {
 	}
 }
 
+// enrollFixtureEndpoint is the write shape of one enrollment endpoint with the
+// params kept raw, so the test decodes the union the same way the Worker does.
+type enrollFixtureEndpoint struct {
+	Name     string          `json:"name"`
+	Protocol string          `json:"protocol"`
+	Port     int             `json:"port"`
+	Params   json.RawMessage `json:"params"`
+}
+
+// decodeEnrollParams picks the params struct named by the endpoint protocol.
+func decodeEnrollParams(t *testing.T, protocol string, raw json.RawMessage) EnrollEndpointParams {
+	t.Helper()
+	var params EnrollEndpointParams
+	switch protocol {
+	case "vless-reality":
+		params = &VlessRealityParams{}
+	case "vmess":
+		params = &VmessParams{}
+	case "trojan":
+		params = &TrojanParams{}
+	case "shadowsocks":
+		params = &ShadowsocksParams{}
+	default:
+		t.Fatalf("enrollment fixture uses protocol %q, which the agent cannot report", protocol)
+	}
+	if err := json.Unmarshal(raw, params); err != nil {
+		t.Fatalf("unmarshal %s params: %v", protocol, err)
+	}
+	return params
+}
+
 func TestEnrollFixtures(t *testing.T) {
-	var req EnrollRequest
-	if err := json.Unmarshal(readFixture(t, "agent-enroll.json"), &req); err != nil {
+	data := readFixture(t, "agent-enroll.json")
+	var request struct {
+		Name      string                  `json:"name"`
+		Host      string                  `json:"host"`
+		Endpoints []enrollFixtureEndpoint `json:"endpoints"`
+	}
+	if err := json.Unmarshal(data, &request); err != nil {
 		t.Fatalf("unmarshal enroll request: %v", err)
 	}
-	if req.Name != "edge-tokyo-01" || req.Host != "203.0.113.10" {
-		t.Errorf("unexpected enroll request: %+v", req)
+	if request.Name != "edge-tokyo-01" || request.Host != "203.0.113.10" {
+		t.Errorf("unexpected enroll request: %+v", request)
 	}
-	if len(req.Endpoints) != 1 {
-		t.Fatalf("endpoints = %d, want 1", len(req.Endpoints))
+	if len(request.Endpoints) == 0 {
+		t.Fatal("enroll request reports no endpoints")
 	}
-	endpoint := req.Endpoints[0]
-	if endpoint.Port != 443 || endpoint.Protocol != "vless-reality" || endpoint.Params.SNI != "www.microsoft.com" {
-		t.Errorf("unexpected enroll endpoint: %+v", endpoint)
+
+	// The vless-reality endpoint is first: the agent keeps the existing primary
+	// endpoint ahead of the added protocols.
+	first := request.Endpoints[0]
+	if first.Protocol != "vless-reality" || first.Port != 443 {
+		t.Fatalf("first endpoint = %+v, want the vless-reality endpoint", first)
 	}
-	if endpoint.Params.Flow != "xtls-rprx-vision" || endpoint.Params.Network != "tcp" {
-		t.Errorf("unexpected enroll params: %+v", endpoint.Params)
+	vless := decodeEnrollParams(t, first.Protocol, first.Params)
+	vlessParams, ok := vless.(*VlessRealityParams)
+	if !ok {
+		t.Fatalf("vless params = %T", vless)
+	}
+	if vlessParams.SNI != "www.microsoft.com" || vlessParams.Flow != "xtls-rprx-vision" || vlessParams.Network != "tcp" {
+		t.Errorf("vless params = %+v", vlessParams)
+	}
+	if vlessParams.PublicKey == "" || vlessParams.ShortID == "" || vlessParams.Fingerprint == "" {
+		t.Errorf("vless params = %+v, want the REALITY fields", vlessParams)
+	}
+
+	// The union must also decode the added protocols when the fixture carries
+	// them: a renamed field on either side has to fail here.
+	for _, endpoint := range request.Endpoints[1:] {
+		params := decodeEnrollParams(t, endpoint.Protocol, endpoint.Params)
+		switch protocol := params.(type) {
+		case *VmessParams:
+			if protocol.Security != "tls" || protocol.Network != "ws" || protocol.Path != "/ws" || protocol.Host == "" {
+				t.Errorf("vmess params = %+v", protocol)
+			}
+		case *TrojanParams:
+			if protocol.Network != "grpc" || protocol.Path != "trojan-grpc" || protocol.Host != "" {
+				t.Errorf("trojan params = %+v", protocol)
+			}
+			if protocol.SNI == "" {
+				t.Errorf("trojan params = %+v, want the TLS SNI", protocol)
+			}
+		case *ShadowsocksParams:
+			if protocol.Method != "aes-256-gcm" {
+				t.Errorf("shadowsocks params = %+v", protocol)
+			}
+		default:
+			t.Fatalf("unexpected decoded params %T", params)
+		}
+	}
+
+	// The agent writes these payloads, so the fixture decode alone cannot catch a
+	// broken write-side tag. Re-marshal every endpoint and compare it with the
+	// fixture object, including fields that are present but empty.
+	var wire struct {
+		Endpoints []map[string]any `json:"endpoints"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		t.Fatalf("unmarshal enroll request as wire objects: %v", err)
+	}
+	for index, endpoint := range request.Endpoints {
+		params := decodeEnrollParams(t, endpoint.Protocol, endpoint.Params)
+		encoded, err := json.Marshal(EnrollEndpoint{
+			Name:     endpoint.Name,
+			Protocol: endpoint.Protocol,
+			Port:     endpoint.Port,
+			Params:   params,
+		})
+		if err != nil {
+			t.Fatalf("marshal %s endpoint: %v", endpoint.Protocol, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(encoded, &got); err != nil {
+			t.Fatalf("unmarshal marshaled %s endpoint: %v", endpoint.Protocol, err)
+		}
+		if !reflect.DeepEqual(got, wire.Endpoints[index]) {
+			t.Errorf("%s endpoint = %v, want the fixture shape %v", endpoint.Protocol, got, wire.Endpoints[index])
+		}
 	}
 
 	var resp EnrollResponse
@@ -183,7 +285,34 @@ func TestEnrollFixtures(t *testing.T) {
 	if resp.NodeID != "01J2Z6Q8Y3V9M4K7T1B5C0D2E6" || resp.HeartbeatIntervalSeconds != 300 {
 		t.Errorf("unexpected enroll response: %+v", resp)
 	}
-	if len(resp.Endpoints) != 1 || resp.Endpoints[0].Port != 443 || resp.Endpoints[0].Protocol != "vless-reality" {
-		t.Errorf("unexpected enrolled endpoints: %+v", resp.Endpoints)
+	if len(resp.Endpoints) == 0 {
+		t.Fatal("enroll response has no endpoints")
+	}
+	if resp.Endpoints[0].Protocol != "vless-reality" || resp.Endpoints[0].Port != 443 {
+		t.Errorf("first enrolled endpoint = %+v, want the vless-reality endpoint", resp.Endpoints[0])
+	}
+	// Every stored endpoint the panel returns must be addressable by name and keep
+	// the protocol and port the agent reported.
+	stored := make(map[string]EnrolledEndpoint, len(resp.Endpoints))
+	for _, endpoint := range resp.Endpoints {
+		if endpoint.ID == "" || endpoint.Name == "" || endpoint.Port < 1 || endpoint.Port > 65535 {
+			t.Errorf("stored endpoint = %+v", endpoint)
+		}
+		switch endpoint.Protocol {
+		case "vless-reality", "vmess", "trojan", "shadowsocks":
+		default:
+			t.Errorf("stored endpoint protocol = %q, want an agent protocol", endpoint.Protocol)
+		}
+		stored[endpoint.Name] = endpoint
+	}
+	for _, endpoint := range request.Endpoints {
+		enrolled, ok := stored[endpoint.Name]
+		if !ok {
+			continue
+		}
+		if enrolled.Protocol != endpoint.Protocol || enrolled.Port != endpoint.Port {
+			t.Errorf("stored endpoint %q = %+v, want protocol %q on port %d",
+				endpoint.Name, enrolled, endpoint.Protocol, endpoint.Port)
+		}
 	}
 }

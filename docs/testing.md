@@ -8,7 +8,7 @@
 
 在 Vitest Workers 池中运行，每个测试套件启动前都会自动执行真实的 D1 迁移脚本，主要验证：
 
-- **订阅渲染**：Clash.Meta YAML 合法性、代理组/规则结构、通用 `vless://` URI 编码与 IPv6 处理
+- **订阅渲染**：Clash.Meta YAML 合法性、代理组/规则结构、五种协议的 Clash 代理项与 URI（`vless://`、`vmess://`、`trojan://`、`ss://`、`hysteria2://`）编码、IPv6 处理与协议参数失效时的跳过
 - **权限与生命周期**：Token 轮换/撤销、到期与超额拦截、无可用节点返回 `503`、Cloudflare Access JWT 校验
 - **节点状态**：`online` / `degraded` / `offline` / `disabled` 四种状态的派生逻辑
 - **流量幂等与同步**：重复 `report_id` 幂等、载荷不一致报 `409`、跨小时拆分校验、`ETag` / `304` 协商

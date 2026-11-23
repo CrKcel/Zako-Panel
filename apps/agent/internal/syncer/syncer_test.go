@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -171,6 +172,30 @@ func (a *fakeApplier) Apply(_ context.Context, config []byte) error {
 	return nil
 }
 
+// managedStaticConfig is the default render template: one tagged managed inbound,
+// so every sync can derive its hot-update targets.
+const managedStaticConfig = `{"inbounds": [
+  {"tag": "vless-reality", "port": 443, "protocol": "vless", "settings": {"clients": []},
+   "streamSettings": {"network": "tcp", "security": "reality",
+     "realitySettings": {"privateKey": "local-key"}}}
+]}`
+
+// mixedStaticConfig carries one inbound per managed protocol, so a sync can be
+// checked for per-protocol targets and for both converge paths.
+const mixedStaticConfig = `{"inbounds": [
+  {"tag": "vless-reality", "port": 443, "protocol": "vless", "settings": {"clients": []},
+   "streamSettings": {"network": "tcp", "security": "reality",
+     "realitySettings": {"privateKey": "local-key"}}},
+  {"tag": "vmess-ws", "port": 8443, "protocol": "vmess", "settings": {"clients": []},
+   "streamSettings": {"network": "ws", "security": "tls",
+     "tlsSettings": {"serverNames": ["cdn.example.com"]}}},
+  {"tag": "trojan-grpc", "port": 9000, "protocol": "trojan", "settings": {"clients": []},
+   "streamSettings": {"network": "grpc", "security": "tls",
+     "tlsSettings": {"serverNames": ["www.example.com"]}}},
+  {"tag": "ss-gcm", "port": 9001, "protocol": "shadowsocks",
+   "settings": {"method": "aes-256-gcm", "clients": []}}
+]}`
+
 type fixture struct {
 	syncer  *Syncer
 	store   *state.Store
@@ -193,7 +218,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{
 		store:   store,
 		users:   &fakeUsers{live: map[string]string{}},
-		config:  &fakeConfig{present: true, static: []byte(`{"clients":[]}`)},
+		config:  &fakeConfig{present: true, static: []byte(managedStaticConfig)},
 		applier: &fakeApplier{},
 		fetcher: &fakeFetcher{signalled: make(chan fetchCall, 8)},
 		path:    filepath.Join(directory, "users.json"),
@@ -207,9 +232,14 @@ func newFixture(t *testing.T) *fixture {
 // agent restart: the new instance starts from the store and disk only.
 func (f *fixture) rebuild(t *testing.T) {
 	t.Helper()
+	f.rebuildWith(t, f.users)
+}
+
+func (f *fixture) rebuildWith(t *testing.T, users xraycore.UserManager) {
+	t.Helper()
 	syncer, err := New(Options{
 		Fetcher:   f.fetcher,
-		Users:     f.users,
+		Users:     users,
 		Store:     f.store,
 		UsersPath: f.path,
 		Config:    f.config,
@@ -220,6 +250,32 @@ func (f *fixture) rebuild(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	f.syncer = syncer
+}
+
+// targetUsers is a *fakeUsers that also accepts the protocol-aware hot-update
+// targets, like *xraycore.HandlerClient does in production.
+type targetUsers struct {
+	*fakeUsers
+	targets []xraycore.InboundTarget
+	setErr  error
+}
+
+func (u *targetUsers) SetInboundTargets(targets []xraycore.InboundTarget) error {
+	if u.setErr != nil {
+		return u.setErr
+	}
+	u.targets = append([]xraycore.InboundTarget(nil), targets...)
+	return nil
+}
+
+// newTargetFixture builds a fixture whose user manager accepts targets. The restart
+// fallback still writes into the underlying fakeUsers through the applier.
+func newTargetFixture(t *testing.T) (*fixture, *targetUsers) {
+	t.Helper()
+	f := newFixture(t)
+	targets := &targetUsers{fakeUsers: f.users}
+	f.rebuildWith(t, targets)
+	return f, targets
 }
 
 func (f *fixture) appliedVersion(t *testing.T) int64 {
@@ -480,7 +536,7 @@ func TestSyncOnceRepairsConfigAfterInterruptedApply(t *testing.T) {
 	if err := f.store.SetMetaInt64(state.KeyUsersVersion, 13); err != nil {
 		t.Fatalf("SetMetaInt64: %v", err)
 	}
-	f.config.static = []byte(`{"clients":[]}`)
+	f.config.static = []byte(managedStaticConfig)
 	f.fetcher.set(usersOf(13, map[string]string{"u_a": "uuid-a"}), false, nil)
 
 	if err := f.syncer.SyncOnce(context.Background()); err != nil {
@@ -555,6 +611,79 @@ func TestSyncOnceIgnoresStaleAndMissingConfig(t *testing.T) {
 	f.fetcher.set(usersOf(15, map[string]string{"u_a": "uuid-a"}), false, nil)
 	if err := f.syncer.SyncOnce(context.Background()); !errors.Is(err, ErrNoConfig) {
 		t.Errorf("SyncOnce error = %v, want ErrNoConfig", err)
+	}
+}
+
+func TestSyncOnceHotUpdatesEveryManagedProtocol(t *testing.T) {
+	f, targets := newTargetFixture(t)
+	f.config.static = []byte(mixedStaticConfig)
+	f.fetcher.set(usersOf(13, map[string]string{"u_a": "secret-a"}), false, nil)
+
+	if err := f.syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+
+	// The targets are re-derived from the document on every sync: one per managed
+	// inbound, with the account protocol and the shadowsocks cipher.
+	want := []xraycore.InboundTarget{
+		{Tag: "vless-reality", Protocol: xraycore.ProtocolVlessReality},
+		{Tag: "vmess-ws", Protocol: xraycore.ProtocolVmess},
+		{Tag: "trojan-grpc", Protocol: xraycore.ProtocolTrojan},
+		{Tag: "ss-gcm", Protocol: xraycore.ProtocolShadowsocks, Method: "aes-256-gcm"},
+	}
+	if !reflect.DeepEqual(targets.targets, want) {
+		t.Errorf("targets = %+v, want %+v", targets.targets, want)
+	}
+	if len(f.users.added) != 1 || f.users.added[0].UUID != "secret-a" {
+		t.Errorf("added = %+v, want the single node-client secret", f.users.added)
+	}
+	if len(f.applier.applied) != 0 {
+		t.Errorf("restart fallback used for a clean hot update: %d applies", len(f.applier.applied))
+	}
+	if got := f.appliedVersion(t); got != 13 {
+		t.Errorf("applied version = %d, want 13", got)
+	}
+}
+
+func TestSyncOnceMixedProtocolNodeFallsBackToRestart(t *testing.T) {
+	f, targets := newTargetFixture(t)
+	f.config.static = []byte(mixedStaticConfig)
+	f.users.addErr = map[string]error{"u_a": errors.New("inbound rejected the user")}
+	f.fetcher.set(usersOf(13, map[string]string{"u_a": "secret-a"}), false, nil)
+
+	if err := f.syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+
+	// A failed per-protocol hot update converges through the config restart, which
+	// reparses the rendered document on the node.
+	if len(targets.targets) != 4 {
+		t.Errorf("targets = %+v, want one per managed protocol", targets.targets)
+	}
+	if len(f.applier.applied) != 1 {
+		t.Fatalf("restart applies = %d, want the fallback to run once", len(f.applier.applied))
+	}
+	if got := f.appliedVersion(t); got != 13 {
+		t.Errorf("applied version = %d, want 13 after the fallback", got)
+	}
+	if got := f.users.snapshot(); got != `["u_a"]` {
+		t.Errorf("live users after the restart fallback = %s, want the converged set", got)
+	}
+}
+
+func TestSyncOnceStopsWhenTargetsCannotBeDerived(t *testing.T) {
+	f, targets := newTargetFixture(t)
+	targets.setErr = errors.New("unknown inbound protocol")
+	f.fetcher.set(usersOf(13, map[string]string{"u_a": "uuid-a"}), false, nil)
+
+	if err := f.syncer.SyncOnce(context.Background()); err == nil {
+		t.Fatal("SyncOnce reported success although the targets were rejected")
+	}
+	if len(f.users.added) != 0 {
+		t.Errorf("added = %+v, want no hot update without targets", f.users.added)
+	}
+	if got := f.appliedVersion(t); got != 0 {
+		t.Errorf("applied version = %d, want 0 because nothing was applied", got)
 	}
 }
 

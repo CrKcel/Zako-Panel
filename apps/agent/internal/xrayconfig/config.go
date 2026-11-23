@@ -208,15 +208,15 @@ func (f ConfigFile) Write(config []byte) error {
 
 // RenderConfig returns the complete config document for users.
 //
-// The client list of every panel-managed inbound is replaced. Every other field
-// and every inbound of a protocol the panel does not implement stays untouched,
-// including the API inbound, routing, policy and the REALITY parameters. Unknown
-// fields are carried through because the document is decoded as generic JSON
-// rather than into a struct.
+// The client list of every panel-managed inbound is replaced with the account
+// shape of that inbound's protocol. Every other field and every inbound the panel
+// does not implement stays untouched, including the API inbound, routing, policy
+// and the REALITY parameters. Unknown fields are carried through because the
+// document is decoded as generic JSON rather than into a struct.
 //
-// privateKey is merged into each realitySettings block that lacks one. A config
-// that already carries a key keeps it, which lets an operator pin a key that is
-// not stored in reality_private_key_path.
+// privateKey is merged into each vless realitySettings block that lacks one. A
+// config that already carries a key keeps it, which lets an operator pin a key that
+// is not stored in reality_private_key_path.
 func RenderConfig(static []byte, users []xraycore.User, privateKey string) ([]byte, error) {
 	var document map[string]any
 	if err := json.Unmarshal(static, &document); err != nil {
@@ -240,14 +240,18 @@ func RenderConfig(static []byte, users []xraycore.User, privateKey string) ([]by
 		if !ok {
 			return nil, errors.New("xray: managed inbound has no settings object")
 		}
-		settings["clients"] = renderClients(users)
-		if err := mergeRealityPrivateKey(inbound, privateKey); err != nil {
+		clients, err := renderClients(protocolOf(inbound), shadowsocksMethod(inbound), users)
+		if err != nil {
+			return nil, err
+		}
+		settings["clients"] = clients
+		if err := mergeManagedRealityKey(inbound, privateKey); err != nil {
 			return nil, err
 		}
 		inbounds[index] = inbound
 	}
 	if managed == 0 {
-		return nil, errors.New("xray: config has no vless reality inbound")
+		return nil, errors.New("xray: config has no managed inbound")
 	}
 	document["inbounds"] = inbounds
 
@@ -260,25 +264,54 @@ func RenderConfig(static []byte, users []xraycore.User, privateKey string) ([]by
 
 // renderClients emits the client list in email order so two renders of the same
 // set produce identical bytes and cannot look like a spurious config change.
-func renderClients(users []xraycore.User) []any {
+func renderClients(protocol xraycore.Protocol, method string, users []xraycore.User) ([]any, error) {
 	sorted := make([]xraycore.User, len(users))
 	copy(sorted, users)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Email < sorted[j].Email })
 
 	clients := make([]any, 0, len(sorted))
 	for _, user := range sorted {
+		client, err := renderClient(protocol, method, user)
+		if err != nil {
+			return nil, err
+		}
+		clients = append(clients, client)
+	}
+	return clients, nil
+}
+
+// renderClient stores the node-client secret in the account shape of the inbound's
+// protocol: the UUID for vless and vmess, the password verbatim for trojan and
+// shadowsocks. The shadowsocks inbound also pins the cipher on every client account.
+func renderClient(protocol xraycore.Protocol, method string, user xraycore.User) (map[string]any, error) {
+	switch protocol {
+	case xraycore.ProtocolVlessReality:
 		flow := user.Flow
 		if flow == "" {
 			flow = xraycore.FlowVision
 		}
-		clients = append(clients, map[string]any{
-			"id":    user.UUID,
-			"flow":  flow,
-			"email": user.Email,
-			"level": 0,
-		})
+		return map[string]any{"id": user.UUID, "flow": flow, "email": user.Email, "level": 0}, nil
+	case xraycore.ProtocolVmess:
+		return map[string]any{"id": user.UUID, "alterId": 0, "email": user.Email, "level": 0}, nil
+	case xraycore.ProtocolTrojan:
+		return map[string]any{"password": user.UUID, "email": user.Email, "level": 0}, nil
+	case xraycore.ProtocolShadowsocks:
+		if method == "" {
+			return nil, errors.New("xray: shadowsocks inbound has no supported method")
+		}
+		return map[string]any{"password": user.UUID, "email": user.Email, "level": 0, "method": method}, nil
+	default:
+		return nil, fmt.Errorf("xray: unknown managed protocol %q", protocol)
 	}
-	return clients
+}
+
+// mergeManagedRealityKey fills the local key into a vless inbound only: the other
+// managed protocols terminate no REALITY connection.
+func mergeManagedRealityKey(inbound map[string]any, privateKey string) error {
+	if protocolOf(inbound) != xraycore.ProtocolVlessReality {
+		return nil
+	}
+	return mergeRealityPrivateKey(inbound, privateKey)
 }
 
 func mergeRealityPrivateKey(inbound map[string]any, privateKey string) error {

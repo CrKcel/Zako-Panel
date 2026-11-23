@@ -230,8 +230,15 @@ type EnrollRequest struct {
 	Endpoints    []EnrollEndpoint `json:"endpoints"`
 }
 
-// EnrollEndpointParams mirrors the panel's VLESS + REALITY parameters.
-type EnrollEndpointParams struct {
+// EnrollEndpointParams is the protocol-specific parameter payload of one
+// enrollment endpoint. The concrete types below own the JSON field names, and both
+// sides of the contract pick the type by switching on EnrollEndpoint.Protocol.
+type EnrollEndpointParams interface {
+	enrollEndpointParams()
+}
+
+// VlessRealityParams mirrors the panel's VLESS + REALITY parameters.
+type VlessRealityParams struct {
 	SNI         string `json:"sni"`
 	PublicKey   string `json:"public_key"`
 	ShortID     string `json:"short_id"`
@@ -239,6 +246,33 @@ type EnrollEndpointParams struct {
 	Flow        string `json:"flow"`
 	Network     string `json:"network"`
 }
+
+// VmessParams mirrors the panel's VMess parameters.
+type VmessParams struct {
+	Security string `json:"security"`
+	SNI      string `json:"sni"`
+	Network  string `json:"network"`
+	Path     string `json:"path"`
+	Host     string `json:"host"`
+}
+
+// TrojanParams mirrors the panel's Trojan parameters.
+type TrojanParams struct {
+	SNI     string `json:"sni"`
+	Network string `json:"network"`
+	Path    string `json:"path"`
+	Host    string `json:"host"`
+}
+
+// ShadowsocksParams mirrors the panel's Shadowsocks parameters.
+type ShadowsocksParams struct {
+	Method string `json:"method"`
+}
+
+func (VlessRealityParams) enrollEndpointParams() {}
+func (VmessParams) enrollEndpointParams()        {}
+func (TrojanParams) enrollEndpointParams()       {}
+func (ShadowsocksParams) enrollEndpointParams()  {}
 
 // EnrollEndpoint describes one inbound the node adopted or created.
 type EnrollEndpoint struct {

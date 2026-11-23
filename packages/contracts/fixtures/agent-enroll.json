@@ -16,6 +16,37 @@
 				"flow": "xtls-rprx-vision",
 				"network": "tcp"
 			}
+		},
+		{
+			"name": "vmess-ws",
+			"protocol": "vmess",
+			"port": 8443,
+			"params": {
+				"security": "tls",
+				"sni": "cdn.example.com",
+				"network": "ws",
+				"path": "/ws",
+				"host": "cdn.example.com"
+			}
+		},
+		{
+			"name": "trojan-grpc",
+			"protocol": "trojan",
+			"port": 9000,
+			"params": {
+				"sni": "www.example.com",
+				"network": "grpc",
+				"path": "trojan-grpc",
+				"host": ""
+			}
+		},
+		{
+			"name": "ss-2022",
+			"protocol": "shadowsocks",
+			"port": 9001,
+			"params": {
+				"method": "aes-256-gcm"
+			}
 		}
 	]
 }

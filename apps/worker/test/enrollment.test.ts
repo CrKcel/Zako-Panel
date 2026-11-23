@@ -1,10 +1,12 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import type { VlessRealityParams } from '../src/protocols/vless-reality';
 import { sha256Hex } from '../src/lib/hash';
 import { parseAgentToken } from '../src/lib/token';
 import { createEnrollmentToken, enrollNode, listEnrollmentTokens, revokeEnrollmentToken } from '../src/services/enrollment-service';
 import { getNode, listNodeClients } from '../src/services/node-service';
-import { nowSeconds, seedMeta, seedSubscriber } from './helpers';
+import type { AgentEndpointProtocol } from '@zako/contracts';
+import { DEFAULT_SHADOWSOCKS_PARAMS, DEFAULT_TROJAN_PARAMS, DEFAULT_VMESS_PARAMS, nowSeconds, seedMeta, seedSubscriber } from './helpers';
 
 function enrollEndpoint(port = 443) {
 	return {
@@ -88,7 +90,9 @@ describe('node enrollment tokens', () => {
 		// Duplicate inbound tags are disambiguated so the unique (node, name) index holds.
 		expect(detail.endpoints.map((endpoint) => endpoint.name).sort()).toEqual(['vless-reality', 'vless-reality-2']);
 		expect(detail.endpoints[0]?.host).toBe('203.0.113.20');
-		expect(detail.endpoints[0]?.params.public_key).toBe('m1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE');
+		expect(detail.endpoints[0]?.protocol).toBe('vless-reality');
+		const params = detail.endpoints[0]?.params as VlessRealityParams;
+		expect(params.public_key).toBe('m1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE');
 
 		const clients = await listNodeClients(env.DB, enrolled.node_id);
 		expect(clients).toHaveLength(1);
@@ -184,5 +188,65 @@ describe('node enrollment tokens', () => {
 			}),
 		});
 		expect(retryRes.status).toBe(201);
+	});
+});
+
+describe('multi-protocol enrollment', () => {
+	it('stores every reported protocol with its own params', async () => {
+		const created = await createEnrollmentToken(env.DB, {}, 'admin@example.com');
+		const enrolled = await enrollNode(env.DB, `Bearer ${created.token}`, {
+			name: 'mixed',
+			host: '203.0.113.30',
+			endpoints: [
+				enrollEndpoint(443),
+				{ name: 'vmess', protocol: 'vmess', port: 8443, params: DEFAULT_VMESS_PARAMS },
+				{ name: 'trojan', protocol: 'trojan', port: 9000, params: DEFAULT_TROJAN_PARAMS },
+				{ name: 'ss', protocol: 'shadowsocks', port: 9001, params: DEFAULT_SHADOWSOCKS_PARAMS },
+			],
+		});
+
+		expect(enrolled.endpoints.map((endpoint) => endpoint.protocol).sort()).toEqual(['shadowsocks', 'trojan', 'vless-reality', 'vmess']);
+
+		const detail = await getNode(env.DB, enrolled.node_id);
+		const byProtocol = new Map(detail.endpoints.map((endpoint) => [endpoint.protocol, endpoint]));
+		expect(byProtocol.get('vmess')?.port).toBe(8443);
+		expect(byProtocol.get('vmess')?.params).toEqual(DEFAULT_VMESS_PARAMS);
+		expect(byProtocol.get('trojan')?.params).toEqual(DEFAULT_TROJAN_PARAMS);
+		expect(byProtocol.get('shadowsocks')?.params).toEqual(DEFAULT_SHADOWSOCKS_PARAMS);
+	});
+
+	it('rejects params that do not match the reported protocol', async () => {
+		const created = await createEnrollmentToken(env.DB, {}, 'admin@example.com');
+		await expect(
+			enrollNode(env.DB, `Bearer ${created.token}`, {
+				name: 'bad-params',
+				host: '203.0.113.31',
+				endpoints: [{ name: 'vmess', protocol: 'vmess', port: 443, params: DEFAULT_TROJAN_PARAMS }],
+			}),
+		).rejects.toMatchObject({ status: 422, code: 'VALIDATION_ERROR' });
+
+		// The token survives a rejected payload so the operator can retry the install.
+		const tokens = await listEnrollmentTokens(env.DB, { limit: 10 });
+		expect(tokens.items.find((item) => item.id === created.enrollment_token.id)?.status).toBe('active');
+	});
+
+	it('refuses a protocol the agent cannot manage', async () => {
+		const created = await createEnrollmentToken(env.DB, {}, 'admin@example.com');
+		await expect(
+			enrollNode(env.DB, `Bearer ${created.token}`, {
+				name: 'hysteria',
+				host: '203.0.113.32',
+				endpoints: [
+					{
+						// Hysteria2 endpoints are operator-declared; the agent schema already
+						// rejects the value, and the service repeats the check.
+						name: 'hy2',
+						protocol: 'hysteria2' as AgentEndpointProtocol,
+						port: 443,
+						params: { sni: 'www.example.com', obfs: 'none', obfs_password: '' },
+					},
+				],
+			}),
+		).rejects.toMatchObject({ status: 422, code: 'VALIDATION_ERROR' });
 	});
 });

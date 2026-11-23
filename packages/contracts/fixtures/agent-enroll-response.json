@@ -8,6 +8,24 @@
 			"name": "vless-reality",
 			"protocol": "vless-reality",
 			"port": 443
+		},
+		{
+			"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E8",
+			"name": "vmess-ws",
+			"protocol": "vmess",
+			"port": 8443
+		},
+		{
+			"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E9",
+			"name": "trojan-grpc",
+			"protocol": "trojan",
+			"port": 9000
+		},
+		{
+			"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2EA",
+			"name": "ss-2022",
+			"protocol": "shadowsocks",
+			"port": 9001
 		}
 	]
 }

@@ -1747,8 +1747,7 @@ components:
         name:
           type: string
         protocol:
-          type: string
-          enum: [vless-reality]
+          $ref: '#/components/schemas/EndpointProtocol'
         host:
           type: string
         port:
@@ -1756,13 +1755,28 @@ components:
           minimum: 1
           maximum: 65535
         params:
-          $ref: '#/components/schemas/VlessRealityParams'
+          $ref: '#/components/schemas/ProtocolParams'
         enabled:
           type: boolean
         created_at:
           type: integer
         updated_at:
           type: integer
+    EndpointProtocol:
+      type: string
+      enum: [vless-reality, vmess, trojan, shadowsocks, hysteria2]
+    AgentEndpointProtocol:
+      description: Protocols the node agent can adopt and keep in sync.
+      type: string
+      enum: [vless-reality, vmess, trojan, shadowsocks]
+    ProtocolParams:
+      description: Parameter object matching the endpoint protocol.
+      oneOf:
+        - $ref: '#/components/schemas/VlessRealityParams'
+        - $ref: '#/components/schemas/VmessParams'
+        - $ref: '#/components/schemas/TrojanParams'
+        - $ref: '#/components/schemas/ShadowsocksParams'
+        - $ref: '#/components/schemas/Hysteria2Params'
     VlessRealityParams:
       type: object
       required: [sni, public_key, short_id, fingerprint, flow, network]
@@ -1781,6 +1795,57 @@ components:
         network:
           type: string
           enum: [tcp]
+    VmessParams:
+      type: object
+      required: [security, sni, network, path, host]
+      properties:
+        security:
+          type: string
+          enum: [tls, none]
+        sni:
+          type: string
+        network:
+          type: string
+          enum: [tcp, ws, grpc]
+        path:
+          description: WebSocket path or gRPC service name; an empty string keeps the client default.
+          type: string
+        host:
+          description: WebSocket Host header or gRPC authority; an empty string omits it.
+          type: string
+    TrojanParams:
+      type: object
+      required: [sni, network, path, host]
+      properties:
+        sni:
+          type: string
+        network:
+          type: string
+          enum: [tcp, ws, grpc]
+        path:
+          description: WebSocket path or gRPC service name; an empty string keeps the client default.
+          type: string
+        host:
+          description: WebSocket Host header or gRPC authority; an empty string omits it.
+          type: string
+    ShadowsocksParams:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [aes-128-gcm, aes-256-gcm, chacha20-ietf-poly1305]
+    Hysteria2Params:
+      type: object
+      required: [sni, obfs, obfs_password]
+      properties:
+        sni:
+          type: string
+        obfs:
+          type: string
+          enum: [none, salamander]
+        obfs_password:
+          type: string
     ProxyGroup:
       type: object
       additionalProperties: true
@@ -1868,7 +1933,7 @@ components:
           description: Must match the inbound client email so statistics attribute traffic.
         vless_uuid:
           type: string
-          description: Client UUID for the node-local inbound entry.
+          description: Client credential for the node-local inbound entry. UUID-based protocols use it as the UUID; password-based protocols use it verbatim as the password.
         enabled:
           type: boolean
     ClashPreview:
@@ -2259,7 +2324,7 @@ components:
           maximum: 900
     CreateEndpointRequest:
       type: object
-      required: [name, host, port, params]
+      required: [name, host, port, protocol, params]
       properties:
         name:
           type: string
@@ -2269,9 +2334,12 @@ components:
           type: integer
           minimum: 1
           maximum: 65535
+        protocol:
+          $ref: '#/components/schemas/EndpointProtocol'
         params:
-          $ref: '#/components/schemas/VlessRealityParams'
+          $ref: '#/components/schemas/ProtocolParams'
     UpdateEndpointRequest:
+      description: The protocol of an endpoint is fixed at creation; params are validated against it.
       type: object
       minProperties: 1
       properties:
@@ -2284,7 +2352,7 @@ components:
           minimum: 1
           maximum: 65535
         params:
-          $ref: '#/components/schemas/VlessRealityParams'
+          $ref: '#/components/schemas/ProtocolParams'
         enabled:
           type: boolean
     CreateProfileRequest:
@@ -2468,14 +2536,13 @@ components:
         name:
           type: string
         protocol:
-          type: string
-          enum: [vless-reality]
+          $ref: '#/components/schemas/AgentEndpointProtocol'
         port:
           type: integer
           minimum: 1
           maximum: 65535
         params:
-          $ref: '#/components/schemas/VlessRealityParams'
+          $ref: '#/components/schemas/ProtocolParams'
     AgentEnrollResponse:
       type: object
       required: [node_id, agent_token, heartbeat_interval_seconds, endpoints]
@@ -2497,6 +2564,6 @@ components:
               name:
                 type: string
               protocol:
-                type: string
+                $ref: '#/components/schemas/AgentEndpointProtocol'
               port:
                 type: integer

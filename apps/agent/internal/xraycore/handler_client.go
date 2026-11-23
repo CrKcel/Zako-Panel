@@ -26,9 +26,10 @@ const defaultHandlerCallTimeout = 5 * time.Second
 type HandlerClient struct {
 	conn    *grpc.ClientConn
 	timeout time.Duration
-	// tags names every managed inbound. An adopted node can expose more than one
-	// VLESS + REALITY inbound, and HandlerService addresses inbounds by tag.
-	tags []string
+	// targets names every managed inbound with the protocol its account encoding
+	// belongs to. An adopted node can expose more than one inbound, and one user
+	// needs a different account message per protocol.
+	targets []InboundTarget
 }
 
 // HandlerClientOption customizes a HandlerClient.
@@ -44,9 +45,9 @@ func WithHandlerCallTimeout(timeout time.Duration) HandlerClientOption {
 }
 
 // NewHandlerClient dials target without blocking. inboundTag names the initial
-// VLESS inbound to mutate; the syncer refreshes the tag set from the config
+// managed inbound to mutate; the syncer refreshes the targets from the config
 // document before each hot update, because HandlerService addresses inbounds by
-// tag rather than by protocol.
+// tag and every inbound needs the account encoding of its own protocol.
 func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*HandlerClient, error) {
 	if err := validateTarget(target); err != nil {
 		return nil, err
@@ -59,7 +60,9 @@ func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*
 	for _, opt := range opts {
 		opt(client)
 	}
-	if err := client.SetInboundTags([]string{inboundTag}); err != nil {
+	// The protocol stays unknown until the syncer reads the document; an AddUser
+	// before that refresh fails and converges through the config-restart path.
+	if err := client.SetInboundTargets([]InboundTarget{{Tag: inboundTag}}); err != nil {
 		return nil, err
 	}
 
@@ -74,29 +77,30 @@ func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*
 	return client, nil
 }
 
-// SetInboundTags replaces the managed inbound tags. Empty and duplicate entries
-// are dropped so a config with an untagged inbound cannot produce a no-op RPC.
-func (c *HandlerClient) SetInboundTags(tags []string) error {
-	seen := make(map[string]bool, len(tags))
-	normalized := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		trimmed := strings.TrimSpace(tag)
-		if trimmed == "" || seen[trimmed] {
+// SetInboundTargets replaces the managed inbounds. Entries without a tag and
+// duplicate tags are dropped so a malformed config cannot produce a no-op RPC.
+func (c *HandlerClient) SetInboundTargets(targets []InboundTarget) error {
+	seen := make(map[string]bool, len(targets))
+	normalized := make([]InboundTarget, 0, len(targets))
+	for _, target := range targets {
+		tag := strings.TrimSpace(target.Tag)
+		if tag == "" || seen[tag] {
 			continue
 		}
-		seen[trimmed] = true
-		normalized = append(normalized, trimmed)
+		seen[tag] = true
+		target.Tag = tag
+		normalized = append(normalized, target)
 	}
 	if len(normalized) == 0 {
-		return errors.New("xray: at least one inbound tag is required")
+		return errors.New("xray: at least one inbound target is required")
 	}
-	c.tags = normalized
+	c.targets = normalized
 	return nil
 }
 
-// InboundTags returns the tags hot updates currently target.
-func (c *HandlerClient) InboundTags() []string {
-	return append([]string(nil), c.tags...)
+// InboundTargets returns the inbounds hot updates currently target.
+func (c *HandlerClient) InboundTargets() []InboundTarget {
+	return append([]InboundTarget(nil), c.targets...)
 }
 
 // Close releases the gRPC connection. It is safe to call once at shutdown.
@@ -112,10 +116,10 @@ func (c *HandlerClient) Close() error {
 	return nil
 }
 
-// AddUser adds a VLESS client with level 0 and the REALITY vision flow. Xray
-// rejects a second user with the same email, so a replay after a partially
-// applied diff fails; the syncer treats that as a signal to converge by applying
-// the config file instead of retrying the same delta.
+// AddUser adds the user to every managed inbound with the account encoding of that
+// inbound's protocol. Xray rejects a second user with the same email, so a replay
+// after a partially applied diff fails; the syncer treats that as a signal to
+// converge by applying the config file instead of retrying the same delta.
 func (c *HandlerClient) AddUser(ctx context.Context, user User) error {
 	if strings.TrimSpace(user.Email) == "" {
 		return errors.New("xray: add user: email is required")
@@ -123,40 +127,22 @@ func (c *HandlerClient) AddUser(ctx context.Context, user User) error {
 	if strings.TrimSpace(user.UUID) == "" {
 		return errors.New("xray: add user: uuid is required")
 	}
-	flow := user.Flow
-	if flow == "" {
-		flow = FlowVision
-	}
 
-	account, err := encodeVlessAccount(&vlessAccount{ID: user.UUID, Flow: flow})
-	if err != nil {
-		return fmt.Errorf("xray: add user: %w", err)
-	}
-	operation, err := encodeAddUserOperation(&addUserOperation{
-		User: protocolUser{
-			Level:   0,
-			Email:   user.Email,
-			Account: &typedMessage{Type: vlessAccountType, Value: account},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("xray: add user: %w", err)
-	}
-
-	for _, tag := range c.tags {
-		request := &alterInboundRequest{
-			Tag:       tag,
-			Operation: &typedMessage{Type: addUserOperationType, Value: operation},
+	for _, target := range c.targets {
+		request, err := encodeAddUserRequest(target, user)
+		if err != nil {
+			return fmt.Errorf("xray: add user to inbound %q: %w", target.Tag, err)
 		}
 		if err := c.alterInbound(ctx, request); err != nil {
-			return fmt.Errorf("xray: add user to inbound %q: %w", tag, err)
+			return fmt.Errorf("xray: add user to inbound %q: %w", target.Tag, err)
 		}
 	}
 	return nil
 }
 
-// RemoveUser removes a client by email. Xray reports an error when the email is
-// unknown; callers must not interpret that as "already removed".
+// RemoveUser removes a client by email from every managed inbound. Xray reports an
+// error when the email is unknown; callers must not interpret that as "already
+// removed".
 func (c *HandlerClient) RemoveUser(ctx context.Context, email string) error {
 	if strings.TrimSpace(email) == "" {
 		return errors.New("xray: remove user: email is required")
@@ -165,13 +151,13 @@ func (c *HandlerClient) RemoveUser(ctx context.Context, email string) error {
 	if err != nil {
 		return fmt.Errorf("xray: remove user: %w", err)
 	}
-	for _, tag := range c.tags {
+	for _, target := range c.targets {
 		request := &alterInboundRequest{
-			Tag:       tag,
+			Tag:       target.Tag,
 			Operation: &typedMessage{Type: removeUserOperationType, Value: operation},
 		}
 		if err := c.alterInbound(ctx, request); err != nil {
-			return fmt.Errorf("xray: remove user from inbound %q: %w", tag, err)
+			return fmt.Errorf("xray: remove user from inbound %q: %w", target.Tag, err)
 		}
 	}
 	return nil

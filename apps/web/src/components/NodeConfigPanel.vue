@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { ConfigVersion, Endpoint } from '@zako/contracts';
+import type { ConfigVersion, Endpoint, VlessRealityParams } from '@zako/contracts';
 import { computed, ref, watch } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { useAsyncAction } from '../composables/useAsyncAction';
+import { endpointParamsOf } from '../domain/endpoint-form';
 import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
@@ -90,11 +91,12 @@ function versionTag(row: ConfigVersion): { label: string; type: 'success' | 'war
 }
 
 function buildDefaultTemplate(): Record<string, unknown> {
-	const first = props.endpoints[0];
-	const port = first?.port ?? 443;
-	const sni = first?.params.sni ?? 'www.microsoft.com';
-	const shortId = first?.params.short_id ?? '0123456789abcdef';
-	const fingerprint = first?.params.fingerprint ?? 'chrome';
+	const vlessEndpoint = props.endpoints.find((endpoint) => endpoint.protocol === 'vless-reality');
+	const params = vlessEndpoint === undefined ? null : endpointParamsOf<VlessRealityParams>(vlessEndpoint);
+	const port = vlessEndpoint?.port ?? 443;
+	const sni = params?.sni ?? 'www.microsoft.com';
+	const shortId = params?.short_id ?? '0123456789abcdef';
+	const fingerprint = params?.fingerprint ?? 'chrome';
 
 	return {
 		log: { loglevel: 'warning' },

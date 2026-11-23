@@ -1,10 +1,11 @@
 // Package initcmd implements `zako-agent init` for one-time node enrollment.
 //
 // Enrollment adopts the node's existing Xray configuration: the document is
-// inspected for VLESS + REALITY inbounds, each becomes a panel endpoint, and a
-// node without any configuration receives the default template. The derived
-// REALITY public keys are reported with the node name, and the permanent agent
-// token plus YAML configuration are written atomically.
+// inspected for inbounds the panel can manage, each becomes a panel endpoint with
+// the parameters of its own protocol, and a node without any configuration receives
+// the default template. The derived REALITY public keys are reported with the node
+// name, and the permanent agent token plus YAML configuration are written
+// atomically.
 package initcmd
 
 import (
@@ -28,6 +29,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/config"
 	"github.com/zako-panel/zako-agent/internal/reporter"
 	"github.com/zako-panel/zako-agent/internal/xrayconfig"
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
 // Options configures a single enrollment run.
@@ -149,12 +151,16 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 		return nil, err
 	}
 
+	endpoints, err := enrollEndpoints(prepared.Endpoints)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := rep.Enroll(ctx, &reporter.EnrollRequest{
 		Name:         nodeName,
 		Host:         strings.TrimSpace(opts.Host),
 		AgentVersion: opts.AgentVersion,
 		XrayVersion:  strings.TrimSpace(opts.XrayVersion),
-		Endpoints:    enrollEndpoints(prepared.Endpoints),
+		Endpoints:    endpoints,
 	})
 	if err != nil {
 		return nil, err
@@ -221,31 +227,64 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 	for _, endpoint := range prepared.Endpoints {
 		out.Endpoints = append(out.Endpoints, OutputEndpoint{
 			Name:     endpoint.Name,
-			Protocol: "vless-reality",
+			Protocol: string(endpoint.Protocol),
 			Port:     endpoint.Port,
 		})
 	}
 	return out, nil
 }
 
-func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) []reporter.EnrollEndpoint {
+func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) ([]reporter.EnrollEndpoint, error) {
 	result := make([]reporter.EnrollEndpoint, 0, len(endpoints))
 	for _, endpoint := range endpoints {
+		params, err := enrollParams(endpoint)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, reporter.EnrollEndpoint{
 			Name:     endpoint.Name,
-			Protocol: "vless-reality",
+			Protocol: string(endpoint.Protocol),
 			Port:     endpoint.Port,
-			Params: reporter.EnrollEndpointParams{
-				SNI:         endpoint.SNI,
-				PublicKey:   endpoint.PublicKey,
-				ShortID:     endpoint.ShortID,
-				Fingerprint: endpoint.Fingerprint,
-				Flow:        endpoint.Flow,
-				Network:     endpoint.Network,
-			},
+			Params:   params,
 		})
 	}
-	return result
+	return result, nil
+}
+
+// enrollParams maps an adopted endpoint onto the panel's payload for its protocol.
+// The panel validates the payload per protocol, so an unknown protocol is an error
+// instead of a generic parameter object.
+func enrollParams(endpoint xrayconfig.ManagedEndpoint) (reporter.EnrollEndpointParams, error) {
+	switch endpoint.Protocol {
+	case xraycore.ProtocolVlessReality:
+		return reporter.VlessRealityParams{
+			SNI:         endpoint.Params.SNI,
+			PublicKey:   endpoint.Params.PublicKey,
+			ShortID:     endpoint.Params.ShortID,
+			Fingerprint: endpoint.Params.Fingerprint,
+			Flow:        endpoint.Params.Flow,
+			Network:     endpoint.Params.Network,
+		}, nil
+	case xraycore.ProtocolVmess:
+		return reporter.VmessParams{
+			Security: endpoint.Params.Security,
+			SNI:      endpoint.Params.SNI,
+			Network:  endpoint.Params.Network,
+			Path:     endpoint.Params.Path,
+			Host:     endpoint.Params.Host,
+		}, nil
+	case xraycore.ProtocolTrojan:
+		return reporter.TrojanParams{
+			SNI:     endpoint.Params.SNI,
+			Network: endpoint.Params.Network,
+			Path:    endpoint.Params.Path,
+			Host:    endpoint.Params.Host,
+		}, nil
+	case xraycore.ProtocolShadowsocks:
+		return reporter.ShadowsocksParams{Method: endpoint.Params.Method}, nil
+	default:
+		return nil, fmt.Errorf("init: unsupported endpoint protocol %q", endpoint.Protocol)
+	}
 }
 
 func readExistingConfig(path string) ([]byte, error) {

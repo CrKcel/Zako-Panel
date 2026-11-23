@@ -142,7 +142,8 @@ func TestExecuteAdoptsExistingConfigAndPreservesOtherProtocols(t *testing.T) {
 	existing := `{
 	  "inbounds": [
 	    {"tag": "vmess-in", "listen": "0.0.0.0", "port": 10086, "protocol": "vmess",
-	     "settings": {"clients": [{"id": "keep-me", "alterId": 0}]}},
+	     "settings": {"clients": [{"id": "keep-me", "alterId": 0}]},
+	     "streamSettings": {"network": "kcp"}},
 	    {"tag": "reality-8443", "listen": "0.0.0.0", "port": 8443, "protocol": "vless",
 	     "settings": {"clients": [], "decryption": "none"},
 	     "streamSettings": {"network": "tcp", "security": "reality",
@@ -272,6 +273,96 @@ func TestExecuteAppendsManagedInboundWhenExistingConfigHasNone(t *testing.T) {
 	trojan, _ := inbounds[0].(map[string]any)
 	if trojan["protocol"] != "trojan" || trojan["port"] != float64(443) {
 		t.Errorf("trojan inbound was changed: %+v", trojan)
+	}
+}
+
+// Enrollment reports every adopted endpoint with its own protocol and parameters;
+// the panel validates each payload per protocol.
+func TestExecuteReportsEveryManagedProtocol(t *testing.T) {
+	dir := t.TempDir()
+	_, publicKey := writeRealityKey(t, dir)
+
+	existing := `{
+	  "inbounds": [
+	    {"tag": "vless-reality", "listen": "0.0.0.0", "port": 443, "protocol": "vless",
+	     "settings": {"clients": [], "decryption": "none"},
+	     "streamSettings": {"network": "tcp", "security": "reality",
+	       "realitySettings": {"dest": "cdn.example.com:443", "serverNames": ["cdn.example.com"],
+	         "privateKey": "", "shortIds": ["aabbccdd"], "fingerprint": "chrome"}}},
+	    {"tag": "vmess-ws", "listen": "0.0.0.0", "port": 8443, "protocol": "vmess",
+	     "settings": {"clients": []},
+	     "streamSettings": {"network": "ws", "security": "tls",
+	       "tlsSettings": {"serverNames": ["cdn.example.com"]},
+	       "wsSettings": {"path": "/ws", "headers": {"Host": "cdn.example.com"}}}},
+	    {"tag": "trojan-grpc", "listen": "0.0.0.0", "port": 9000, "protocol": "trojan",
+	     "settings": {"clients": []},
+	     "streamSettings": {"network": "grpc", "security": "tls",
+	       "tlsSettings": {"serverName": "www.example.com"},
+	       "grpcSettings": {"serviceName": "trojan-grpc"}}},
+	    {"tag": "ss-gcm", "listen": "0.0.0.0", "port": 9001, "protocol": "shadowsocks",
+	     "settings": {"method": "aes-256-gcm", "clients": []}}
+	  ],
+	  "outbounds": [{"protocol": "freedom"}]
+	}`
+	xrayConfigPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(xrayConfigPath, []byte(existing), 0o640); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	server, body, _ := enrollServer(t, publicKey)
+	defer server.Close()
+
+	out, err := Execute(context.Background(), Options{
+		PanelURL:       server.URL,
+		Token:          "01J2Z6Q8Y3V9M4K7T1B5C0D2E0.one-time-secret",
+		NodeName:       "edge-mixed",
+		Host:           "203.0.113.13",
+		ConfigPath:     filepath.Join(dir, "agent.yaml"),
+		TokenFile:      filepath.Join(dir, "token"),
+		RealityKeyPath: filepath.Join(dir, "reality.key"),
+		XrayConfigPath: xrayConfigPath,
+	}, server.Client())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.CreatedConfig {
+		t.Error("CreatedConfig = true, want the existing document to be adopted")
+	}
+
+	wantProtocols := []string{"vless-reality", "vmess", "trojan", "shadowsocks"}
+	if out.EndpointCount != len(wantProtocols) || len(out.Endpoints) != len(wantProtocols) {
+		t.Fatalf("output endpoints = %+v, want one per adopted protocol", out.Endpoints)
+	}
+	for index, protocol := range wantProtocols {
+		if out.Endpoints[index].Protocol != protocol {
+			t.Errorf("output endpoint %d protocol = %q, want %q", index, out.Endpoints[index].Protocol, protocol)
+		}
+	}
+
+	endpoints, _ := (*body)["endpoints"].([]any)
+	if len(endpoints) != len(wantProtocols) {
+		t.Fatalf("reported endpoints = %d, want %d", len(endpoints), len(wantProtocols))
+	}
+	wantParams := []map[string]any{
+		{"sni": "cdn.example.com", "network": "tcp", "short_id": "aabbccdd"},
+		{"security": "tls", "sni": "cdn.example.com", "network": "ws", "path": "/ws", "host": "cdn.example.com"},
+		{"sni": "www.example.com", "network": "grpc", "path": "trojan-grpc", "host": ""},
+		{"method": "aes-256-gcm"},
+	}
+	for index, protocol := range wantProtocols {
+		endpoint, _ := endpoints[index].(map[string]any)
+		if endpoint["protocol"] != protocol {
+			t.Errorf("reported endpoint %d protocol = %v, want %q", index, endpoint["protocol"], protocol)
+		}
+		params, _ := endpoint["params"].(map[string]any)
+		for key, want := range wantParams[index] {
+			if params[key] != want {
+				t.Errorf("%s params[%q] = %v, want %v", protocol, key, params[key], want)
+			}
+		}
+		if _, hasPublicKey := params["public_key"]; protocol != "vless-reality" && hasPublicKey {
+			t.Errorf("%s params = %+v, want no vless fields", protocol, params)
+		}
 	}
 }
 

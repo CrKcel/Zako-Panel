@@ -19,8 +19,8 @@
 | --- | --- | --- |
 | REALITY 私钥 | **只在节点本地**（`/etc/xray/reality.key`，权限 `0600`） | 永远不上传控制面；控制面只存公钥和 `short_id` |
 | Agent Token / 注册 Token / 订阅 Token | **D1 只存 SHA-256 哈希** | 至少 256 位随机熵，明文只在创建或轮换响应里返回一次 |
-| VLESS UUID | D1 `node_clients` 表 + 节点 `users.json` | 只在订阅下发、节点授权和节点同步时出现；档案预览全部替换成占位符 |
-| 请求日志 | Worker / Agent 日志 | 严禁打印 Token、订阅 URL、UUID 和完整请求体 |
+| 节点凭据（`node_clients.vless_uuid`） | D1 `node_clients` 表 + 节点 `users.json` | 在 VLESS、VMess 里当 UUID，在 Trojan、Shadowsocks、Hysteria2 里当密码；只在订阅下发、节点授权和节点同步时出现，档案预览全部替换成占位符 |
+| 请求日志 | Worker / Agent 日志 | 严禁打印 Token、订阅 URL、用户凭据和完整请求体 |
 
 > **防时序攻击**：Agent 常规 Token 格式为 `Bearer <node_id>.<secret>`。服务端先按 `node_id` 查出节点，再对 `secret` 算 SHA-256 并做常数时间比对。
 

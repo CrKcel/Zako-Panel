@@ -1,7 +1,12 @@
 import { env } from 'cloudflare:test';
 import { sha256Hex } from '../src/lib/hash';
 import { newId } from '../src/lib/ids';
+import type { EndpointProtocol } from '@zako/contracts';
+import type { Hysteria2Params } from '../src/protocols/hysteria2';
+import type { ShadowsocksParams } from '../src/protocols/shadowsocks';
+import type { TrojanParams } from '../src/protocols/trojan';
 import type { VlessRealityParams } from '../src/protocols/vless-reality';
+import type { VmessParams } from '../src/protocols/vmess';
 
 export function nowSeconds(): number {
 	return Math.floor(Date.now() / 1000);
@@ -23,6 +28,33 @@ export const DEFAULT_PARAMS: VlessRealityParams = {
 	fingerprint: 'chrome',
 	flow: 'xtls-rprx-vision',
 	network: 'tcp',
+};
+
+export const DEFAULT_VMESS_PARAMS: VmessParams = {
+	security: 'tls',
+	sni: 'www.example.com',
+	network: 'ws',
+	path: '/ws',
+	host: 'cdn.example.com',
+};
+
+export const DEFAULT_TROJAN_PARAMS: TrojanParams = {
+	sni: 'www.example.com',
+	network: 'tcp',
+	path: '',
+	host: '',
+};
+
+export const DEFAULT_SHADOWSOCKS_PARAMS: ShadowsocksParams = { method: 'aes-256-gcm' };
+
+export const DEFAULT_HYSTERIA2_PARAMS: Hysteria2Params = { sni: 'www.example.com', obfs: 'none', obfs_password: '' };
+
+const DEFAULT_PARAMS_BY_PROTOCOL: Record<EndpointProtocol, Record<string, unknown>> = {
+	'vless-reality': DEFAULT_PARAMS,
+	vmess: DEFAULT_VMESS_PARAMS,
+	trojan: DEFAULT_TROJAN_PARAMS,
+	shadowsocks: DEFAULT_SHADOWSOCKS_PARAMS,
+	hysteria2: DEFAULT_HYSTERIA2_PARAMS,
 };
 
 /** Clears rows between tests; migrations stay applied for the whole file. */
@@ -101,24 +133,27 @@ export interface SeedEndpointOptions {
 	name?: string;
 	host?: string;
 	port?: number;
-	params?: VlessRealityParams;
+	protocol?: EndpointProtocol;
+	params?: Record<string, unknown>;
 	enabled?: boolean;
 }
 
 export async function seedEndpoint(nodeId: string, options: SeedEndpointOptions = {}): Promise<string> {
 	const id = options.id ?? newId();
 	const now = nowSeconds();
+	const protocol = options.protocol ?? 'vless-reality';
 	await env.DB.prepare(
 		`INSERT INTO endpoints (id, node_id, name, protocol, host, port, params_json, enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, 'vless-reality', ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			id,
 			nodeId,
 			options.name ?? `endpoint-${id.slice(-4)}`,
+			protocol,
 			options.host ?? '203.0.113.10',
 			options.port ?? 443,
-			JSON.stringify(options.params ?? DEFAULT_PARAMS),
+			JSON.stringify(options.params ?? DEFAULT_PARAMS_BY_PROTOCOL[protocol]),
 			options.enabled === false ? 0 : 1,
 			now,
 			now,

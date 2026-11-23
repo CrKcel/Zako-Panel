@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AppError } from '../lib/errors';
 import { isId } from '../lib/ids';
-import { vlessRealityParamsSchema } from '../protocols/vless-reality';
+import { AGENT_PROTOCOLS, PROTOCOLS } from '../protocols';
 import type { AppContext } from '../types';
 
 export const idSchema = z.string().refine(isId, 'Invalid identifier');
@@ -30,11 +30,16 @@ export function positiveVersion(c: AppContext): number {
 
 const optionalText = z.string().trim().min(1).max(255).nullable().optional();
 
+// Protocol params are validated in the service against the stored protocol, so the
+// route only checks that some object was sent.
+const endpointParamsSchema = z.record(z.string(), z.unknown());
+
 export const createEndpointSchema = z.object({
 	name: z.string().trim().min(1).max(64),
 	host: z.string().trim().min(1).max(255),
 	port: z.number().int().min(1).max(65535),
-	params: vlessRealityParamsSchema,
+	protocol: z.enum(PROTOCOLS),
+	params: endpointParamsSchema,
 });
 
 export const updateEndpointSchema = z
@@ -42,7 +47,7 @@ export const updateEndpointSchema = z
 		name: z.string().trim().min(1).max(64).optional(),
 		host: z.string().trim().min(1).max(255).optional(),
 		port: z.number().int().min(1).max(65535).optional(),
-		params: vlessRealityParamsSchema.optional(),
+		params: endpointParamsSchema.optional(),
 		enabled: z.boolean().optional(),
 	})
 	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
@@ -238,9 +243,9 @@ const agentEnrollEndpointSchema = z.object({
 	// The agent reports inbound tags, which Xray does not length-limit. The service
 	// truncates to the panel's endpoint-name limit.
 	name: z.string().trim().min(1).max(255),
-	protocol: z.literal('vless-reality'),
+	protocol: z.enum(AGENT_PROTOCOLS),
 	port: z.number().int().min(1).max(65535),
-	params: vlessRealityParamsSchema,
+	params: endpointParamsSchema,
 });
 
 export const agentEnrollSchema = z.object({

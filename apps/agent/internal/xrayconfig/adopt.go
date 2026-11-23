@@ -10,18 +10,35 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/zako-panel/zako-agent/internal/xraycore"
 )
 
-// The panel manages exactly one protocol shape on a node: VLESS over REALITY on
-// TCP. Every other inbound keeps its configuration when the agent rewrites the
-// document, so a node that already serves other protocols keeps doing so.
+// The panel manages the proxy protocols whose parameters can be expressed from an
+// inbound: VLESS over REALITY on TCP, VMess, Trojan and Shadowsocks. Every other
+// inbound keeps its configuration when the agent rewrites the document, so a node
+// that already serves other protocols keeps doing so.
 const (
 	DefaultSNI         = "www.microsoft.com"
 	DefaultPort        = 443
 	DefaultFingerprint = "chrome"
 	DefaultFlow        = "xtls-rprx-vision"
 	DefaultNetwork     = "tcp"
+
+	xrayProtocolVless       = "vless"
+	xrayProtocolVmess       = "vmess"
+	xrayProtocolTrojan      = "trojan"
+	xrayProtocolShadowsocks = "shadowsocks"
 )
+
+// supportedShadowsocksMethods are the ciphers whose key is the node-client secret.
+// ShadowSocks-2022 methods need a fixed-length base64 key, so an inbound using one
+// stays unmanaged.
+var supportedShadowsocksMethods = map[string]bool{
+	"aes-128-gcm":            true,
+	"aes-256-gcm":            true,
+	"chacha20-ietf-poly1305": true,
+}
 
 //go:embed default-template.json
 var defaultTemplate []byte
@@ -30,15 +47,33 @@ var defaultTemplate []byte
 // comes from the inbound tag so endpoints adopted from an existing config stay
 // recognisable in the panel.
 type ManagedEndpoint struct {
-	Name        string
-	Tag         string
-	Port        int
-	SNI         string
+	Name     string
+	Tag      string
+	Protocol xraycore.Protocol
+	Port     int
+	Params   ManagedParams
+}
+
+// ManagedParams carries the panel parameters of an endpoint. The protocol decides
+// which fields are set; the panel validates the set per protocol, so fields of
+// other protocols stay empty.
+type ManagedParams struct {
+	// vless-reality, vmess (only when its security is tls) and trojan.
+	SNI string
+	// vless-reality.
 	PublicKey   string
 	ShortID     string
 	Fingerprint string
 	Flow        string
-	Network     string
+	// vless-reality, vmess and trojan.
+	Network string
+	// vmess: tls or none.
+	Security string
+	// vmess and trojan: ws path or gRPC service name, and ws Host or gRPC authority.
+	Path string
+	Host string
+	// shadowsocks.
+	Method string
 }
 
 // Prepared is the outcome of inspecting a node's existing Xray document.
@@ -116,7 +151,7 @@ func PrepareDocument(existing []byte, privateKey, shortID string) (Prepared, err
 
 	ensureManagedTags(root)
 	for _, inbound := range managedInbounds(root) {
-		if err := mergeRealityPrivateKey(inbound, privateKey); err != nil {
+		if err := mergeManagedRealityKey(inbound, privateKey); err != nil {
 			return Prepared{}, err
 		}
 	}
@@ -148,21 +183,27 @@ func PrepareDocument(existing []byte, privateKey, shortID string) (Prepared, err
 	return Prepared{Document: append(encoded, '\n'), Endpoints: endpoints, APIAddress: apiAddress}, nil
 }
 
-// ManagedInboundTags returns the tags of the inbounds HandlerService must mutate.
-// Inbounds without a tag are skipped: the panel cannot address them.
-func ManagedInboundTags(document []byte) ([]string, error) {
+// ManagedInboundTargets returns the inbounds HandlerService must mutate, each with
+// the protocol that selects its account encoding. Inbounds without a tag are
+// skipped: the panel cannot address them.
+func ManagedInboundTargets(document []byte) ([]xraycore.InboundTarget, error) {
 	var root map[string]any
 	if err := json.Unmarshal(document, &root); err != nil {
 		return nil, fmt.Errorf("xray: decode config: %w", err)
 	}
-	managed := managedInbounds(root)
-	tags := make([]string, 0, len(managed))
-	for _, inbound := range managed {
-		if tag, _ := inbound["tag"].(string); tag != "" {
-			tags = append(tags, tag)
+	var targets []xraycore.InboundTarget
+	for _, inbound := range managedInbounds(root) {
+		tag, _ := inbound["tag"].(string)
+		if tag == "" {
+			continue
 		}
+		target := xraycore.InboundTarget{Tag: tag, Protocol: protocolOf(inbound)}
+		if target.Protocol == xraycore.ProtocolShadowsocks {
+			target.Method = shadowsocksMethod(inbound)
+		}
+		targets = append(targets, target)
 	}
-	return tags, nil
+	return targets, nil
 }
 
 func defaultDocument(privateKey, shortID string) ([]byte, error) {
@@ -175,7 +216,7 @@ func defaultDocument(privateKey, shortID string) ([]byte, error) {
 		return nil, errors.New("xray: default template must contain exactly one managed inbound")
 	}
 	inbound := managed[0]
-	if err := mergeRealityPrivateKey(inbound, privateKey); err != nil {
+	if err := mergeManagedRealityKey(inbound, privateKey); err != nil {
 		return nil, err
 	}
 	applyRealityTarget(inbound, DefaultSNI)
@@ -212,7 +253,7 @@ func defaultInbound(root map[string]any, privateKey, shortID string) (map[string
 	}
 	inbound := managed[0]
 	inbound["port"] = float64(port)
-	inbound["tag"] = uniqueTag(root, fmt.Sprintf("vless-reality-%d", port))
+	inbound["tag"] = uniqueTag(root, defaultTag(xraycore.ProtocolVlessReality, port))
 	return inbound, nil
 }
 
@@ -224,7 +265,7 @@ func ensureManagedTags(root map[string]any) {
 			continue
 		}
 		port, _ := intValue(inbound["port"])
-		inbound["tag"] = uniqueTag(root, fmt.Sprintf("vless-reality-%d", port))
+		inbound["tag"] = uniqueTag(root, defaultTag(protocolOf(inbound), port))
 	}
 }
 
@@ -283,23 +324,117 @@ func inboundsOf(root map[string]any) []map[string]any {
 	return inbounds
 }
 
-// isManagedInbound is the single definition of what the panel owns. Everything
-// else in the document is untouched by every render and apply path.
+// isManagedInbound is the single definition of what the panel owns. An inbound is
+// managed only when the panel can express its parameters; everything else in the
+// document is untouched by every render and apply path.
 func isManagedInbound(inbound map[string]any) bool {
-	protocol, _ := inbound["protocol"].(string)
-	if protocol != "vless" {
+	switch protocol, _ := inbound["protocol"].(string); protocol {
+	case xrayProtocolVless:
+		// The panel renders VLESS over REALITY on TCP only; a TLS or other
+		// transport inbound stays operator-owned.
+		stream, ok := inbound["streamSettings"].(map[string]any)
+		if !ok {
+			return false
+		}
+		security, _ := stream["security"].(string)
+		if security != "reality" {
+			return false
+		}
+		network, _ := stream["network"].(string)
+		return network == "" || network == DefaultNetwork
+	case xrayProtocolVmess:
+		return isManagedTransport(inbound) && vmessSecuritySupported(inbound)
+	case xrayProtocolTrojan:
+		return isManagedTransport(inbound) && trojanSecuritySupported(inbound)
+	case xrayProtocolShadowsocks:
+		return shadowsocksMethod(inbound) != ""
+	default:
 		return false
 	}
-	stream, ok := inbound["streamSettings"].(map[string]any)
-	if !ok {
+}
+
+// isManagedTransport reports whether the inbound runs on a transport the panel can
+// render. An absent streamSettings means TCP.
+func isManagedTransport(inbound map[string]any) bool {
+	switch network := streamNetwork(inbound); network {
+	case "", DefaultNetwork, "ws", "grpc":
+		return true
+	default:
 		return false
 	}
-	security, _ := stream["security"].(string)
-	if security != "reality" {
+}
+
+// vmessSecuritySupported accepts the modes the panel renders, plaintext and TLS.
+// A TLS inbound must name its SNI: the panel requires one and would reject the
+// enrollment payload, which would abort the whole install.
+func vmessSecuritySupported(inbound map[string]any) bool {
+	switch security := streamSecurity(inbound); security {
+	case "", "none":
+		return true
+	case "tls":
+		return tlsSNI(streamSettings(inbound)) != ""
+	default:
 		return false
 	}
-	network, _ := stream["network"].(string)
-	return network == "" || network == DefaultNetwork
+}
+
+// trojanSecuritySupported accepts an explicitly TLS inbound or one with an unset
+// security mode, and requires the SNI the client verifies. The panel always renders
+// trojan with TLS, so an inbound without a SNI would be rejected with 422 and abort
+// the install.
+func trojanSecuritySupported(inbound map[string]any) bool {
+	switch streamSecurity(inbound) {
+	case "", "tls":
+		return tlsSNI(streamSettings(inbound)) != ""
+	default:
+		return false
+	}
+}
+
+// protocolOf maps a managed inbound's Xray protocol name onto the panel id.
+func protocolOf(inbound map[string]any) xraycore.Protocol {
+	switch protocol, _ := inbound["protocol"].(string); protocol {
+	case xrayProtocolVless:
+		return xraycore.ProtocolVlessReality
+	case xrayProtocolVmess:
+		return xraycore.ProtocolVmess
+	case xrayProtocolTrojan:
+		return xraycore.ProtocolTrojan
+	case xrayProtocolShadowsocks:
+		return xraycore.ProtocolShadowsocks
+	default:
+		return ""
+	}
+}
+
+// shadowsocksMethod resolves the supported cipher of an inbound. Older configs put
+// the method on each client instead of the inbound settings, so the first client's
+// method is the fallback. An unsupported method returns "" and keeps the inbound
+// unmanaged.
+func shadowsocksMethod(inbound map[string]any) string {
+	settings, _ := inbound["settings"].(map[string]any)
+	if method, _ := settings["method"].(string); method != "" {
+		if supportedShadowsocksMethods[method] {
+			return method
+		}
+		return ""
+	}
+	clients, _ := settings["clients"].([]any)
+	for _, raw := range clients {
+		client, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		method, _ := client["method"].(string)
+		if method == "" {
+			continue
+		}
+		if supportedShadowsocksMethods[method] {
+			return method
+		}
+		return ""
+	}
+	return ""
 }
 
 func endpointsFromDocument(root map[string]any) ([]ManagedEndpoint, error) {
@@ -309,53 +444,157 @@ func endpointsFromDocument(root map[string]any) ([]ManagedEndpoint, error) {
 		if !ok || port < 1 || port > 65535 {
 			return nil, errors.New("xray: managed inbound has no valid port")
 		}
-		stream, _ := inbound["streamSettings"].(map[string]any)
-		reality, ok := stream["realitySettings"].(map[string]any)
-		if !ok {
-			return nil, errors.New("xray: managed inbound has no realitySettings")
-		}
-		sni, err := realitySNI(reality)
-		if err != nil {
-			return nil, err
-		}
-		privateKey, _ := reality["privateKey"].(string)
-		publicKey, err := PublicKeyFromPrivateKey(privateKey)
-		if err != nil {
-			return nil, fmt.Errorf("xray: managed inbound privateKey: %w", err)
-		}
 		tag, _ := inbound["tag"].(string)
-		name := endpointName(tag, port)
-		fingerprint, _ := reality["fingerprint"].(string)
-		if fingerprint == "" {
-			fingerprint = DefaultFingerprint
+		protocol := protocolOf(inbound)
+		endpoint := ManagedEndpoint{
+			Name:     endpointName(tag, protocol, port),
+			Tag:      tag,
+			Protocol: protocol,
+			Port:     port,
 		}
-		endpoints = append(endpoints, ManagedEndpoint{
-			Name:        name,
-			Tag:         tag,
-			Port:        port,
-			SNI:         sni,
-			PublicKey:   publicKey,
-			ShortID:     firstString(reality["shortIds"]),
-			Fingerprint: fingerprint,
-			Flow:        DefaultFlow,
-			Network:     DefaultNetwork,
-		})
+		switch protocol {
+		case xraycore.ProtocolVlessReality:
+			params, err := realityParams(inbound)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Params = params
+		case xraycore.ProtocolVmess:
+			params := transportParams(inbound)
+			params.Security = "none"
+			if streamSecurity(inbound) == "tls" {
+				params.Security = "tls"
+			}
+			endpoint.Params = params
+		case xraycore.ProtocolTrojan:
+			endpoint.Params = transportParams(inbound)
+		case xraycore.ProtocolShadowsocks:
+			endpoint.Params = ManagedParams{Method: shadowsocksMethod(inbound)}
+		}
+		endpoints = append(endpoints, endpoint)
 	}
 	return endpoints, nil
 }
 
-// endpointName keeps a panel endpoint name inside the contract limit. Inbound
-// tags are not length-limited, but the panel validates endpoint names at 64.
-func endpointName(tag string, port int) string {
+// realityParams reports the panel's REALITY parameters and derives the public key
+// from the local private key, which never leaves the node.
+func realityParams(inbound map[string]any) (ManagedParams, error) {
+	reality, ok := streamSettings(inbound)["realitySettings"].(map[string]any)
+	if !ok {
+		return ManagedParams{}, errors.New("xray: managed inbound has no realitySettings")
+	}
+	sni, err := realitySNI(reality)
+	if err != nil {
+		return ManagedParams{}, err
+	}
+	privateKey, _ := reality["privateKey"].(string)
+	publicKey, err := PublicKeyFromPrivateKey(privateKey)
+	if err != nil {
+		return ManagedParams{}, fmt.Errorf("xray: managed inbound privateKey: %w", err)
+	}
+	fingerprint, _ := reality["fingerprint"].(string)
+	if fingerprint == "" {
+		fingerprint = DefaultFingerprint
+	}
+	return ManagedParams{
+		SNI:         sni,
+		PublicKey:   publicKey,
+		ShortID:     firstString(reality["shortIds"]),
+		Fingerprint: fingerprint,
+		Flow:        DefaultFlow,
+		Network:     DefaultNetwork,
+	}, nil
+}
+
+// transportParams maps the stream settings of a vmess or trojan inbound onto the
+// panel's transport fields.
+func transportParams(inbound map[string]any) ManagedParams {
+	stream := streamSettings(inbound)
+	network := streamNetwork(inbound)
+	if network == "" {
+		network = DefaultNetwork
+	}
+	params := ManagedParams{Network: network, SNI: tlsSNI(stream)}
+	switch network {
+	case "ws":
+		ws, _ := stream["wsSettings"].(map[string]any)
+		params.Path, _ = ws["path"].(string)
+		params.Host = headerValue(ws["headers"], "Host")
+	case "grpc":
+		grpc, _ := stream["grpcSettings"].(map[string]any)
+		params.Path, _ = grpc["serviceName"].(string)
+		params.Host, _ = grpc["authority"].(string)
+	}
+	return params
+}
+
+// tlsSNI reads the SNI an inbound advertises: the panel's field maps onto the first
+// of tlsSettings.serverNames or its single serverName.
+func tlsSNI(stream map[string]any) string {
+	tls, ok := stream["tlsSettings"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if sni := firstString(tls["serverNames"]); sni != "" {
+		return sni
+	}
+	sni, _ := tls["serverName"].(string)
+	return sni
+}
+
+// streamSettings returns the inbound's streamSettings object. Missing settings mean
+// a plain TCP inbound.
+func streamSettings(inbound map[string]any) map[string]any {
+	stream, _ := inbound["streamSettings"].(map[string]any)
+	return stream
+}
+
+func streamNetwork(inbound map[string]any) string {
+	network, _ := streamSettings(inbound)["network"].(string)
+	return network
+}
+
+// streamSecurity returns streamSettings.security, which selects the transport
+// security mode; an absent value means none.
+func streamSecurity(inbound map[string]any) string {
+	security, _ := streamSettings(inbound)["security"].(string)
+	return security
+}
+
+// headerValue reads one ws header case-insensitively: header names are HTTP tokens,
+// so a config may spell "host" instead of "Host".
+func headerValue(raw any, name string) string {
+	headers, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			text, _ := value.(string)
+			return text
+		}
+	}
+	return ""
+}
+
+// endpointName keeps a panel endpoint name inside the contract limit. Inbound tags
+// are not length-limited, but the panel validates endpoint names at 64.
+func endpointName(tag string, protocol xraycore.Protocol, port int) string {
 	name := strings.TrimSpace(tag)
 	if name == "" {
-		name = fmt.Sprintf("vless-reality-%d", port)
+		name = defaultTag(protocol, port)
 	}
 	runes := []rune(name)
 	if len(runes) > 64 {
 		name = string(runes[:64])
 	}
 	return name
+}
+
+// defaultTag names an untagged inbound after its protocol and port, so the tag the
+// agent generates stays recognisable in the panel.
+func defaultTag(protocol xraycore.Protocol, port int) string {
+	return fmt.Sprintf("%s-%d", protocol, port)
 }
 
 func realitySNI(reality map[string]any) (string, error) {

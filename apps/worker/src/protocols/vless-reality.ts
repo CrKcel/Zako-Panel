@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AppError } from '../lib/errors';
-import type { ProtocolAdapter, ProxyEndpoint } from './types';
+import { uriHost } from './transport';
+import type { ProtocolAdapter, ProxyCredential, ProxyEndpoint } from './types';
 
 export const vlessRealityParamsSchema = z.object({
 	sni: z.string().trim().min(1).max(255),
@@ -21,24 +22,19 @@ function paramsOf(endpoint: ProxyEndpoint): VlessRealityParams {
 	return parsed.data;
 }
 
-/** IPv6 literals must be bracketed inside a URI authority. */
-function uriHost(host: string): string {
-	return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-}
-
 export const VLESS_REALITY_PROTOCOL = 'vless-reality' as const;
 
 export const vlessRealityAdapter: ProtocolAdapter = {
 	protocol: VLESS_REALITY_PROTOCOL,
 	paramsSchema: vlessRealityParamsSchema,
-	toClash(endpoint: ProxyEndpoint, uuid: string): Record<string, unknown> {
+	toClash(endpoint: ProxyEndpoint, credential: ProxyCredential): Record<string, unknown> {
 		const params = paramsOf(endpoint);
 		const proxy: Record<string, unknown> = {
 			name: endpoint.name,
 			type: 'vless',
 			server: endpoint.host,
 			port: endpoint.port,
-			uuid,
+			uuid: credential.secret,
 			network: params.network,
 			tls: true,
 			udp: true,
@@ -54,7 +50,7 @@ export const vlessRealityAdapter: ProtocolAdapter = {
 		}
 		return proxy;
 	},
-	toUri(endpoint: ProxyEndpoint, uuid: string): string {
+	toUri(endpoint: ProxyEndpoint, credential: ProxyCredential): string {
 		const params = paramsOf(endpoint);
 		const query: string[] = [
 			'encryption=none',
@@ -66,6 +62,6 @@ export const vlessRealityAdapter: ProtocolAdapter = {
 		];
 		if (params.short_id !== '') query.push(`sid=${encodeURIComponent(params.short_id)}`);
 		query.push(`type=${encodeURIComponent(params.network)}`);
-		return `vless://${uuid}@${uriHost(endpoint.host)}:${endpoint.port}?${query.join('&')}#${encodeURIComponent(endpoint.name)}`;
+		return `vless://${credential.secret}@${uriHost(endpoint.host)}:${endpoint.port}?${query.join('&')}#${encodeURIComponent(endpoint.name)}`;
 	},
 };

@@ -1,7 +1,7 @@
 // Package xraycore defines the agent's gRPC boundary to Xray-core.
 //
-// StatsClient reads StatsService and HandlerClient mutates the running VLESS
-// inbound through HandlerService, both over loopback gRPC. Message encoding is
+// StatsClient reads StatsService and HandlerClient mutates the running managed
+// inbounds through HandlerService, both over loopback gRPC. Message encoding is
 // hand written in proto.go and handler_proto.go, so the agent does not vendor
 // xray-core or depend on protoc.
 //
@@ -16,6 +16,27 @@ import (
 
 // FlowVision is the VLESS flow used for REALITY inbounds.
 const FlowVision = "xtls-rprx-vision"
+
+// Protocol is the panel id of a managed inbound's protocol. The values are the
+// panel's protocol ids rather than Xray protocol names, so they can travel to the
+// Worker unchanged.
+type Protocol string
+
+const (
+	ProtocolVlessReality Protocol = "vless-reality"
+	ProtocolVmess        Protocol = "vmess"
+	ProtocolTrojan       Protocol = "trojan"
+	ProtocolShadowsocks  Protocol = "shadowsocks"
+)
+
+// InboundTarget is one inbound HandlerService must mutate, together with the
+// protocol its account encoding belongs to. Method is the shadowsocks cipher; the
+// other protocols leave it empty.
+type InboundTarget struct {
+	Tag      string
+	Protocol Protocol
+	Method   string
+}
 
 // ByteCounters are cumulative traffic counters. The agent never resets them.
 type ByteCounters struct {
@@ -51,8 +72,10 @@ type StatsReader interface {
 	SysStats(ctx context.Context) (SystemStats, error)
 }
 
-// User is a VLESS credential applied through HandlerService. Level is fixed at 0
-// because the shipped policy enables user stats only at level 0.
+// User is one proxy credential applied through HandlerService. UUID is the single
+// node-client secret: the UUID for vless and vmess, the password verbatim for
+// trojan and shadowsocks. Flow applies to vless only. Level is fixed at 0 because
+// the shipped policy enables user stats only at level 0.
 type User struct {
 	Email string
 	UUID  string

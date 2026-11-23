@@ -631,15 +631,23 @@ export interface components {
             id: string;
             node_id: string;
             name: string;
-            /** @enum {string} */
-            protocol: "vless-reality";
+            protocol: components["schemas"]["EndpointProtocol"];
             host: string;
             port: number;
-            params: components["schemas"]["VlessRealityParams"];
+            params: components["schemas"]["ProtocolParams"];
             enabled: boolean;
             created_at: number;
             updated_at: number;
         };
+        /** @enum {string} */
+        EndpointProtocol: "vless-reality" | "vmess" | "trojan" | "shadowsocks" | "hysteria2";
+        /**
+         * @description Protocols the node agent can adopt and keep in sync.
+         * @enum {string}
+         */
+        AgentEndpointProtocol: "vless-reality" | "vmess" | "trojan" | "shadowsocks";
+        /** @description Parameter object matching the endpoint protocol. */
+        ProtocolParams: components["schemas"]["VlessRealityParams"] | components["schemas"]["VmessParams"] | components["schemas"]["TrojanParams"] | components["schemas"]["ShadowsocksParams"] | components["schemas"]["Hysteria2Params"];
         VlessRealityParams: {
             sni: string;
             public_key: string;
@@ -649,6 +657,36 @@ export interface components {
             flow: "xtls-rprx-vision";
             /** @enum {string} */
             network: "tcp";
+        };
+        VmessParams: {
+            /** @enum {string} */
+            security: "tls" | "none";
+            sni: string;
+            /** @enum {string} */
+            network: "tcp" | "ws" | "grpc";
+            /** @description WebSocket path or gRPC service name; an empty string keeps the client default. */
+            path: string;
+            /** @description WebSocket Host header or gRPC authority; an empty string omits it. */
+            host: string;
+        };
+        TrojanParams: {
+            sni: string;
+            /** @enum {string} */
+            network: "tcp" | "ws" | "grpc";
+            /** @description WebSocket path or gRPC service name; an empty string keeps the client default. */
+            path: string;
+            /** @description WebSocket Host header or gRPC authority; an empty string omits it. */
+            host: string;
+        };
+        ShadowsocksParams: {
+            /** @enum {string} */
+            method: "aes-128-gcm" | "aes-256-gcm" | "chacha20-ietf-poly1305";
+        };
+        Hysteria2Params: {
+            sni: string;
+            /** @enum {string} */
+            obfs: "none" | "salamander";
+            obfs_password: string;
         };
         ProxyGroup: {
             name: string;
@@ -686,7 +724,7 @@ export interface components {
             subscriber_name: string;
             /** @description Must match the inbound client email so statistics attribute traffic. */
             xray_email: string;
-            /** @description Client UUID for the node-local inbound entry. */
+            /** @description Client credential for the node-local inbound entry. UUID-based protocols use it as the UUID; password-based protocols use it verbatim as the password. */
             vless_uuid: string;
             enabled: boolean;
         };
@@ -870,13 +908,15 @@ export interface components {
             name: string;
             host: string;
             port: number;
-            params: components["schemas"]["VlessRealityParams"];
+            protocol: components["schemas"]["EndpointProtocol"];
+            params: components["schemas"]["ProtocolParams"];
         };
+        /** @description The protocol of an endpoint is fixed at creation; params are validated against it. */
         UpdateEndpointRequest: {
             name?: string;
             host?: string;
             port?: number;
-            params?: components["schemas"]["VlessRealityParams"];
+            params?: components["schemas"]["ProtocolParams"];
             enabled?: boolean;
         };
         CreateProfileRequest: {
@@ -969,10 +1009,9 @@ export interface components {
         };
         AgentEnrollEndpoint: {
             name: string;
-            /** @enum {string} */
-            protocol: "vless-reality";
+            protocol: components["schemas"]["AgentEndpointProtocol"];
             port: number;
-            params: components["schemas"]["VlessRealityParams"];
+            params: components["schemas"]["ProtocolParams"];
         };
         AgentEnrollResponse: {
             node_id: string;
@@ -981,7 +1020,7 @@ export interface components {
             endpoints: {
                 id: string;
                 name: string;
-                protocol: string;
+                protocol: components["schemas"]["AgentEndpointProtocol"];
                 port: number;
             }[];
         };

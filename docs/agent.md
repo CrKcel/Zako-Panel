@@ -30,7 +30,7 @@ Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd`
 | `xray_binary_path` | Xray 可执行文件 | `/usr/local/bin/xray` |
 | `reality_private_key_path` | 本地 REALITY 私钥 | `/etc/xray/reality.key` |
 | `xray_api_address` | Xray gRPC 地址 | `127.0.0.1:10085` |
-| `xray_inbound_tag` | 初始热更新入站 Tag（运行时按配置文件刷新全部受管入站） | `vless-reality` |
+| `xray_inbound_tag` | 初始热更新入站 Tag（运行时按配置文件刷新全部受管入站及协议） | `vless-reality` |
 | `heartbeat_interval` | 心跳间隔（服务端可动态下发覆盖） | `5m` |
 | `collector.sample_interval` | 采集 Xray 流量间隔 | `30s` |
 | `collector.report_interval` | 上报流量间隔 | `15m` |
@@ -41,10 +41,10 @@ Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd`
 
 1. **发现变化**：控制面每次修改用户授权、配额超限或到期，都会把全局版本号 `users_ver` 加 1。Agent 心跳时看到服务端返回的 `users_ver` 和自己手里不一样，就触发一次同步。
 2. **省流拉取**：Agent 带上本地版本号作为 `If-None-Match` 请求 `GET /api/v1/agent/users`。如果版本其实没变，服务端直接返回 `304 Not Modified`。
-3. **算差集并热更新**：对比新名单和本地 `users.json`，算出要新增、删除的用户（UUID 变了就先删后加），调用 Xray gRPC `HandlerService.AlterInbound`（`RemoveUser` / `AddUser`）动态修改，然后原子更新 `users.json` 和版本号。
+3. **算差集并热更新**：对比新名单和本地 `users.json`，算出要新增、删除的用户（凭据变了就先删后加），调用 Xray gRPC `HandlerService.AlterInbound`（`RemoveUser` / `AddUser`）动态修改，然后原子更新 `users.json` 和版本号。每次同步前都会从当前配置文档重新读取受管入站列表，按每个入站的协议编码账号：VLESS/VMess 用 UUID，Trojan/Shadowsocks 用同一个凭据当密码，Shadowsocks 还要带上入站的加密方式。
 4. **万一热更新失败（安全回退）**：
    如果 gRPC 调用失败，Agent 会自动切到“改文件 + 重启”模式：
-   - 把新用户列表和本地私钥拼进完整的 Xray 配置，写入所有受管的 VLESS + REALITY 入站；
+   - 把新用户列表和本地私钥拼进完整的 Xray 配置，按各入站的协议写入受管入站（REALITY 私钥只补进 VLESS 入站）；
    - 先跑 `xray run -test -config` 确认语法没问题；
    - 原子替换 `/etc/xray/config.json` 并执行 `systemctl restart xray.service`；
    - 检查 `StatsService` 是否健康；如果重启失败或健康检查没过，立刻还原旧配置再重启一次。
@@ -87,11 +87,12 @@ Agent 内部按以下状态流转：`IDLE → DOWNLOADING → VERIFYING → REND
 
 安装时 `zako-agent init` 读取节点已有的 Xray/V2Ray 配置；存在则沿用该文件，不存在时写入内置默认模板。
 
-- 面板只管理 VLESS + REALITY（TCP）入站：注册时把它们的端口、SNI、REALITY 公钥、Short ID 和 Fingerprint 作为接入端点上报，面板据此自动创建 Endpoint。
-- 其他协议的入站（vmess、trojan、shadowsocks、dokodemo-door 等）不参与渲染，重写配置时按原样保留。
+- 面板管理四类 Xray 入站：VLESS + REALITY（TCP）、VMess、Trojan 和 Shadowsocks。注册时按协议把端口与传输参数上报（VLESS 还上报 REALITY 公钥、Short ID 和 Fingerprint），面板据此自动创建 Endpoint。
+- 无法用面板参数表达清楚的入站保持原样、不参与渲染：例如 VMess 的 REALITY/XTLS 传输、Trojan 没有 TLS SNI、Shadowsocks-2022 方法、以及 kcp 等面板不渲染的传输。这样即使节点上已有手工维护的同类入站，也不会被覆盖。
+- Hysteria2 不是 Xray 协议，Agent 不接管也不参与用户同步；它的接入端点由管理员在后台手工创建。
 - 已有配置没有任何受管入站时，会在未被占用的端口追加一个默认 VLESS + REALITY 入站，其余配置不变。
 - 已有配置缺少 `api`、`stats`、Level 0 统计或 API 路由规则时只补缺失项，不覆盖已有值；这样接管后流量采集和用户热更新可以直接工作。
-- 热更新会按当前配置文件里的全部受管入站 Tag 逐个执行；任何一步失败都回退到重启并重写完整配置。
+- 热更新会按当前配置文件里的全部受管入站（Tag + 协议）逐个执行；任何一步失败都回退到重启并重写完整配置。
 
 ## 6. 节点权限隔离（最小特权）
 

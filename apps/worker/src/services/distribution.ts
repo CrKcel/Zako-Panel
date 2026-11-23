@@ -22,10 +22,10 @@ import { toProfile } from './profile-mapping';
 
 /**
  * Previews render credentials as a placeholder. The profile preview exists to
- * validate names, groups and rules; keeping the real UUID out of it keeps
+ * validate names, groups and rules; keeping the real credential out of it keeps
  * docs/security.md's allowed surfaces for proxy credentials unchanged.
  */
-const PREVIEW_UUID = '00000000-0000-0000-0000-000000000000';
+const PREVIEW_SECRET = '00000000-0000-0000-0000-000000000000';
 
 export interface RenderableProxy {
 	node_id: string;
@@ -198,10 +198,11 @@ function buildProxies(
 				port: endpoint.port,
 				params: params.data as Record<string, unknown>,
 			};
+			const credential = { secret: client.vless_uuid };
 			rendered.push({
 				node_id: node.id,
-				proxy: adapter.toClash(proxyEndpoint, client.vless_uuid) as RenderProxy,
-				uri: adapter.toUri(proxyEndpoint, client.vless_uuid),
+				proxy: adapter.toClash(proxyEndpoint, credential) as RenderProxy,
+				uri: adapter.toUri(proxyEndpoint, credential),
 			});
 		}
 		if (rendered.length === 0) {
@@ -303,7 +304,7 @@ export async function previewProfile(db: D1Database, profileId: string, subscrib
 	const nodes = nodeIds.length > 0 ? await findNodesByIds(db, nodeIds) : [];
 	const endpoints = nodeIds.length > 0 ? await listEnabledEndpointRowsByNodes(db, nodeIds) : [];
 
-	const previewClients = target.clients.map((client) => ({ ...client, vless_uuid: PREVIEW_UUID }));
+	const previewClients = target.clients.map((client) => ({ ...client, vless_uuid: PREVIEW_SECRET }));
 	const { proxies, skipped } = buildProxies(target.profile, target.profileNodeIds, previewClients, nodes, endpoints, now);
 
 	return {

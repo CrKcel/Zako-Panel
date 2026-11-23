@@ -18,15 +18,15 @@ Zako Panel 由三部分组成：**控制面**（Cloudflare Worker + D1）、**�
 ```
 
 - **Node（节点）**：一台装了 Xray 和 Agent 的服务器。它有一把专属的 `agent_token` 用来和面板通信。
-- **Endpoint（接入端点）**：节点对外提供代理服务的公网入口（域名/IP、端口、VLESS + REALITY 参数）。一台机器可以挂多个端口或域名，所以拆成了 `1 个 Node 对多个 Endpoint`；安装时从节点已有的 Xray 配置识别并自动创建。
+- **Endpoint（接入端点）**：节点对外提供代理服务的公网入口（域名/IP、端口、协议参数），协议支持 VLESS + REALITY、VMess、Trojan、Shadowsocks 与 Hysteria2。一台机器可以挂多个端口或域名，所以拆成了 `1 个 Node 对多个 Endpoint`；安装时从节点已有的 Xray 配置识别并自动创建，Hysteria2 端点由管理员手工创建。
 - **Subscriber（订阅用户）**：真正在用代理的人。流量限额、月度用量、到期时间、是否启用，全部挂在人身上。
-- **Node Client（节点凭据）**：管理员把某个用户授权给某个节点时，系统会为这对“用户-节点”生成一对固定的 `xray_email`（形如 `u_<ULID>`）和 `vless_uuid`。同一节点下的多个 Endpoint 共用这一对凭据。
+- **Node Client（节点凭据）**：管理员把某个用户授权给某个节点时，系统会为这对“用户-节点”生成一对固定的 `xray_email`（形如 `u_<ULID>`）和 `vless_uuid`。同一节点下的多个 Endpoint 共用这一对凭据：`vless_uuid` 在 VLESS、VMess 里当 UUID，在 Trojan、Shadowsocks、Hysteria2 里直接当密码。
 - **Profile（订阅档案）**：决定订阅长什么样——选哪些节点（全部还是指定几个）、是不是只下发在线节点、Clash 的基础配置、代理组和分流规则怎么写。
 - **Subscription（订阅链接）**：把某个 `Subscriber` 和某个 `Profile` 绑在一起生成的访问 Token（对应 URL `/sub/{token}`）。一个人可以有多个不同 Profile 的订阅链接，轮换或撤销某条链接不会影响其他人。
 
 ### 四条主线怎么串起来
 
-1. **装节点**：管理员在面板生成一次性注册 Token → 节点跑一键脚本安装 Xray 和 Agent，识别并接管已有的 Xray 配置（没有配置时写入默认模板），只把 REALITY 公钥和接入端点报给面板完成注册。
+1. **装节点**：管理员在面板生成一次性注册 Token → 节点跑一键脚本安装 Xray 和 Agent，识别并接管已有的 Xray 配置（没有配置时写入默认模板），只把 REALITY 公钥、传输参数和接入端点报给面板完成注册。
 2. **授权用户**：管理员创建用户、授权节点 → 面板把全局版本号 `users_ver` 加 1 → Agent 下次心跳发现版本号变了，就来拉最新名单，通过 gRPC 热更新塞进本地 Xray。
 3. **用户拉订阅**：客户端请求 `/sub/{token}/clash.yaml` → 面板校验用户没过期、没超额 → 把档案里选的节点和用户有权限的节点取交集，去掉离线/停用的节点 → 现场拼出 YAML 返回。
 4. **收流量**：Agent 每 30 秒看一眼 Xray 计数器，每 15 分钟把增量按自然小时拆好，连同心跳一起发给面板 → 面板按 `report_id` 幂等记账并累加到用户当月用量。
@@ -121,7 +121,7 @@ flowchart LR
 
 ### 5.3 怎么扩展新功能
 
-- **加新协议**：实现一个新的 `ProtocolAdapter`（定义参数校验 + Clash/URI 渲染）并注册进 `protocols/` 注册表。
+- **加新协议**：实现一个新的 `ProtocolAdapter`（定义参数校验 + Clash/URI 渲染）并注册进 `protocols/` 注册表；需要节点接管的协议还要加进 `AGENT_PROTOCOLS`，并在 Agent 侧补上入站识别与客户端渲染。
 - **加新订阅格式**：复用已筛选好的节点列表 DTO，在 `renderers/` 下新增一个渲染器。
 - **加新节点监控指标**：Heartbeat 请求体支持可选字段，控制面在对应 service 中消化即可。
 - **加新管理功能**：先改 `packages/contracts/openapi.yaml` 并生成类型，再按 `migration → repository → service → route → web` 顺序补齐。

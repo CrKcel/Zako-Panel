@@ -1,11 +1,11 @@
-import type { AgentEnrollRequest, AgentEnrollResponse, CreateNodeEnrollmentTokenRequest, NodeEnrollmentToken } from '@zako/contracts';
+import type { AgentEndpointProtocol, AgentEnrollResponse, CreateNodeEnrollmentTokenRequest, NodeEnrollmentToken } from '@zako/contracts';
 import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { sha256Hex, timingSafeEqualHex } from '../lib/hash';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { generateToken, parseAgentToken } from '../lib/token';
-import { getProtocolAdapter } from '../protocols';
+import { getProtocolAdapter, isAgentProtocol } from '../protocols';
 import {
 	consumeEnrollmentToken,
 	type EnrollmentTokenRow,
@@ -18,6 +18,30 @@ import {
 } from '../repositories/enrollment-tokens';
 import type { ListQuery, Paginated } from '../types';
 import { prepareNodeProvision, type ProvisionEndpoint } from './node-service';
+
+/**
+ * The agent reports endpoint params the route cannot validate: each one belongs to
+ * the protocol the agent declared, so validateEndpoints checks it against that
+ * protocol's adapter.
+ */
+export interface EnrollEndpointInput {
+	name: string;
+	protocol: AgentEndpointProtocol;
+	port: number;
+	params: Record<string, unknown>;
+}
+
+export interface EnrollInput {
+	name: string;
+	host: string;
+	agent_version?: string;
+	xray_version?: string;
+	endpoints: EnrollEndpointInput[];
+}
+
+interface ValidatedEndpoint extends ProvisionEndpoint {
+	protocol: AgentEndpointProtocol;
+}
 
 const DEFAULT_TTL_SECONDS = 86_400; // 24 hours
 const MAX_ENDPOINTS = 16;
@@ -96,7 +120,7 @@ export async function revokeEnrollmentToken(db: D1Database, tokenId: string): Pr
  * Endpoint names are unique per node, and two inbounds adopted from one node can
  * legitimately share a tag. Suffixes keep enrollment from failing on that.
  */
-function uniqueEndpointNames(endpoints: AgentEnrollRequest['endpoints']): string[] {
+function uniqueEndpointNames(endpoints: EnrollEndpointInput[]): string[] {
 	const used = new Set<string>();
 	return endpoints.map((endpoint) => {
 		const base = truncateName(endpoint.name.trim() || `endpoint-${endpoint.port}`, 64);
@@ -115,7 +139,7 @@ function uniqueEndpointNames(endpoints: AgentEnrollRequest['endpoints']): string
  * the protocol adapter so a malformed value is rejected before the token is
  * consumed and the node row is written.
  */
-function validateEndpoints(endpoints: AgentEnrollRequest['endpoints']): ProvisionEndpoint[] {
+function validateEndpoints(endpoints: EnrollEndpointInput[]): ValidatedEndpoint[] {
 	if (endpoints.length === 0) {
 		throw new AppError('VALIDATION_ERROR', 'Enrollment must report at least one endpoint', 422);
 	}
@@ -124,6 +148,9 @@ function validateEndpoints(endpoints: AgentEnrollRequest['endpoints']): Provisio
 	}
 	const names = uniqueEndpointNames(endpoints);
 	return endpoints.map((endpoint, index) => {
+		if (!isAgentProtocol(endpoint.protocol)) {
+			throw new AppError('VALIDATION_ERROR', `Unsupported endpoint protocol: ${endpoint.protocol}`, 422);
+		}
 		const adapter = getProtocolAdapter(endpoint.protocol);
 		if (!adapter) {
 			throw new AppError('VALIDATION_ERROR', `Unsupported endpoint protocol: ${endpoint.protocol}`, 422);
@@ -135,7 +162,7 @@ function validateEndpoints(endpoints: AgentEnrollRequest['endpoints']): Provisio
 		return {
 			id: newId(),
 			name: names[index] as string,
-			protocol: adapter.protocol,
+			protocol: endpoint.protocol,
 			host: '',
 			port: endpoint.port,
 			params: params.data as Record<string, unknown>,
@@ -157,7 +184,7 @@ function truncateName(name: string, limit: number): string {
 export async function enrollNode(
 	db: D1Database,
 	authorizationHeader: string | undefined,
-	input: AgentEnrollRequest,
+	input: EnrollInput,
 ): Promise<AgentEnrollResponse> {
 	const bearer = authorizationHeader?.startsWith('Bearer ') ? authorizationHeader.slice('Bearer '.length).trim() : undefined;
 	const parsed = parseAgentToken(bearer);

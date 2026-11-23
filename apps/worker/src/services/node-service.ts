@@ -1,12 +1,11 @@
 import type {
 	AgentUpdateResult,
-	CreateEndpointRequest,
 	Endpoint,
+	EndpointProtocol,
 	Node,
 	NodeClient,
 	NodeStatusDetail,
 	SysStats,
-	UpdateEndpointRequest,
 	UpdateNodeRequest,
 } from '@zako/contracts';
 import { isUniqueConstraintError } from '../lib/db-errors';
@@ -15,7 +14,7 @@ import { sha256Hex } from '../lib/hash';
 import { newId, newXrayEmail } from '../lib/ids';
 import { deriveNodeStatus, nowSeconds } from '../lib/node-status';
 import { generateToken } from '../lib/token';
-import { DEFAULT_PROTOCOL, requireProtocolAdapter } from '../protocols';
+import { getProtocolAdapter, isEndpointProtocol, requireProtocolAdapter } from '../protocols';
 import {
 	disableEndpoint as disableEndpointRow,
 	type EndpointRow,
@@ -49,6 +48,26 @@ export interface ProvisionEndpoint {
 	host: string;
 	port: number;
 	params: Record<string, unknown>;
+}
+
+/**
+ * Endpoint writes carry unvalidated protocol params: the route can only check that
+ * an object was sent, while the service validates it against the protocol adapter.
+ */
+export interface CreateEndpointInput {
+	name: string;
+	host: string;
+	port: number;
+	protocol: EndpointProtocol;
+	params: Record<string, unknown>;
+}
+
+export interface UpdateEndpointInput {
+	name?: string;
+	host?: string;
+	port?: number;
+	params?: Record<string, unknown>;
+	enabled?: boolean;
 }
 
 export interface NodeProvisionParams {
@@ -180,6 +199,9 @@ function toNode(row: NodeRow, now: number): Node {
 }
 
 function toEndpoint(row: EndpointRow): Endpoint {
+	if (!isEndpointProtocol(row.protocol)) {
+		throw new AppError('INTERNAL_ERROR', 'Stored endpoint protocol is not supported', 500);
+	}
 	const adapter = requireProtocolAdapter(row.protocol);
 	const params = adapter.paramsSchema.safeParse(JSON.parse(row.params_json) as unknown);
 	if (!params.success) {
@@ -189,8 +211,7 @@ function toEndpoint(row: EndpointRow): Endpoint {
 		id: row.id,
 		node_id: row.node_id,
 		name: row.name,
-		// The protocol registry is the single source of truth for endpoint shapes.
-		protocol: DEFAULT_PROTOCOL,
+		protocol: row.protocol,
 		host: row.host,
 		port: row.port,
 		params: params.data as Endpoint['params'],
@@ -198,6 +219,23 @@ function toEndpoint(row: EndpointRow): Endpoint {
 		created_at: row.created_at,
 		updated_at: row.updated_at,
 	};
+}
+
+/**
+ * Validates protocol parameters against the adapter that owns them. The route
+ * schema cannot do this because the protocol is resolved from the request (create)
+ * or from the stored endpoint (update).
+ */
+function validatedParams(protocol: EndpointProtocol, params: unknown): Record<string, unknown> {
+	const adapter = getProtocolAdapter(protocol);
+	if (!adapter) {
+		throw new AppError('VALIDATION_ERROR', `Unsupported endpoint protocol: ${protocol}`, 422);
+	}
+	const parsed = adapter.paramsSchema.safeParse(params);
+	if (!parsed.success) {
+		throw new AppError('VALIDATION_ERROR', `Invalid parameters for protocol ${protocol}`, 422);
+	}
+	return parsed.data as Record<string, unknown>;
 }
 
 function nodeNotFound(): AppError {
@@ -299,7 +337,7 @@ export async function listNodeClients(db: D1Database, nodeId: string): Promise<N
 	}));
 }
 
-export async function createEndpoint(db: D1Database, nodeId: string, input: CreateEndpointRequest): Promise<Endpoint> {
+export async function createEndpoint(db: D1Database, nodeId: string, input: CreateEndpointInput): Promise<Endpoint> {
 	const node = await findNodeById(db, nodeId);
 	if (!node) throw nodeNotFound();
 	const now = nowSeconds();
@@ -309,10 +347,10 @@ export async function createEndpoint(db: D1Database, nodeId: string, input: Crea
 			id: endpointId,
 			node_id: nodeId,
 			name: input.name,
-			protocol: DEFAULT_PROTOCOL,
+			protocol: input.protocol,
 			host: input.host,
 			port: input.port,
-			params_json: JSON.stringify(input.params),
+			params_json: JSON.stringify(validatedParams(input.protocol, input.params)),
 			now,
 		}).run();
 	} catch (error) {
@@ -326,11 +364,14 @@ export async function createEndpoint(db: D1Database, nodeId: string, input: Crea
 	return toEndpoint(row);
 }
 
-export async function updateEndpoint(db: D1Database, nodeId: string, endpointId: string, input: UpdateEndpointRequest): Promise<Endpoint> {
+export async function updateEndpoint(db: D1Database, nodeId: string, endpointId: string, input: UpdateEndpointInput): Promise<Endpoint> {
 	const node = await findNodeById(db, nodeId);
 	if (!node) throw nodeNotFound();
 	const existing = await findEndpointById(db, nodeId, endpointId);
 	if (!existing) throw new AppError('NOT_FOUND', 'Endpoint not found', 404);
+	if (!isEndpointProtocol(existing.protocol)) {
+		throw new AppError('INTERNAL_ERROR', 'Stored endpoint protocol is not supported', 500);
+	}
 	try {
 		await updateEndpointRow(
 			db,
@@ -340,7 +381,9 @@ export async function updateEndpoint(db: D1Database, nodeId: string, endpointId:
 				name: input.name,
 				host: input.host,
 				port: input.port,
-				params_json: input.params === undefined ? undefined : JSON.stringify(input.params),
+				// The protocol is fixed at creation, so an omitted protocol in the
+				// request is validated against the stored one.
+				params_json: input.params === undefined ? undefined : JSON.stringify(validatedParams(existing.protocol, input.params)),
 				enabled: input.enabled,
 			},
 			nowSeconds(),

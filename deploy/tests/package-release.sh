@@ -39,8 +39,6 @@ for expected in \
 	zako-agent/systemd/zako-agent.service \
 	zako-agent/polkit/50-zako-agent-xray.rules \
 	zako-agent/lib/reality-key.sh \
-	zako-agent/xray/config.example.json \
-	zako-agent/xray/render-config.py \
 	zako-agent/VERSION; do
 	if ! grep -Fxq "${expected}" "${LISTING}"; then
 		printf 'archive is missing %s\n' "${expected}" >&2

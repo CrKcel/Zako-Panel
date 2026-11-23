@@ -28,7 +28,7 @@ erDiagram
     nodes ||--o{ profile_nodes : "关联"
 ```
 
-- **节点与注册**：`nodes` 存节点名称、Token 哈希、心跳周期、最后活跃时间、健康状态、版本号；`node_enrollment_tokens` 存一键部署用的一次性注册令牌哈希、默认参数与 24 小时过期时间；`endpoints` 存公网地址、端口和协议参数（`params_json`）。
+- **节点与注册**：`nodes` 存节点名称、Token 哈希、心跳周期、最后活跃时间、健康状态、版本号；`node_enrollment_tokens` 存一键部署用的一次性注册令牌哈希与 24 小时过期时间；`endpoints` 存公网地址、端口和协议参数（`params_json`）。
 - **用户与凭据**：`subscribers` 存用户状态（`active` / `limited` / `expired` / `disabled`）、月度限额和到期时间；`node_clients` 存用户在某节点上的 `xray_email` 和 `vless_uuid`（取消授权时把 `enabled` 设为 `0`，保留历史统计关联）。
 - **订阅与档案**：`subscription_profiles` 存节点筛选策略（全量或指定列表）、`online_only` 开关以及 Clash 模板 JSON；`subscriptions` 存订阅 Token 的 SHA-256 哈希和过期/撤销状态。
 - **配置与元数据**：`node_configs` 按 `(node_id, version)` 存不可变配置 JSON 与哈希，回滚时基于旧版本生成递增新版本；`meta` 存全局键值（如 `users_ver`、`default_subscriber_id`）；`audit_events` 记录关键管理操作。

@@ -1,21 +1,22 @@
 // Package initcmd implements `zako-agent init` for one-time node enrollment.
 //
-// It derives the REALITY public key from the local private key, registers the
-// node with the control plane using a one-time enrollment token, and writes
-// the permanent agent token and YAML configuration atomically.
+// Enrollment adopts the node's existing Xray configuration: the document is
+// inspected for VLESS + REALITY inbounds, each becomes a panel endpoint, and a
+// node without any configuration receives the default template. The derived
+// REALITY public keys are reported with the node name, and the permanent agent
+// token plus YAML configuration are written atomically.
 package initcmd
 
 import (
 	"context"
-	"crypto/ecdh"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"github.com/zako-panel/zako-agent/internal/atomicfile"
 	"github.com/zako-panel/zako-agent/internal/config"
 	"github.com/zako-panel/zako-agent/internal/reporter"
+	"github.com/zako-panel/zako-agent/internal/xrayconfig"
 )
 
 // Options configures a single enrollment run.
@@ -34,9 +36,6 @@ type Options struct {
 	Token          string
 	NodeName       string
 	Host           string
-	Port           int
-	SNI            string
-	ShortID        string
 	ConfigPath     string
 	TokenFile      string
 	RealityKeyPath string
@@ -49,12 +48,19 @@ type Options struct {
 // Output is printed as JSON to stdout after enrollment succeeds; it never
 // contains the enrollment token or the permanent agent token.
 type Output struct {
-	NodeID    string `json:"node_id"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	SNI       string `json:"sni"`
-	ShortID   string `json:"short_id"`
-	PublicKey string `json:"public_key"`
+	NodeID         string           `json:"node_id"`
+	Host           string           `json:"host"`
+	XrayConfigPath string           `json:"xray_config_path"`
+	CreatedConfig  bool             `json:"created_config"`
+	EndpointCount  int              `json:"endpoint_count"`
+	Endpoints      []OutputEndpoint `json:"endpoints"`
+}
+
+// OutputEndpoint describes one endpoint stored by the panel.
+type OutputEndpoint struct {
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Port     int    `json:"port"`
 }
 
 // Run parses CLI flags for `zako-agent init` and executes enrollment.
@@ -66,14 +72,11 @@ func Run(ctx context.Context, args []string, agentVersion string, stdout io.Writ
 	fs.StringVar(&opts.PanelURL, "panel", "", "control plane HTTPS URL")
 	fs.StringVar(&opts.Token, "token", "", "one-time enrollment token from the panel")
 	fs.StringVar(&opts.NodeName, "name", "", "node name (defaults to hostname)")
-	fs.StringVar(&opts.Host, "host", "", "public IP or domain for the node endpoint")
-	fs.IntVar(&opts.Port, "port", 0, "optional VLESS endpoint port override")
-	fs.StringVar(&opts.SNI, "sni", "", "optional REALITY SNI override")
-	fs.StringVar(&opts.ShortID, "short-id", "", "REALITY short id hex string (generated if omitted)")
+	fs.StringVar(&opts.Host, "host", "", "public IP or domain for the node endpoints")
 	fs.StringVar(&opts.ConfigPath, "config", "/etc/zako-agent/config.yaml", "path to write agent config.yaml")
 	fs.StringVar(&opts.TokenFile, "token-file", "/etc/zako-agent/token", "path to write permanent agent token")
 	fs.StringVar(&opts.RealityKeyPath, "reality-key", "/etc/xray/reality.key", "path to local REALITY private key")
-	fs.StringVar(&opts.XrayConfigPath, "xray-config", "/etc/xray/config.json", "path to Xray config.json")
+	fs.StringVar(&opts.XrayConfigPath, "xray-config", "/etc/xray/config.json", "path to the Xray config.json to adopt or create")
 	fs.StringVar(&opts.XrayBinaryPath, "xray-bin", "/usr/local/bin/xray", "path to Xray binary")
 	fs.StringVar(&opts.XrayVersion, "xray-version", "", "installed Xray version")
 
@@ -107,6 +110,9 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 	if strings.TrimSpace(opts.Host) == "" {
 		return nil, errors.New("init: --host is required")
 	}
+	if strings.TrimSpace(opts.XrayConfigPath) == "" {
+		return nil, errors.New("init: --xray-config is required")
+	}
 
 	nodeName := strings.TrimSpace(opts.NodeName)
 	if nodeName == "" {
@@ -117,17 +123,25 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 		nodeName = hostname
 	}
 
-	publicKey, err := deriveRealityPublicKey(opts.RealityKeyPath)
+	privateKey, err := readRealityPrivateKey(opts.RealityKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	shortID, err := randomShortID()
+	if err != nil {
+		return nil, err
+	}
+	existing, err := readExistingConfig(opts.XrayConfigPath)
 	if err != nil {
 		return nil, err
 	}
 
-	shortID := strings.TrimSpace(opts.ShortID)
-	if shortID == "" {
-		shortID, err = randomShortID()
-		if err != nil {
-			return nil, err
-		}
+	prepared, err := xrayconfig.PrepareDocument(existing, privateKey, shortID)
+	if err != nil {
+		return nil, err
+	}
+	if len(prepared.Endpoints) == 0 {
+		return nil, errors.New("init: no endpoint could be adopted from the Xray configuration")
 	}
 
 	rep, err := reporter.New(panelURL, opts.Token, client)
@@ -136,14 +150,11 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 	}
 
 	resp, err := rep.Enroll(ctx, &reporter.EnrollRequest{
-		Name:             nodeName,
-		Host:             strings.TrimSpace(opts.Host),
-		Port:             opts.Port,
-		SNI:              strings.TrimSpace(opts.SNI),
-		RealityPublicKey: publicKey,
-		RealityShortID:   shortID,
-		AgentVersion:     opts.AgentVersion,
-		XrayVersion:      strings.TrimSpace(opts.XrayVersion),
+		Name:         nodeName,
+		Host:         strings.TrimSpace(opts.Host),
+		AgentVersion: opts.AgentVersion,
+		XrayVersion:  strings.TrimSpace(opts.XrayVersion),
+		Endpoints:    enrollEndpoints(prepared.Endpoints),
 	})
 	if err != nil {
 		return nil, err
@@ -157,6 +168,14 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 	if hbInterval == 0 {
 		hbInterval = 5 * time.Minute
 	}
+	inboundTag := prepared.Endpoints[0].Tag
+	if inboundTag == "" {
+		inboundTag = "vless-reality"
+	}
+	apiAddress := prepared.APIAddress
+	if apiAddress == "" {
+		apiAddress = "127.0.0.1:10085"
+	}
 	cfg := config.Config{
 		ControlPlaneURL:       panelURL,
 		NodeID:                resp.NodeID,
@@ -166,8 +185,8 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 		XrayConfigPath:        opts.XrayConfigPath,
 		XrayBinaryPath:        opts.XrayBinaryPath,
 		RealityPrivateKeyPath: opts.RealityKeyPath,
-		XrayAPIAddress:        "127.0.0.1:10085",
-		XrayInboundTag:        "vless-reality",
+		XrayAPIAddress:        apiAddress,
+		XrayInboundTag:        inboundTag,
 		HeartbeatInterval:     config.Duration(hbInterval),
 		Collector: config.CollectorConfig{
 			SampleInterval: config.Duration(30 * time.Second),
@@ -182,36 +201,75 @@ func Execute(ctx context.Context, opts Options, client *http.Client) (*Output, e
 		return nil, fmt.Errorf("write config: %w", err)
 	}
 
-	return &Output{
-		NodeID:    resp.NodeID,
-		Host:      resp.Endpoint.Host,
-		Port:      resp.Endpoint.Port,
-		SNI:       resp.Endpoint.SNI,
-		ShortID:   resp.Endpoint.ShortID,
-		PublicKey: publicKey,
-	}, nil
+	// The document is written after enrollment so a rejected enrollment leaves
+	// the node's existing Xray configuration untouched.
+	store, err := xrayconfig.NewConfigStore(opts.XrayConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Write(prepared.Document); err != nil {
+		return nil, err
+	}
+
+	out := &Output{
+		NodeID:         resp.NodeID,
+		Host:           strings.TrimSpace(opts.Host),
+		XrayConfigPath: opts.XrayConfigPath,
+		CreatedConfig:  prepared.Created,
+		EndpointCount:  len(prepared.Endpoints),
+	}
+	for _, endpoint := range prepared.Endpoints {
+		out.Endpoints = append(out.Endpoints, OutputEndpoint{
+			Name:     endpoint.Name,
+			Protocol: "vless-reality",
+			Port:     endpoint.Port,
+		})
+	}
+	return out, nil
 }
 
-// deriveRealityPublicKey decodes the base64url raw X25519 private key written by
-// `xray x25519` and computes the matching base64url raw public key.
-func deriveRealityPublicKey(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+func enrollEndpoints(endpoints []xrayconfig.ManagedEndpoint) []reporter.EnrollEndpoint {
+	result := make([]reporter.EnrollEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		result = append(result, reporter.EnrollEndpoint{
+			Name:     endpoint.Name,
+			Protocol: "vless-reality",
+			Port:     endpoint.Port,
+			Params: reporter.EnrollEndpointParams{
+				SNI:         endpoint.SNI,
+				PublicKey:   endpoint.PublicKey,
+				ShortID:     endpoint.ShortID,
+				Fingerprint: endpoint.Fingerprint,
+				Flow:        endpoint.Flow,
+				Network:     endpoint.Network,
+			},
+		})
+	}
+	return result
+}
+
+func readExistingConfig(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		return data, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("read xray config %s: %w", path, err)
+	}
+}
+
+func readRealityPrivateKey(path string) (string, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read reality key %s: %w", path, err)
 	}
-	trimmed := strings.TrimSpace(string(raw))
-	keyBytes, err := base64.RawURLEncoding.DecodeString(trimmed)
-	if err != nil {
-		keyBytes, err = base64.URLEncoding.DecodeString(trimmed)
-		if err != nil {
-			return "", fmt.Errorf("decode reality key %s: %w", path, err)
-		}
+	key := strings.TrimSpace(string(data))
+	if key == "" {
+		return "", fmt.Errorf("reality key %s is empty", path)
 	}
-	priv, err := ecdh.X25519().NewPrivateKey(keyBytes)
-	if err != nil {
-		return "", fmt.Errorf("invalid reality x25519 private key: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
+	return key, nil
 }
 
 func randomShortID() (string, error) {

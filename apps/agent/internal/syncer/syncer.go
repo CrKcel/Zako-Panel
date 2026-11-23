@@ -255,6 +255,9 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := s.refreshInboundTags(static); err != nil {
+		return err
+	}
 	rendered, err := s.render(static, response.Users)
 	if err != nil {
 		return err
@@ -284,6 +287,28 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		// when the state write failed after a successful apply.
 		return s.advanceVersion(response.Version)
 	}
+}
+
+// refreshInboundTags points the hot-update manager at the inbounds the current
+// document exposes. Endpoints adopted from an existing node can be renamed by a
+// published config, so the tag set is read from the document each time instead of
+// staying frozen at agent start.
+func (s *Syncer) refreshInboundTags(static []byte) error {
+	setter, ok := s.users.(interface{ SetInboundTags([]string) error })
+	if !ok {
+		return nil
+	}
+	tags, err := xrayconfig.ManagedInboundTags(static)
+	if err != nil {
+		return fmt.Errorf("syncer: read inbound tags: %w", err)
+	}
+	if len(tags) == 0 {
+		return errors.New("syncer: xray config has no tagged vless reality inbound")
+	}
+	if err := setter.SetInboundTags(tags); err != nil {
+		return fmt.Errorf("syncer: set inbound tags: %w", err)
+	}
+	return nil
 }
 
 // hotUpdate mutates the running inbound. Removals run first: a UUID change is a

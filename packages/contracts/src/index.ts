@@ -42,6 +42,7 @@ export type AgentUsers = Schemas['AgentUsers'];
 export type AgentConfig = Schemas['AgentConfig'];
 export type AgentConfigResult = Schemas['AgentConfigResult'];
 export type AgentUpdateResult = Schemas['AgentUpdateResult'];
+export type AgentEnrollEndpoint = Schemas['AgentEnrollEndpoint'];
 export type AgentEnrollRequest = Schemas['AgentEnrollRequest'];
 export type AgentEnrollResponse = Schemas['AgentEnrollResponse'];
 

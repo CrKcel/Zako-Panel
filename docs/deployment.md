@@ -38,9 +38,9 @@ npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 
 ## 2. 节点一键部署
 
-节点支持 **Debian 12 / 13**，只需预先有 `curl`（或 `wget`）、`tar` 和 CA 证书。脚本会自动下载缺失的 Xray-core（支持 `--xray-mirror` 指定镜像）、生成 REALITY 私钥、创建低权限用户 `zako-agent` 并注册节点。
+节点支持 **Debian 12 / 13**，只需预先有 `curl`（或 `wget`）、`tar` 和 CA 证书。脚本会自动下载缺失的 Xray-core（支持 `--xray-mirror` 指定镜像）、生成缺失的 REALITY 私钥、创建低权限用户 `zako-agent` 并注册节点。
 
-1. 在管理后台 **「节点列表」** 点击 **「一键部署节点」**，填好名称前缀、默认 SNI、端口和 Fingerprint，拿到一次性注册 Token（24 小时有效，用完即失效）。
+1. 在管理后台 **「节点列表」** 点击 **「一键部署节点」**，填写名称前缀（可选）和心跳间隔，拿到一次性注册 Token（24 小时有效，用完即失效）。
 2. 在节点上执行后台生成的命令：
 
 ```bash
@@ -49,9 +49,11 @@ curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   --token <ONE_TIME_ENROLLMENT_TOKEN>
 ```
 
-常用可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--port <端口>`、`--sni <SNI>`、`--xray-mirror <镜像地址>`。
+脚本会识别节点上已有的 Xray/V2Ray 配置（`/etc/xray/config.json`、`/usr/local/etc/xray/config.json`、`/etc/v2ray/config.json` 等）：VLESS + REALITY 入站被接管为面板接入端点，其他协议的入站保持原样；没有配置时写入默认模板。接入端点由节点上报后自动创建，面板侧不需要填写协议参数。
 
-执行完后，`xray.service` 和 `zako-agent.service` 会自动拉起，节点几十秒内就会在面板显示为 `online`。
+常用可选参数：`--name <节点名>`、`--host <公网IP或域名>`、`--xray-mirror <镜像地址>`。
+
+执行完后，`xray.service` 和 `zako-agent.service` 会自动拉起，节点几十秒内就会在面板显示为 `online`，并在节点详情页看到自动创建的接入端点。
 
 ### 升级与卸载
 

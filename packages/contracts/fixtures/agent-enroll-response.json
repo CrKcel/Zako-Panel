@@ -2,13 +2,12 @@
 	"node_id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E6",
 	"agent_token": "01J2Z6Q8Y3V9M4K7T1B5C0D2E6.dGhpcyBpcyBhIHNhbXBsZSBzZWNyZXQgdG9rZW4gZm9yIHRlc3Rz",
 	"heartbeat_interval_seconds": 300,
-	"endpoint": {
-		"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E7",
-		"name": "vless-reality",
-		"host": "203.0.113.10",
-		"port": 443,
-		"sni": "www.microsoft.com",
-		"short_id": "a1b2c3d4e5f60708",
-		"fingerprint": "chrome"
-	}
+	"endpoints": [
+		{
+			"id": "01J2Z6Q8Y3V9M4K7T1B5C0D2E7",
+			"name": "vless-reality",
+			"protocol": "vless-reality",
+			"port": 443
+		}
+	]
 }

@@ -148,7 +148,7 @@ func TestHandlerCodecRoundTripsAlterInbound(t *testing.T) {
 }
 
 func TestHandlerClientRejectsIncompleteUsers(t *testing.T) {
-	client := &HandlerClient{tag: testInboundTag}
+	client := &HandlerClient{tags: []string{testInboundTag}}
 	if err := client.AddUser(context.Background(), User{Email: testEmail}); err == nil {
 		t.Error("AddUser accepted a user without a UUID")
 	}

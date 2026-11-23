@@ -23,8 +23,21 @@ async function enrollTestNode(name: string) {
 	return enrollNode(env.DB, `Bearer ${createdToken.token}`, {
 		name,
 		host: '203.0.113.10',
-		reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-		reality_short_id: '0123456789abcdef',
+		endpoints: [
+			{
+				name: 'vless-reality',
+				protocol: 'vless-reality',
+				port: 443,
+				params: {
+					sni: 'www.example.com',
+					public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
+					short_id: '0123456789abcdef',
+					fingerprint: 'chrome',
+					flow: 'xtls-rprx-vision',
+					network: 'tcp',
+				},
+			},
+		],
 	});
 }
 

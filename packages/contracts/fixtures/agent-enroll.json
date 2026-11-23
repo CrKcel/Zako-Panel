@@ -1,10 +1,21 @@
 {
 	"name": "edge-tokyo-01",
 	"host": "203.0.113.10",
-	"port": 443,
-	"sni": "www.microsoft.com",
-	"reality_public_key": "m1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE",
-	"reality_short_id": "a1b2c3d4e5f60708",
 	"agent_version": "0.1.0",
-	"xray_version": "25.1.30"
+	"xray_version": "25.1.30",
+	"endpoints": [
+		{
+			"name": "vless-reality",
+			"protocol": "vless-reality",
+			"port": 443,
+			"params": {
+				"sni": "www.microsoft.com",
+				"public_key": "m1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE",
+				"short_id": "a1b2c3d4e5f60708",
+				"fingerprint": "chrome",
+				"flow": "xtls-rprx-vision",
+				"network": "tcp"
+			}
+		}
+	]
 }

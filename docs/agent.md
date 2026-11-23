@@ -26,11 +26,11 @@ Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd`
 | `agent_token_file` | 节点认证 Token 文件 | `/etc/zako-agent/token` |
 | `state_path` | BoltDB 本地状态库 | `/var/lib/zako-agent/state.db` |
 | `users_path` | 上次成功生效的用户快照 | `/var/lib/zako-agent/users.json` |
-| `xray_config_path` | Xray 配置文件 | `/etc/xray/config.json` |
+| `xray_config_path` | Xray 配置文件（安装时发现已有配置则沿用该路径） | `/etc/xray/config.json` |
 | `xray_binary_path` | Xray 可执行文件 | `/usr/local/bin/xray` |
 | `reality_private_key_path` | 本地 REALITY 私钥 | `/etc/xray/reality.key` |
 | `xray_api_address` | Xray gRPC 地址 | `127.0.0.1:10085` |
-| `xray_inbound_tag` | 代理入站 Tag | `vless-reality` |
+| `xray_inbound_tag` | 初始热更新入站 Tag（运行时按配置文件刷新全部受管入站） | `vless-reality` |
 | `heartbeat_interval` | 心跳间隔（服务端可动态下发覆盖） | `5m` |
 | `collector.sample_interval` | 采集 Xray 流量间隔 | `30s` |
 | `collector.report_interval` | 上报流量间隔 | `15m` |
@@ -44,7 +44,7 @@ Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd`
 3. **算差集并热更新**：对比新名单和本地 `users.json`，算出要新增、删除的用户（UUID 变了就先删后加），调用 Xray gRPC `HandlerService.AlterInbound`（`RemoveUser` / `AddUser`）动态修改，然后原子更新 `users.json` 和版本号。
 4. **万一热更新失败（安全回退）**：
    如果 gRPC 调用失败，Agent 会自动切到“改文件 + 重启”模式：
-   - 把新用户列表和本地私钥拼进完整的 Xray 配置；
+   - 把新用户列表和本地私钥拼进完整的 Xray 配置，写入所有受管的 VLESS + REALITY 入站；
    - 先跑 `xray run -test -config` 确认语法没问题；
    - 原子替换 `/etc/xray/config.json` 并执行 `systemctl restart xray.service`；
    - 检查 `StatsService` 是否健康；如果重启失败或健康检查没过，立刻还原旧配置再重启一次。
@@ -83,7 +83,17 @@ Agent 内部按以下状态流转：`IDLE → DOWNLOADING → VERIFYING → REND
 
 ---
 
-## 5. 节点权限隔离（最小特权）
+## 5. 接管已有 Xray 配置
+
+安装时 `zako-agent init` 读取节点已有的 Xray/V2Ray 配置；存在则沿用该文件，不存在时写入内置默认模板。
+
+- 面板只管理 VLESS + REALITY（TCP）入站：注册时把它们的端口、SNI、REALITY 公钥、Short ID 和 Fingerprint 作为接入端点上报，面板据此自动创建 Endpoint。
+- 其他协议的入站（vmess、trojan、shadowsocks、dokodemo-door 等）不参与渲染，重写配置时按原样保留。
+- 已有配置没有任何受管入站时，会在未被占用的端口追加一个默认 VLESS + REALITY 入站，其余配置不变。
+- 已有配置缺少 `api`、`stats`、Level 0 统计或 API 路由规则时只补缺失项，不覆盖已有值；这样接管后流量采集和用户热更新可以直接工作。
+- 热更新会按当前配置文件里的全部受管入站 Tag 逐个执行；任何一步失败都回退到重启并重写完整配置。
+
+## 6. 节点权限隔离（最小特权）
 
 Agent 不以 `root` 运行，而是用专用低权限用户 `zako-agent` 启动（`NoNewPrivileges=true`）：
 

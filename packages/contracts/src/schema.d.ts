@@ -943,9 +943,6 @@ export interface components {
         NodeEnrollmentToken: {
             id: string;
             name_prefix: string | null;
-            default_sni: string;
-            default_port: number;
-            default_fingerprint: string;
             heartbeat_interval_seconds: number;
             created_by: string;
             expires_at: number;
@@ -958,15 +955,6 @@ export interface components {
         };
         CreateNodeEnrollmentTokenRequest: {
             name_prefix?: string | null;
-            /** @default www.microsoft.com */
-            default_sni: string;
-            /** @default 443 */
-            default_port: number;
-            /**
-             * @default chrome
-             * @enum {string}
-             */
-            default_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random";
             /** @default 300 */
             heartbeat_interval_seconds: number;
             /** @default 86400 */
@@ -975,26 +963,27 @@ export interface components {
         AgentEnrollRequest: {
             name: string;
             host: string;
-            port?: number;
-            sni?: string;
-            reality_public_key: string;
-            reality_short_id: string;
             agent_version?: string;
             xray_version?: string;
+            endpoints: components["schemas"]["AgentEnrollEndpoint"][];
+        };
+        AgentEnrollEndpoint: {
+            name: string;
+            /** @enum {string} */
+            protocol: "vless-reality";
+            port: number;
+            params: components["schemas"]["VlessRealityParams"];
         };
         AgentEnrollResponse: {
             node_id: string;
             agent_token: string;
             heartbeat_interval_seconds: number;
-            endpoint: {
+            endpoints: {
                 id: string;
                 name: string;
-                host: string;
+                protocol: string;
                 port: number;
-                sni: string;
-                short_id: string;
-                fingerprint: string;
-            };
+            }[];
         };
     };
     responses: {

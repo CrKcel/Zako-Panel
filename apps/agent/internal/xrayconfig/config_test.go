@@ -260,3 +260,209 @@ func TestConfigStoreCreatesPrivateDirectoryAndReplacesFile(t *testing.T) {
 		t.Errorf("config directory mode = %o, want %o", got, want)
 	}
 }
+
+func TestRenderConfigFillsEveryManagedInboundAndKeepsOtherProtocols(t *testing.T) {
+	static := `{
+	  "inbounds": [
+	    {"tag": "vmess-in", "port": 10086, "protocol": "vmess",
+	     "settings": {"clients": [{"id": "vmess-user"}]}},
+	    {"tag": "reality-a", "port": 443, "protocol": "vless",
+	     "settings": {"clients": []},
+	     "streamSettings": {"network": "tcp", "security": "reality",
+	       "realitySettings": {"serverNames": ["a.example.com"], "shortIds": ["aa"]}}},
+	    {"tag": "reality-b", "port": 8443, "protocol": "vless",
+	     "settings": {"clients": []},
+	     "streamSettings": {"network": "tcp", "security": "reality",
+	       "realitySettings": {"serverNames": ["b.example.com"], "shortIds": ["bb"]}}}
+	  ]
+	}`
+	users := []xraycore.User{{Email: "u_a", UUID: "uuid-a"}}
+	rendered, err := RenderConfig([]byte(static), users, "local-key")
+	if err != nil {
+		t.Fatalf("RenderConfig: %v", err)
+	}
+	document := decodeDocument(t, rendered)
+
+	for _, tag := range []string{"reality-a", "reality-b"} {
+		inbound := inboundByTag(t, document, tag)
+		settings, _ := inbound["settings"].(map[string]any)
+		clients, _ := settings["clients"].([]any)
+		if len(clients) != 1 {
+			t.Errorf("%s clients = %+v, want the managed user set", tag, clients)
+		}
+		stream, _ := inbound["streamSettings"].(map[string]any)
+		reality, _ := stream["realitySettings"].(map[string]any)
+		if reality["privateKey"] != "local-key" {
+			t.Errorf("%s privateKey = %v, want the local key", tag, reality["privateKey"])
+		}
+		if reality["serverNames"].([]any)[0] != map[string]string{"reality-a": "a.example.com", "reality-b": "b.example.com"}[tag] {
+			t.Errorf("%s reality parameters were not preserved", tag)
+		}
+	}
+
+	// A protocol the panel does not implement keeps its settings untouched.
+	vmess := inboundByTag(t, document, "vmess-in")
+	vmessSettings, _ := vmess["settings"].(map[string]any)
+	vmessClients, _ := vmessSettings["clients"].([]any)
+	if len(vmessClients) != 1 || vmessClients[0].(map[string]any)["id"] != "vmess-user" {
+		t.Errorf("vmess clients = %+v, want untouched", vmessClients)
+	}
+}
+
+func TestManagedInboundTagsSkipsUnsupportedProtocols(t *testing.T) {
+	static := `{"inbounds": [
+	  {"tag": "vmess-in", "protocol": "vmess"},
+	  {"tag": "vless-plain", "protocol": "vless", "settings": {},
+	   "streamSettings": {"network": "tcp", "security": "none"}},
+	  {"tag": "reality-a", "protocol": "vless", "settings": {},
+	   "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {}}}
+	]}`
+	tags, err := ManagedInboundTags([]byte(static))
+	if err != nil {
+		t.Fatalf("ManagedInboundTags: %v", err)
+	}
+	if len(tags) != 1 || tags[0] != "reality-a" {
+		t.Errorf("tags = %v, want only the managed inbound", tags)
+	}
+}
+
+func TestPrepareDocumentAdoptsExistingConfig(t *testing.T) {
+	privateKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	existing := `{"inbounds": [
+	  {"tag": "vmess-in", "port": 10086, "protocol": "vmess", "settings": {"clients": []}},
+	  {"tag": "reality-a", "port": 8443, "protocol": "vless", "settings": {"clients": []},
+	   "streamSettings": {"network": "tcp", "security": "reality",
+	     "realitySettings": {"dest": "cdn.example.com:443", "serverNames": ["cdn.example.com"],
+	       "privateKey": "` + privateKey + `", "shortIds": ["aabb"], "fingerprint": "firefox"}}}
+	]}`
+	prepared, err := PrepareDocument([]byte(existing), "", "")
+	if err != nil {
+		t.Fatalf("PrepareDocument: %v", err)
+	}
+	if prepared.Created {
+		t.Error("Created = true, want the existing document adopted")
+	}
+	if len(prepared.Endpoints) != 1 {
+		t.Fatalf("endpoints = %d, want 1", len(prepared.Endpoints))
+	}
+	endpoint := prepared.Endpoints[0]
+	if endpoint.Name != "reality-a" || endpoint.Port != 8443 || endpoint.SNI != "cdn.example.com" {
+		t.Errorf("endpoint = %+v", endpoint)
+	}
+	if endpoint.PublicKey == "" || endpoint.ShortID != "aabb" || endpoint.Fingerprint != "firefox" {
+		t.Errorf("endpoint params = %+v", endpoint)
+	}
+
+	// The unsupported inbound is still present in the document that gets written.
+	tags, err := ManagedInboundTags(prepared.Document)
+	if err != nil || len(tags) != 1 || tags[0] != "reality-a" {
+		t.Fatalf("ManagedInboundTags = %v, %v", tags, err)
+	}
+}
+
+func TestPrepareDocumentCreatesDefaultTemplateWithoutConfig(t *testing.T) {
+	privateKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	prepared, err := PrepareDocument(nil, privateKey, "aabbccdd")
+	if err != nil {
+		t.Fatalf("PrepareDocument: %v", err)
+	}
+	if !prepared.Created {
+		t.Error("Created = false, want the default template")
+	}
+	if len(prepared.Endpoints) != 1 {
+		t.Fatalf("endpoints = %d, want 1", len(prepared.Endpoints))
+	}
+	endpoint := prepared.Endpoints[0]
+	if endpoint.SNI != DefaultSNI || endpoint.Port != DefaultPort || endpoint.ShortID != "aabbccdd" {
+		t.Errorf("endpoint = %+v", endpoint)
+	}
+}
+
+func TestPrepareDocumentAddsManagementScaffolding(t *testing.T) {
+	privateKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	existing := `{"inbounds": [
+	  {"tag": "reality-a", "port": 8443, "protocol": "vless", "settings": {"clients": []},
+	   "streamSettings": {"network": "tcp", "security": "reality",
+	     "realitySettings": {"serverNames": ["a.example.com"], "privateKey": "` + privateKey + `", "shortIds": ["aa"]}}}
+	]}`
+	prepared, err := PrepareDocument([]byte(existing), "", "")
+	if err != nil {
+		t.Fatalf("PrepareDocument: %v", err)
+	}
+	if prepared.APIAddress != "127.0.0.1:10085" {
+		t.Errorf("APIAddress = %q, want the default loopback API", prepared.APIAddress)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(prepared.Document, &root); err != nil {
+		t.Fatalf("decode adopted document: %v", err)
+	}
+	if _, ok := root["stats"]; !ok {
+		t.Error("stats section was not added")
+	}
+	api, _ := root["api"].(map[string]any)
+	if api == nil || api["tag"] != "api" {
+		t.Fatalf("api = %+v, want the management API", api)
+	}
+	services, _ := api["services"].([]any)
+	found := map[string]bool{}
+	for _, service := range services {
+		found[service.(string)] = true
+	}
+	if !found["StatsService"] || !found["HandlerService"] {
+		t.Errorf("api services = %v, want stats and handler", services)
+	}
+
+	policy, _ := root["policy"].(map[string]any)
+	levels, _ := policy["levels"].(map[string]any)
+	level0, _ := levels["0"].(map[string]any)
+	if level0["statsUserUplink"] != true || level0["statsUserDownlink"] != true {
+		t.Errorf("level 0 policy = %+v, want per-user stats enabled", level0)
+	}
+
+	if findInboundByTag(root, "api") == nil {
+		t.Error("management inbound was not appended")
+	}
+	routing, _ := root["routing"].(map[string]any)
+	rules, _ := routing["rules"].([]any)
+	if len(rules) != 1 {
+		t.Errorf("routing rules = %+v, want the API rule", rules)
+	}
+}
+
+func TestPrepareDocumentTagsAnUntaggedManagedInbound(t *testing.T) {
+	privateKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	existing := `{"inbounds": [
+	  {"port": 8443, "protocol": "vless", "settings": {"clients": []},
+	   "streamSettings": {"network": "tcp", "security": "reality",
+	     "realitySettings": {"serverNames": ["a.example.com"], "privateKey": "` + privateKey + `", "shortIds": []}}}
+	]}`
+	prepared, err := PrepareDocument([]byte(existing), "", "")
+	if err != nil {
+		t.Fatalf("PrepareDocument: %v", err)
+	}
+	if len(prepared.Endpoints) != 1 || prepared.Endpoints[0].Name != "vless-reality-8443" {
+		t.Fatalf("endpoints = %+v, want a generated tag", prepared.Endpoints)
+	}
+	tags, err := ManagedInboundTags(prepared.Document)
+	if err != nil || len(tags) != 1 || tags[0] != "vless-reality-8443" {
+		t.Fatalf("ManagedInboundTags = %v, %v", tags, err)
+	}
+}
+
+func TestPrepareDocumentTruncatesLongEndpointName(t *testing.T) {
+	privateKey := "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	longTag := strings.Repeat("t", 80)
+	existing := `{"inbounds": [
+	  {"tag": "` + longTag + `", "port": 8443, "protocol": "vless", "settings": {"clients": []},
+	   "streamSettings": {"network": "tcp", "security": "reality",
+	     "realitySettings": {"serverNames": ["a.example.com"], "privateKey": "` + privateKey + `", "shortIds": []}}}
+	]}`
+	prepared, err := PrepareDocument([]byte(existing), "", "")
+	if err != nil {
+		t.Fatalf("PrepareDocument: %v", err)
+	}
+	if got := len([]rune(prepared.Endpoints[0].Name)); got != 64 {
+		t.Errorf("name length = %d, want 64", got)
+	}
+}

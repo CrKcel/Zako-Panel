@@ -9,7 +9,7 @@
 - 自动生成 Clash.Meta YAML 与通用 URI 订阅链接，支持自定义代理组和分流规则
 - 节点 Agent 定时心跳、Xray 流量采样与按小时幂等入账
 - 节点用户列表热更新（通过 Xray gRPC 增量增删，失败时自动回退到安全重启）
-- 节点一键安装脚本与 Agent 二进制滚动分发（独立 Downloads Worker）
+- 节点一键安装脚本自动接管已有 Xray 配置（未实现的协议保持原样，无配置时写入默认模板），以及 Agent 二进制滚动分发（独立 Downloads Worker）
 
 ## 技术栈
 

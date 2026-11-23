@@ -6,6 +6,22 @@ import { createEnrollmentToken, enrollNode, listEnrollmentTokens, revokeEnrollme
 import { getNode, listNodeClients } from '../src/services/node-service';
 import { nowSeconds, seedMeta, seedSubscriber } from './helpers';
 
+function enrollEndpoint(port = 443) {
+	return {
+		name: 'vless-reality',
+		protocol: 'vless-reality' as const,
+		port,
+		params: {
+			sni: 'www.microsoft.com',
+			public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
+			short_id: 'deadbeef',
+			fingerprint: 'chrome' as const,
+			flow: 'xtls-rprx-vision' as const,
+			network: 'tcp' as const,
+		},
+	};
+}
+
 describe('node enrollment tokens', () => {
 	it('enrolls a node once, creates endpoint and default subscriber grant, and rejects reuse', async () => {
 		const subscriberId = await seedSubscriber({ name: 'default' });
@@ -15,15 +31,10 @@ describe('node enrollment tokens', () => {
 			env.DB,
 			{
 				name_prefix: 'edge',
-				default_sni: 'www.apple.com',
-				default_port: 8443,
-				default_fingerprint: 'safari',
 				heartbeat_interval_seconds: 180,
 			},
 			'admin@example.com',
 		);
-
-		expect(created.enrollment_token.status).toBe('active');
 		expect(created.enrollment_token.expires_at - created.enrollment_token.created_at).toBe(86_400);
 
 		const parsed = parseAgentToken(created.token);
@@ -36,20 +47,47 @@ describe('node enrollment tokens', () => {
 		const enrolled = await enrollNode(env.DB, `Bearer ${created.token}`, {
 			name: 'tokyo-01',
 			host: '203.0.113.20',
-			reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-			reality_short_id: 'a1b2c3d4',
+			endpoints: [
+				{
+					name: 'vless-reality',
+					protocol: 'vless-reality',
+					port: 8443,
+					params: {
+						sni: 'www.apple.com',
+						public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
+						short_id: 'a1b2c3d4',
+						fingerprint: 'safari',
+						flow: 'xtls-rprx-vision',
+						network: 'tcp',
+					},
+				},
+				{
+					name: 'vless-reality',
+					protocol: 'vless-reality',
+					port: 2053,
+					params: {
+						sni: 'www.apple.com',
+						public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
+						short_id: 'a1b2c3d4',
+						fingerprint: 'chrome',
+						flow: 'xtls-rprx-vision',
+						network: 'tcp',
+					},
+				},
+			],
 		});
 
 		expect(enrolled.heartbeat_interval_seconds).toBe(180);
-		expect(enrolled.endpoint.host).toBe('203.0.113.20');
-		expect(enrolled.endpoint.port).toBe(8443);
-		expect(enrolled.endpoint.sni).toBe('www.apple.com');
-		expect(enrolled.endpoint.fingerprint).toBe('safari');
+		expect(enrolled.endpoints).toHaveLength(2);
+		expect(enrolled.endpoints[0]?.port).toBe(8443);
 		expect(parseAgentToken(enrolled.agent_token)?.nodeId).toBe(enrolled.node_id);
 
 		const detail = await getNode(env.DB, enrolled.node_id);
 		expect(detail.node.name).toBe('edge-tokyo-01');
-		expect(detail.endpoints).toHaveLength(1);
+		expect(detail.endpoints).toHaveLength(2);
+		// Duplicate inbound tags are disambiguated so the unique (node, name) index holds.
+		expect(detail.endpoints.map((endpoint) => endpoint.name).sort()).toEqual(['vless-reality', 'vless-reality-2']);
+		expect(detail.endpoints[0]?.host).toBe('203.0.113.20');
 		expect(detail.endpoints[0]?.params.public_key).toBe('m1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE');
 
 		const clients = await listNodeClients(env.DB, enrolled.node_id);
@@ -66,8 +104,7 @@ describe('node enrollment tokens', () => {
 			enrollNode(env.DB, `Bearer ${created.token}`, {
 				name: 'tokyo-02',
 				host: '203.0.113.21',
-				reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-				reality_short_id: 'a1b2c3d4',
+				endpoints: [enrollEndpoint()],
 			}),
 		).rejects.toMatchObject({ status: 401 });
 
@@ -87,8 +124,7 @@ describe('node enrollment tokens', () => {
 			enrollNode(env.DB, `Bearer ${expired.token}`, {
 				name: 'expired-node',
 				host: '203.0.113.30',
-				reality_public_key: 'pk',
-				reality_short_id: '01',
+				endpoints: [enrollEndpoint()],
 			}),
 		).rejects.toMatchObject({ status: 401 });
 
@@ -98,13 +134,12 @@ describe('node enrollment tokens', () => {
 			enrollNode(env.DB, `Bearer ${revoked.token}`, {
 				name: 'revoked-node',
 				host: '203.0.113.31',
-				reality_public_key: 'pk',
-				reality_short_id: '01',
+				endpoints: [enrollEndpoint()],
 			}),
 		).rejects.toMatchObject({ status: 401 });
 
 		// HTTP route test: agent enrolls via POST /api/v1/agent/enroll.
-		const httpToken = await createEnrollmentToken(env.DB, { default_sni: 'www.cloudflare.com' }, 'owner@example.com');
+		const httpToken = await createEnrollmentToken(env.DB, {}, 'owner@example.com');
 
 		const enrollRes = await SELF.fetch('https://panel.example.com/api/v1/agent/enroll', {
 			method: 'POST',
@@ -115,8 +150,7 @@ describe('node enrollment tokens', () => {
 			body: JSON.stringify({
 				name: 'http-node-01',
 				host: '203.0.113.40',
-				reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-				reality_short_id: 'deadbeef',
+				endpoints: [enrollEndpoint()],
 			}),
 		});
 		expect(enrollRes.status).toBe(201);
@@ -132,8 +166,7 @@ describe('node enrollment tokens', () => {
 			body: JSON.stringify({
 				name: 'http-node-01',
 				host: '203.0.113.41',
-				reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-				reality_short_id: 'deadbeef',
+				endpoints: [enrollEndpoint()],
 			}),
 		});
 		expect(conflictRes.status).toBe(409);
@@ -147,8 +180,7 @@ describe('node enrollment tokens', () => {
 			body: JSON.stringify({
 				name: 'http-node-02',
 				host: '203.0.113.41',
-				reality_public_key: 'm1uM4zY2e6b0B9cF1x7vQ5kR3wP8nL2jH4dG6sA0iE',
-				reality_short_id: 'deadbeef',
+				endpoints: [enrollEndpoint()],
 			}),
 		});
 		expect(retryRes.status).toBe(201);

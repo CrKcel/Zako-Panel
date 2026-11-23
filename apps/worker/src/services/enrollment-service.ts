@@ -5,7 +5,7 @@ import { sha256Hex, timingSafeEqualHex } from '../lib/hash';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { generateToken, parseAgentToken } from '../lib/token';
-import type { VlessRealityParams } from '../protocols/vless-reality';
+import { getProtocolAdapter } from '../protocols';
 import {
 	consumeEnrollmentToken,
 	type EnrollmentTokenRow,
@@ -17,10 +17,10 @@ import {
 	revokeEnrollmentTokenRow,
 } from '../repositories/enrollment-tokens';
 import type { ListQuery, Paginated } from '../types';
-import { prepareNodeProvision } from './node-service';
+import { prepareNodeProvision, type ProvisionEndpoint } from './node-service';
 
 const DEFAULT_TTL_SECONDS = 86_400; // 24 hours
-const DEFAULT_ENDPOINT_NAME = 'vless-reality';
+const MAX_ENDPOINTS = 16;
 
 function deriveStatus(row: EnrollmentTokenRow, now: number): NodeEnrollmentToken['status'] {
 	if (row.used_at !== null) return 'used';
@@ -33,9 +33,6 @@ function toEnrollmentToken(row: EnrollmentTokenRow, now: number): NodeEnrollment
 	return {
 		id: row.id,
 		name_prefix: row.name_prefix,
-		default_sni: row.default_sni,
-		default_port: row.default_port,
-		default_fingerprint: row.default_fingerprint,
 		heartbeat_interval_seconds: row.heartbeat_interval_seconds,
 		created_by: row.created_by,
 		expires_at: row.expires_at,
@@ -61,9 +58,6 @@ export async function createEnrollmentToken(
 		id,
 		token_hash: tokenHash,
 		name_prefix: input.name_prefix ?? null,
-		default_sni: input.default_sni ?? 'www.microsoft.com',
-		default_port: input.default_port ?? 443,
-		default_fingerprint: input.default_fingerprint ?? 'chrome',
 		heartbeat_interval_seconds: input.heartbeat_interval_seconds ?? 300,
 		created_by: createdBy,
 		expires_at: now + ttl,
@@ -99,9 +93,67 @@ export async function revokeEnrollmentToken(db: D1Database, tokenId: string): Pr
 }
 
 /**
- * Validates a one-time enrollment token from `Authorization: Bearer <id>.<secret>`,
- * atomically consumes it, and provisions a new node + endpoint + default subscriber.
+ * Endpoint names are unique per node, and two inbounds adopted from one node can
+ * legitimately share a tag. Suffixes keep enrollment from failing on that.
  */
+function uniqueEndpointNames(endpoints: AgentEnrollRequest['endpoints']): string[] {
+	const used = new Set<string>();
+	return endpoints.map((endpoint) => {
+		const base = truncateName(endpoint.name.trim() || `endpoint-${endpoint.port}`, 64);
+		let candidate = base;
+		for (let suffix = 2; used.has(candidate); suffix += 1) {
+			const tail = `-${suffix}`;
+			candidate = `${truncateName(base, 64 - tail.length)}${tail}`;
+		}
+		used.add(candidate);
+		return candidate;
+	});
+}
+
+/**
+ * The agent reports what the node already serves. Parameters are validated by
+ * the protocol adapter so a malformed value is rejected before the token is
+ * consumed and the node row is written.
+ */
+function validateEndpoints(endpoints: AgentEnrollRequest['endpoints']): ProvisionEndpoint[] {
+	if (endpoints.length === 0) {
+		throw new AppError('VALIDATION_ERROR', 'Enrollment must report at least one endpoint', 422);
+	}
+	if (endpoints.length > MAX_ENDPOINTS) {
+		throw new AppError('VALIDATION_ERROR', `Enrollment must not report more than ${MAX_ENDPOINTS} endpoints`, 422);
+	}
+	const names = uniqueEndpointNames(endpoints);
+	return endpoints.map((endpoint, index) => {
+		const adapter = getProtocolAdapter(endpoint.protocol);
+		if (!adapter) {
+			throw new AppError('VALIDATION_ERROR', `Unsupported endpoint protocol: ${endpoint.protocol}`, 422);
+		}
+		const params = adapter.paramsSchema.safeParse(endpoint.params);
+		if (!params.success) {
+			throw new AppError('VALIDATION_ERROR', `Invalid parameters for endpoint ${endpoint.name}`, 422);
+		}
+		return {
+			id: newId(),
+			name: names[index] as string,
+			protocol: adapter.protocol,
+			host: '',
+			port: endpoint.port,
+			params: params.data as Record<string, unknown>,
+		};
+	});
+}
+
+/**
+ * Validates a one-time enrollment token from `Authorization: Bearer <id>.<secret>`,
+ * atomically consumes it, and provisions a new node plus the endpoints the node
+ * reported, along with a default subscriber grant.
+ */
+/** Truncates by code point so a name cannot be split inside a surrogate pair. */
+function truncateName(name: string, limit: number): string {
+	const points = Array.from(name);
+	return points.length > limit ? points.slice(0, limit).join('') : name;
+}
+
 export async function enrollNode(
 	db: D1Database,
 	authorizationHeader: string | undefined,
@@ -134,11 +186,8 @@ export async function enrollNode(
 		throw new AppError('CONFLICT', 'Node name already exists', 409);
 	}
 
+	const endpoints = validateEndpoints(input.endpoints).map((endpoint) => ({ ...endpoint, host: input.host }));
 	const nodeId = newId();
-	const endpointId = newId();
-	const sni = input.sni ?? row.default_sni;
-	const port = input.port ?? row.default_port;
-	const fingerprint = row.default_fingerprint as VlessRealityParams['fingerprint'];
 
 	const consumed = await consumeEnrollmentToken(db, row.id, now);
 	if (!consumed) {
@@ -147,22 +196,9 @@ export async function enrollNode(
 
 	const { statements, agentToken } = await prepareNodeProvision(db, {
 		nodeId,
-		endpointId,
 		name: nodeName,
 		heartbeatInterval: row.heartbeat_interval_seconds,
-		endpoint: {
-			name: DEFAULT_ENDPOINT_NAME,
-			host: input.host,
-			port,
-			params: {
-				sni,
-				public_key: input.reality_public_key,
-				short_id: input.reality_short_id,
-				fingerprint,
-				flow: 'xtls-rprx-vision',
-				network: 'tcp',
-			},
-		},
+		endpoints,
 		now,
 	});
 
@@ -179,14 +215,11 @@ export async function enrollNode(
 		node_id: nodeId,
 		agent_token: agentToken,
 		heartbeat_interval_seconds: row.heartbeat_interval_seconds,
-		endpoint: {
-			id: endpointId,
-			name: DEFAULT_ENDPOINT_NAME,
-			host: input.host,
-			port,
-			sni,
-			short_id: input.reality_short_id,
-			fingerprint,
-		},
+		endpoints: endpoints.map((endpoint) => ({
+			id: endpoint.id,
+			name: endpoint.name,
+			protocol: endpoint.protocol,
+			port: endpoint.port,
+		})),
 	};
 }

@@ -220,35 +220,48 @@ func New(baseURL, token string, client *http.Client) (*Reporter, error) {
 	return &Reporter{baseURL: parsed, token: token, client: client}, nil
 }
 
-// EnrollRequest registers a new node using a one-time enrollment token.
+// EnrollRequest registers a new node using a one-time enrollment token and the
+// endpoints the node already serves.
 type EnrollRequest struct {
-	Name             string `json:"name"`
-	Host             string `json:"host"`
-	Port             int    `json:"port,omitempty"`
-	SNI              string `json:"sni,omitempty"`
-	RealityPublicKey string `json:"reality_public_key"`
-	RealityShortID   string `json:"reality_short_id"`
-	AgentVersion     string `json:"agent_version,omitempty"`
-	XrayVersion      string `json:"xray_version,omitempty"`
+	Name         string           `json:"name"`
+	Host         string           `json:"host"`
+	AgentVersion string           `json:"agent_version,omitempty"`
+	XrayVersion  string           `json:"xray_version,omitempty"`
+	Endpoints    []EnrollEndpoint `json:"endpoints"`
 }
 
-// EnrollEndpoint describes the initial VLESS + REALITY endpoint created by enrollment.
-type EnrollEndpoint struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
+// EnrollEndpointParams mirrors the panel's VLESS + REALITY parameters.
+type EnrollEndpointParams struct {
 	SNI         string `json:"sni"`
+	PublicKey   string `json:"public_key"`
 	ShortID     string `json:"short_id"`
 	Fingerprint string `json:"fingerprint"`
+	Flow        string `json:"flow"`
+	Network     string `json:"network"`
 }
 
-// EnrollResponse carries the permanent node credentials and endpoint settings.
+// EnrollEndpoint describes one inbound the node adopted or created.
+type EnrollEndpoint struct {
+	Name     string               `json:"name"`
+	Protocol string               `json:"protocol"`
+	Port     int                  `json:"port"`
+	Params   EnrollEndpointParams `json:"params"`
+}
+
+// EnrolledEndpoint is the stored endpoint returned by enrollment.
+type EnrolledEndpoint struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Port     int    `json:"port"`
+}
+
+// EnrollResponse carries the permanent node credentials and stored endpoints.
 type EnrollResponse struct {
-	NodeID                   string         `json:"node_id"`
-	AgentToken               string         `json:"agent_token"`
-	HeartbeatIntervalSeconds int            `json:"heartbeat_interval_seconds"`
-	Endpoint                 EnrollEndpoint `json:"endpoint"`
+	NodeID                   string             `json:"node_id"`
+	AgentToken               string             `json:"agent_token"`
+	HeartbeatIntervalSeconds int                `json:"heartbeat_interval_seconds"`
+	Endpoints                []EnrolledEndpoint `json:"endpoints"`
 }
 
 // Enroll registers a new node with a one-time enrollment token and returns the

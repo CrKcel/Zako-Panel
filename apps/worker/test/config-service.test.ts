@@ -85,6 +85,35 @@ describe('config service', () => {
 			status: 422,
 			code: 'VALIDATION_ERROR',
 		});
+
+		const untagged = structuredClone(SAMPLE_CONFIG);
+		delete (untagged.inbounds[1] as Record<string, unknown>).tag;
+		await expect(publishConfig(env.DB, nodeId, { definition: untagged })).rejects.toMatchObject({
+			status: 422,
+			code: 'VALIDATION_ERROR',
+		});
+	});
+
+	it('accepts definitions with several managed inbounds and other protocols', async () => {
+		const nodeId = await seedNode();
+		const definition = structuredClone(SAMPLE_CONFIG) as {
+			inbounds: Record<string, unknown>[];
+		};
+		const managed = structuredClone(definition.inbounds[1]!) as Record<string, unknown>;
+		managed.tag = 'vless-reality-8443';
+		managed.port = 8443;
+		definition.inbounds.push(managed);
+		definition.inbounds.push({
+			tag: 'vmess-in',
+			port: 10086,
+			protocol: 'vmess',
+			settings: { clients: [] },
+		});
+
+		const published = await publishConfig(env.DB, nodeId, { definition: definition as never });
+		expect(published.version).toBe(1);
+		const stored = published.definition.inbounds as Record<string, unknown>[];
+		expect(stored).toHaveLength(4);
 	});
 
 	it('lists versions descending with cursor pagination and rolls back to a new version', async () => {

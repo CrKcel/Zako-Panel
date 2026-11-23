@@ -56,7 +56,7 @@
 
 | 端点 | 用途 | 关键机制 |
 | --- | --- | --- |
-| `POST /agent/enroll` | 一键安装时自动注册节点 | 校验一次性 Token 并原子核销，创建节点和首个 `vless-reality` Endpoint，返回永久 `agent_token` |
+| `POST /agent/enroll` | 一键安装时自动注册节点 | 校验一次性 Token 并原子核销，按节点上报的接入端点创建节点与 Endpoint，返回永久 `agent_token` |
 | `POST /agent/report` | 心跳 + 流量上报 | 心跳和流量解耦（流量冲突不影响心跳落盘）；单次最多 40 个用户条目、64 KB；报表不能跨自然小时；同 `report_id` 重试哈希一致则幂等确认，内容不同返回 `409 REPORT_CONFLICT` |
 | `GET /agent/users` | 拉取当前节点有效用户 | 支持 `ETag` / `If-None-Match`，版本没变直接返回 `304 Not Modified` |
 | `GET /agent/config` | 拉取目标 Xray 配置 | 返回规范化 JSON 与 SHA-256 哈希；已是目标版本则返回 `204 No Content` |

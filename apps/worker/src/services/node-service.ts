@@ -42,18 +42,27 @@ import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode
 import type { ListQuery, Paginated } from '../types';
 import { bumpUsersVersionStatement } from './users-version';
 
+export interface ProvisionEndpoint {
+	id: string;
+	name: string;
+	protocol: string;
+	host: string;
+	port: number;
+	params: Record<string, unknown>;
+}
+
 export interface NodeProvisionParams {
 	nodeId: string;
-	endpointId: string;
 	name: string;
 	heartbeatInterval: number;
-	endpoint: CreateEndpointRequest;
+	endpoints: ProvisionEndpoint[];
 	now: number;
 }
 
 /**
  * Prepares the D1 batch statements and permanent agent token for creating a new
- * node, its initial endpoint, and a default-subscriber grant when present.
+ * node, the endpoints reported by the node, and a default-subscriber grant when
+ * present.
  */
 export async function prepareNodeProvision(
 	db: D1Database,
@@ -61,37 +70,11 @@ export async function prepareNodeProvision(
 ): Promise<{
 	statements: D1PreparedStatement[];
 	agentToken: string;
-	nodeRow: NodeRow;
-	endpointRow: EndpointRow;
 }> {
 	const secret = generateToken();
 	const tokenHash = await sha256Hex(secret);
 	const defaultSubscriberId = await getMetaValue(db, META_KEYS.defaultSubscriberId);
 	const defaultSubscriber = defaultSubscriberId ? await findSubscriberById(db, defaultSubscriberId) : null;
-
-	const nodeRow: NodeRow = {
-		id: params.nodeId,
-		name: params.name,
-		enabled: 1,
-		heartbeat_interval_seconds: params.heartbeatInterval,
-		last_seen_at: null,
-		xray_healthy: null,
-		stats_healthy: null,
-		agent_version: null,
-		xray_version: null,
-		sys_json: null,
-		desired_config_version: 0,
-		applied_config_version: 0,
-		last_config_error: null,
-		last_config_at: null,
-		desired_agent_version: null,
-		last_update_error: null,
-		last_update_at: null,
-		uninstall_requested_at: null,
-		uninstall_remove_xray: 0,
-		created_at: params.now,
-		updated_at: params.now,
-	};
 
 	const statements = [
 		insertNodeStatement(db, {
@@ -101,16 +84,18 @@ export async function prepareNodeProvision(
 			heartbeat_interval_seconds: params.heartbeatInterval,
 			now: params.now,
 		}),
-		insertEndpointStatement(db, {
-			id: params.endpointId,
-			node_id: params.nodeId,
-			name: params.endpoint.name,
-			protocol: DEFAULT_PROTOCOL,
-			host: params.endpoint.host,
-			port: params.endpoint.port,
-			params_json: JSON.stringify(params.endpoint.params),
-			now: params.now,
-		}),
+		...params.endpoints.map((endpoint) =>
+			insertEndpointStatement(db, {
+				id: endpoint.id,
+				node_id: params.nodeId,
+				name: endpoint.name,
+				protocol: endpoint.protocol,
+				host: endpoint.host,
+				port: endpoint.port,
+				params_json: JSON.stringify(endpoint.params),
+				now: params.now,
+			}),
+		),
 		bumpUsersVersionStatement(db),
 	];
 	if (defaultSubscriber) {
@@ -126,24 +111,9 @@ export async function prepareNodeProvision(
 		);
 	}
 
-	const endpointRow: EndpointRow = {
-		id: params.endpointId,
-		node_id: params.nodeId,
-		name: params.endpoint.name,
-		protocol: DEFAULT_PROTOCOL,
-		host: params.endpoint.host,
-		port: params.endpoint.port,
-		params_json: JSON.stringify(params.endpoint.params),
-		enabled: 1,
-		created_at: params.now,
-		updated_at: params.now,
-	};
-
 	return {
 		statements,
 		agentToken: `${params.nodeId}.${secret}`,
-		nodeRow,
-		endpointRow,
 	};
 }
 

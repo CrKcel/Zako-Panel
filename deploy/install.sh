@@ -26,7 +26,7 @@ readonly TOKEN_PATH="${CONFIG_DIR}/token"
 readonly CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 readonly XRAY_DIR="/etc/xray"
 readonly REALITY_KEY="${XRAY_DIR}/reality.key"
-readonly XRAY_CONFIG="${XRAY_DIR}/config.json"
+XRAY_CONFIG="${XRAY_DIR}/config.json"
 readonly XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,9 +77,11 @@ Options:
   --token <token>      One-time enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)
-  --port <port>        Override VLESS port
-  --sni <sni>          Override REALITY SNI
   --xray-mirror <url>  Override Xray-core download base URL
+
+Existing Xray/V2Ray configuration is adopted as-is: VLESS + REALITY inbounds
+become panel endpoints and other protocols are left untouched. A node without a
+configuration receives the default template.
 EOF
 }
 
@@ -88,8 +90,6 @@ PANEL_URL=""
 ENROLL_TOKEN=""
 NODE_NAME=""
 NODE_HOST=""
-NODE_PORT=""
-NODE_SNI=""
 XRAY_MIRROR="${XRAY_MIRROR:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -112,14 +112,6 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--host)
 			NODE_HOST="${2:-}"
-			shift 2
-			;;
-		--port)
-			NODE_PORT="${2:-}"
-			shift 2
-			;;
-		--sni)
-			NODE_SNI="${2:-}"
 			shift 2
 			;;
 		--xray-mirror)
@@ -263,6 +255,42 @@ systemctl daemon-reload
 systemctl enable zako-agent.service
 log "installed and enabled zako-agent.service (not started)"
 
+# Common installation layouts of Xray and V2Ray. A config found in one of them is
+# adopted instead of the default /etc/xray layout, so the shipped unit starts the
+# document the node actually uses.
+discover_xray_config() {
+	local candidate
+	for candidate in \
+		"/etc/xray/config.json" \
+		"/usr/local/etc/xray/config.json" \
+		"/etc/v2ray/config.json" \
+		"/usr/local/etc/v2ray/config.json"; do
+		if [[ -f "${candidate}" ]]; then
+			printf '%s\n' "${candidate}"
+			return 0
+		fi
+	done
+	printf '%s\n' "${XRAY_DIR}/config.json"
+}
+
+# The agent replaces config.json through a same-directory temporary file, so the
+# directory of an adopted config also has to be writable by the service group.
+# Existing access bits are kept: other services may still read the same directory.
+ensure_config_dir() {
+	local config_path="$1"
+	local config_dir
+	config_dir="$(dirname -- "${config_path}")"
+	if [[ ! -d "${config_dir}" ]]; then
+		install -d -m 0770 -o root -g "${SERVICE_GROUP}" "${config_dir}"
+		return
+	fi
+	if [[ "$(stat -c '%G' "${config_dir}")" != "${SERVICE_GROUP}" ]]; then
+		chgrp "${SERVICE_GROUP}" "${config_dir}"
+	fi
+	chmod g+rwx "${config_dir}"
+}
+
+XRAY_CONFIG="$(discover_xray_config)"
 ensure_xray_installed "${XRAY_BIN}" "${ARCH}" "${XRAY_MIRROR:-${XRAY_DEFAULT_MIRROR}}" "${XRAY_CONFIG}"
 
 detect_public_ip() {
@@ -283,6 +311,7 @@ detect_public_ip() {
 
 if [[ -x "${XRAY_BIN}" ]]; then
 	ensure_xray_dir
+	ensure_config_dir "${XRAY_CONFIG}"
 	if [[ -e "${REALITY_KEY}" ]]; then
 		log "preserving existing ${REALITY_KEY}"
 	else
@@ -299,9 +328,6 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		chmod 0600 "${REALITY_KEY}"
 		log "wrote REALITY private key to ${REALITY_KEY} (0600, ${SERVICE_USER})"
 	fi
-
-	xray_template="${SCRIPT_DIR}/xray/config.example.json"
-	xray_renderer="${SCRIPT_DIR}/xray/render-config.py"
 
 	if [[ -n "${PANEL_URL}" && -n "${ENROLL_TOKEN}" ]]; then
 		if [[ -z "${NODE_HOST}" ]]; then
@@ -323,12 +349,6 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		if [[ -n "${NODE_NAME}" ]]; then
 			init_args+=(--name "${NODE_NAME}")
 		fi
-		if [[ -n "${NODE_PORT}" ]]; then
-			init_args+=(--port "${NODE_PORT}")
-		fi
-		if [[ -n "${NODE_SNI}" ]]; then
-			init_args+=(--sni "${NODE_SNI}")
-		fi
 		if [[ -n "${xray_ver}" ]]; then
 			init_args+=(--xray-version "${xray_ver}")
 		fi
@@ -340,18 +360,17 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		chown root:"${SERVICE_GROUP}" "${CONFIG_PATH}"
 		chmod 0640 "${CONFIG_PATH}"
 
-		enrolled_node_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["node_id"])' "${init_json}")"
-		enrolled_sni="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["sni"])' "${init_json}")"
-		enrolled_port="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["port"])' "${init_json}")"
-		enrolled_short_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["short_id"])' "${init_json}")"
+		enrolled_node_id="$(printf '%s' "${init_json}" | sed -n 's/.*"node_id":"\([^"]*\)".*/\1/p')"
+		enrolled_endpoints="$(printf '%s' "${init_json}" | sed -n 's/.*"endpoint_count":\([0-9]*\).*/\1/p')"
+		enrolled_config="$(printf '%s' "${init_json}" | sed -n 's/.*"xray_config_path":"\([^"]*\)".*/\1/p')"
+		enrolled_created="$(printf '%s' "${init_json}" | sed -n 's/.*"created_config":\(true\|false\).*/\1/p')"
 
-		if [[ -f "${xray_template}" && -f "${xray_renderer}" ]] && command -v python3 >/dev/null 2>&1; then
-			python3 "${xray_renderer}" "${xray_template}" "${XRAY_CONFIG}" "$(head -n 1 "${REALITY_KEY}")" "${enrolled_short_id}" "${enrolled_sni}" "${enrolled_port}"
-			chown root:"${SERVICE_GROUP}" "${XRAY_CONFIG}"
-			chmod 0640 "${XRAY_CONFIG}"
-			log "wrote ${XRAY_CONFIG} (SNI=${enrolled_sni}, port=${enrolled_port})"
+		chown root:"${SERVICE_GROUP}" "${XRAY_CONFIG}"
+		chmod 0640 "${XRAY_CONFIG}"
+		if [[ "${enrolled_created}" == "true" ]]; then
+			log "created ${enrolled_config} from the default template"
 		else
-			warn "could not render ${XRAY_CONFIG}; check python3 and ${xray_template}"
+			log "adopted ${enrolled_config} (${enrolled_endpoints:-1} managed endpoint(s))"
 		fi
 
 		systemctl restart xray.service
@@ -359,10 +378,11 @@ if [[ -x "${XRAY_BIN}" ]]; then
 		cat <<EOF
 
 Node enrolled and started!
-  node_id: ${enrolled_node_id}
-  host:    ${NODE_HOST}:${enrolled_port}
-  sni:     ${enrolled_sni}
-  logs:    journalctl -u zako-agent -f
+  node_id:   ${enrolled_node_id}
+  host:      ${NODE_HOST}
+  config:    ${enrolled_config}
+  endpoints: ${enrolled_endpoints:-1}
+  logs:      journalctl -u zako-agent -f
 EOF
 		exit 0
 	fi

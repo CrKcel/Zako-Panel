@@ -41,8 +41,6 @@ Options:
   --token <token>      One-time enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)
-  --port <port>        Override VLESS port
-  --sni <sni>          Override REALITY SNI
   --xray-mirror <url>  Override Xray-core download base URL
 EOF
 }

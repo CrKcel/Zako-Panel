@@ -162,8 +162,18 @@ func TestEnrollFixtures(t *testing.T) {
 	if err := json.Unmarshal(readFixture(t, "agent-enroll.json"), &req); err != nil {
 		t.Fatalf("unmarshal enroll request: %v", err)
 	}
-	if req.Name != "edge-tokyo-01" || req.Host != "203.0.113.10" || req.Port != 443 || req.SNI != "www.microsoft.com" {
+	if req.Name != "edge-tokyo-01" || req.Host != "203.0.113.10" {
 		t.Errorf("unexpected enroll request: %+v", req)
+	}
+	if len(req.Endpoints) != 1 {
+		t.Fatalf("endpoints = %d, want 1", len(req.Endpoints))
+	}
+	endpoint := req.Endpoints[0]
+	if endpoint.Port != 443 || endpoint.Protocol != "vless-reality" || endpoint.Params.SNI != "www.microsoft.com" {
+		t.Errorf("unexpected enroll endpoint: %+v", endpoint)
+	}
+	if endpoint.Params.Flow != "xtls-rprx-vision" || endpoint.Params.Network != "tcp" {
+		t.Errorf("unexpected enroll params: %+v", endpoint.Params)
 	}
 
 	var resp EnrollResponse
@@ -173,7 +183,7 @@ func TestEnrollFixtures(t *testing.T) {
 	if resp.NodeID != "01J2Z6Q8Y3V9M4K7T1B5C0D2E6" || resp.HeartbeatIntervalSeconds != 300 {
 		t.Errorf("unexpected enroll response: %+v", resp)
 	}
-	if resp.Endpoint.Port != 443 || resp.Endpoint.SNI != "www.microsoft.com" {
-		t.Errorf("unexpected enroll endpoint: %+v", resp.Endpoint)
+	if len(resp.Endpoints) != 1 || resp.Endpoints[0].Port != 443 || resp.Endpoints[0].Protocol != "vless-reality" {
+		t.Errorf("unexpected enrolled endpoints: %+v", resp.Endpoints)
 	}
 }

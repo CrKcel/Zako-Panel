@@ -62,36 +62,42 @@ function validateConfigDefinition(definition: Record<string, unknown>): void {
 		throw new AppError('VALIDATION_ERROR', 'Configuration definition must contain an inbounds array', 422);
 	}
 
-	let vlessCount = 0;
+	let managedCount = 0;
 	for (const rawInbound of inbounds) {
 		if (rawInbound === null || typeof rawInbound !== 'object' || Array.isArray(rawInbound)) {
 			throw new AppError('VALIDATION_ERROR', 'Each inbound entry must be a JSON object', 422);
 		}
 		const inbound = rawInbound as Record<string, unknown>;
-		if (inbound.protocol === 'vless') {
-			vlessCount += 1;
-		}
 		const stream = inbound.streamSettings;
-		if (stream !== null && typeof stream === 'object' && !Array.isArray(stream)) {
-			const reality = (stream as Record<string, unknown>).realitySettings;
-			if (reality !== null && typeof reality === 'object' && !Array.isArray(reality)) {
-				const privateKey = (reality as Record<string, unknown>).privateKey;
-				if (typeof privateKey === 'string' && privateKey.trim() !== '') {
-					throw new AppError(
-						'VALIDATION_ERROR',
-						'REALITY privateKey must not be stored in the control plane; leave it unset so the node injects its local key',
-						422,
-					);
-				}
+		if (stream === null || typeof stream !== 'object' || Array.isArray(stream)) {
+			continue;
+		}
+		const streamSettings = stream as Record<string, unknown>;
+		const reality = streamSettings.realitySettings;
+		if (reality === null || typeof reality !== 'object' || Array.isArray(reality)) {
+			continue;
+		}
+		const privateKey = (reality as Record<string, unknown>).privateKey;
+		if (typeof privateKey === 'string' && privateKey.trim() !== '') {
+			throw new AppError(
+				'VALIDATION_ERROR',
+				'REALITY privateKey must not be stored in the control plane; leave it unset so the node injects its local key',
+				422,
+			);
+		}
+		// The panel owns every VLESS + REALITY inbound; other protocols are carried
+		// through untouched by the node. HandlerService addresses the inbound by tag,
+		// so a managed inbound without one could never receive users.
+		if (inbound.protocol === 'vless' && streamSettings.security === 'reality') {
+			if (typeof inbound.tag !== 'string' || inbound.tag.trim() === '') {
+				throw new AppError('VALIDATION_ERROR', 'Every vless reality inbound must have a tag', 422);
 			}
+			managedCount += 1;
 		}
 	}
 
-	if (vlessCount === 0) {
-		throw new AppError('VALIDATION_ERROR', 'Configuration must include a vless inbound', 422);
-	}
-	if (vlessCount > 1) {
-		throw new AppError('VALIDATION_ERROR', 'Configuration must not include more than one vless inbound', 422);
+	if (managedCount === 0) {
+		throw new AppError('VALIDATION_ERROR', 'Configuration must include a vless reality inbound', 422);
 	}
 }
 

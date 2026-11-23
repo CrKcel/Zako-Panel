@@ -208,11 +208,11 @@ func (f ConfigFile) Write(config []byte) error {
 
 // RenderConfig returns the complete config document for users.
 //
-// Only the clients of the single VLESS inbound are replaced: every other field,
-// including the API inbound, routing, policy and the REALITY parameters, is
-// preserved so the panel keeps owning the static definition. Unknown fields are
-// carried through because the document is decoded as generic JSON rather than
-// into a struct.
+// The client list of every panel-managed inbound is replaced. Every other field
+// and every inbound of a protocol the panel does not implement stays untouched,
+// including the API inbound, routing, policy and the REALITY parameters. Unknown
+// fields are carried through because the document is decoded as generic JSON
+// rather than into a struct.
 //
 // privateKey is merged into each realitySettings block that lacks one. A config
 // that already carries a key keeps it, which lets an operator pin a key that is
@@ -228,23 +228,17 @@ func RenderConfig(static []byte, users []xraycore.User, privateKey string) ([]by
 		return nil, errors.New("xray: config has no inbounds array")
 	}
 
-	vlessInbounds := 0
+	managed := 0
 	for index, raw := range inbounds {
 		inbound, ok := raw.(map[string]any)
-		if !ok {
+		if !ok || !isManagedInbound(inbound) {
 			continue
 		}
-		if protocol, _ := inbound["protocol"].(string); protocol != "vless" {
-			continue
-		}
-		vlessInbounds++
-		if vlessInbounds > 1 {
-			return nil, errors.New("xray: config has more than one vless inbound; the user set would be ambiguous")
-		}
+		managed++
 
 		settings, ok := inbound["settings"].(map[string]any)
 		if !ok {
-			return nil, errors.New("xray: vless inbound has no settings object")
+			return nil, errors.New("xray: managed inbound has no settings object")
 		}
 		settings["clients"] = renderClients(users)
 		if err := mergeRealityPrivateKey(inbound, privateKey); err != nil {
@@ -252,8 +246,8 @@ func RenderConfig(static []byte, users []xraycore.User, privateKey string) ([]by
 		}
 		inbounds[index] = inbound
 	}
-	if vlessInbounds == 0 {
-		return nil, errors.New("xray: config has no vless inbound")
+	if managed == 0 {
+		return nil, errors.New("xray: config has no vless reality inbound")
 	}
 	document["inbounds"] = inbounds
 

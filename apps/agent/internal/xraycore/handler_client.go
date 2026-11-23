@@ -26,7 +26,9 @@ const defaultHandlerCallTimeout = 5 * time.Second
 type HandlerClient struct {
 	conn    *grpc.ClientConn
 	timeout time.Duration
-	tag     string
+	// tags names every managed inbound. An adopted node can expose more than one
+	// VLESS + REALITY inbound, and HandlerService addresses inbounds by tag.
+	tags []string
 }
 
 // HandlerClientOption customizes a HandlerClient.
@@ -41,9 +43,10 @@ func WithHandlerCallTimeout(timeout time.Duration) HandlerClientOption {
 	}
 }
 
-// NewHandlerClient dials target without blocking. inboundTag names the VLESS
-// inbound to mutate; the rendered config keeps the tag stable, because
-// HandlerService addresses inbounds by tag rather than by protocol.
+// NewHandlerClient dials target without blocking. inboundTag names the initial
+// VLESS inbound to mutate; the syncer refreshes the tag set from the config
+// document before each hot update, because HandlerService addresses inbounds by
+// tag rather than by protocol.
 func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*HandlerClient, error) {
 	if err := validateTarget(target); err != nil {
 		return nil, err
@@ -52,9 +55,12 @@ func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*
 		return nil, errors.New("xray: handler inbound tag is required")
 	}
 
-	client := &HandlerClient{timeout: defaultHandlerCallTimeout, tag: inboundTag}
+	client := &HandlerClient{timeout: defaultHandlerCallTimeout}
 	for _, opt := range opts {
 		opt(client)
+	}
+	if err := client.SetInboundTags([]string{inboundTag}); err != nil {
+		return nil, err
 	}
 
 	conn, err := grpc.NewClient(target,
@@ -66,6 +72,31 @@ func NewHandlerClient(target, inboundTag string, opts ...HandlerClientOption) (*
 	}
 	client.conn = conn
 	return client, nil
+}
+
+// SetInboundTags replaces the managed inbound tags. Empty and duplicate entries
+// are dropped so a config with an untagged inbound cannot produce a no-op RPC.
+func (c *HandlerClient) SetInboundTags(tags []string) error {
+	seen := make(map[string]bool, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 0 {
+		return errors.New("xray: at least one inbound tag is required")
+	}
+	c.tags = normalized
+	return nil
+}
+
+// InboundTags returns the tags hot updates currently target.
+func (c *HandlerClient) InboundTags() []string {
+	return append([]string(nil), c.tags...)
 }
 
 // Close releases the gRPC connection. It is safe to call once at shutdown.
@@ -112,12 +143,14 @@ func (c *HandlerClient) AddUser(ctx context.Context, user User) error {
 		return fmt.Errorf("xray: add user: %w", err)
 	}
 
-	request := &alterInboundRequest{
-		Tag:       c.tag,
-		Operation: &typedMessage{Type: addUserOperationType, Value: operation},
-	}
-	if err := c.alterInbound(ctx, request); err != nil {
-		return fmt.Errorf("xray: add user: %w", err)
+	for _, tag := range c.tags {
+		request := &alterInboundRequest{
+			Tag:       tag,
+			Operation: &typedMessage{Type: addUserOperationType, Value: operation},
+		}
+		if err := c.alterInbound(ctx, request); err != nil {
+			return fmt.Errorf("xray: add user to inbound %q: %w", tag, err)
+		}
 	}
 	return nil
 }
@@ -132,12 +165,14 @@ func (c *HandlerClient) RemoveUser(ctx context.Context, email string) error {
 	if err != nil {
 		return fmt.Errorf("xray: remove user: %w", err)
 	}
-	request := &alterInboundRequest{
-		Tag:       c.tag,
-		Operation: &typedMessage{Type: removeUserOperationType, Value: operation},
-	}
-	if err := c.alterInbound(ctx, request); err != nil {
-		return fmt.Errorf("xray: remove user: %w", err)
+	for _, tag := range c.tags {
+		request := &alterInboundRequest{
+			Tag:       tag,
+			Operation: &typedMessage{Type: removeUserOperationType, Value: operation},
+		}
+		if err := c.alterInbound(ctx, request); err != nil {
+			return fmt.Errorf("xray: remove user from inbound %q: %w", tag, err)
+		}
 	}
 	return nil
 }

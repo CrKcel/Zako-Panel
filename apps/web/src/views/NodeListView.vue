@@ -38,15 +38,9 @@ const enrollTokens = ref<NodeEnrollmentToken[]>([]);
 const enrollTokensLoading = ref(false);
 const enrollForm = ref<{
 	name_prefix: string;
-	default_sni: string;
-	default_port: number;
-	default_fingerprint: NonNullable<CreateNodeEnrollmentTokenRequest['default_fingerprint']>;
 	heartbeat_interval_seconds: number;
 }>({
 	name_prefix: '',
-	default_sni: 'www.microsoft.com',
-	default_port: 443,
-	default_fingerprint: 'chrome',
 	heartbeat_interval_seconds: 300,
 });
 
@@ -149,9 +143,6 @@ async function rotateAgentToken(node: Node): Promise<void> {
 function openEnrollCreate(): void {
 	enrollForm.value = {
 		name_prefix: '',
-		default_sni: 'www.microsoft.com',
-		default_port: 443,
-		default_fingerprint: 'chrome',
 		heartbeat_interval_seconds: 300,
 	};
 	enrollCreateVisible.value = true;
@@ -160,9 +151,6 @@ function openEnrollCreate(): void {
 const createEnrollAction = useAsyncAction(
 	async () => {
 		const payload: CreateNodeEnrollmentTokenRequest = {
-			default_sni: enrollForm.value.default_sni.trim() || 'www.microsoft.com',
-			default_port: enrollForm.value.default_port,
-			default_fingerprint: enrollForm.value.default_fingerprint,
 			heartbeat_interval_seconds: enrollForm.value.heartbeat_interval_seconds,
 			ttl_seconds: 86_400,
 			...(enrollForm.value.name_prefix.trim() ? { name_prefix: enrollForm.value.name_prefix.trim() } : {}),
@@ -338,17 +326,6 @@ async function submitDeleteNode(): Promise<void> {
 			<el-form-item :label="t('nodes.enroll.namePrefix')">
 				<el-input v-model="enrollForm.name_prefix" :placeholder="t('nodes.enroll.namePrefixPlaceholder')" />
 			</el-form-item>
-			<el-form-item :label="t('nodes.enroll.defaultSni')">
-				<el-input v-model="enrollForm.default_sni" placeholder="www.microsoft.com" />
-			</el-form-item>
-			<el-form-item :label="t('nodes.enroll.defaultPort')">
-				<el-input-number v-model="enrollForm.default_port" :min="1" :max="65535" />
-			</el-form-item>
-			<el-form-item :label="t('nodes.enroll.fingerprint')">
-				<el-select v-model="enrollForm.default_fingerprint">
-					<el-option v-for="fp in ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random']" :key="fp" :label="fp" :value="fp" />
-				</el-select>
-			</el-form-item>
 			<el-form-item :label="t('nodes.enroll.heartbeatIntervalSec')">
 				<el-input-number v-model="enrollForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
 			</el-form-item>
@@ -388,9 +365,9 @@ async function submitDeleteNode(): Promise<void> {
 			<el-table-column :label="t('nodes.enroll.colPrefix')" width="120">
 				<template #default="{ row }">{{ row.name_prefix ?? '—' }}</template>
 			</el-table-column>
-			<el-table-column :label="t('nodes.enroll.colDefaultSniPort')" min-width="180">
+			<el-table-column :label="t('nodes.enroll.colHeartbeatInterval')" min-width="140">
 				<template #default="{ row }">
-					<span class="mono">{{ row.default_sni }}:{{ row.default_port }}</span>
+					<span class="tnum">{{ row.heartbeat_interval_seconds }}s</span>
 				</template>
 			</el-table-column>
 			<el-table-column :label="t('nodes.enroll.colExpiresAt')" width="180">

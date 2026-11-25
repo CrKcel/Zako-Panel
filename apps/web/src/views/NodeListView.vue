@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { CreateNodeEnrollmentTokenRequest, Node, NodeEnrollmentToken } from '@zako/contracts';
-import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import NodeCard from '../components/NodeCard.vue';
@@ -8,25 +7,15 @@ import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
-import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
 import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
-interface EditForm {
-	name: string;
-	heartbeat_interval_seconds: number;
-	enabled: boolean;
-}
-
 const { t } = useI18n();
 const search = ref('');
 const statusFilter = ref<'all' | Node['status']>('all');
-
-const editForm = ref<EditForm>({ name: '', heartbeat_interval_seconds: 300, enabled: true });
-const editFormRef = ref<FormInstance>();
 
 const enrollCreateVisible = ref(false);
 const enrollResultVisible = ref(false);
@@ -74,54 +63,6 @@ function clearFilters(): void {
 }
 
 const { refresh } = usePolling(reload, 30_000);
-
-const required = (message: string): { required: true; message: string; trigger: 'blur' } => ({
-	required: true,
-	message,
-	trigger: 'blur',
-});
-
-const editRules = computed<FormRules>(() => ({
-	name: [required(t('nodes.editDialog.nameRequired'))],
-}));
-
-const {
-	visible: editVisible,
-	editingId,
-	submitting: saving,
-	openEdit,
-	close: closeEdit,
-	submit: submitEditTask,
-} = useCrudDialog({
-	load: (id) => {
-		const node = nodes.value.find((item) => item.id === id);
-		if (node === undefined) return;
-		editForm.value = {
-			name: node.name,
-			heartbeat_interval_seconds: node.heartbeat_interval_seconds,
-			enabled: node.enabled,
-		};
-	},
-});
-
-async function submitEdit(): Promise<void> {
-	const nodeId = editingId.value;
-	if (nodeId === null) return;
-	if (!(await editFormRef.value?.validate().catch(() => false))) return;
-	const saved = await submitEditTask(
-		async () => {
-			await nodesApi.update(nodeId, {
-				name: editForm.value.name,
-				heartbeat_interval_seconds: editForm.value.heartbeat_interval_seconds,
-				enabled: editForm.value.enabled,
-			});
-			closeEdit();
-			showSuccess(t('nodes.editDialog.updated'));
-		},
-		(error) => showError(error, t('nodes.editDialog.updateFailed')),
-	);
-	if (saved) await reload();
-}
 
 function openEnrollCreate(): void {
 	enrollForm.value = {
@@ -258,7 +199,6 @@ async function submitDeleteNode(): Promise<void> {
 				:key="node.id"
 				:node="node"
 				:deleting="deleteAction.isRunning(node.id)"
-				@edit="openEdit"
 				@delete="openDeleteDialog"
 			/>
 		</div>
@@ -269,24 +209,6 @@ async function submitDeleteNode(): Promise<void> {
 			</el-empty>
 		</el-card>
 	</div>
-
-	<el-dialog v-model="editVisible" :title="t('nodes.editDialog.title')" width="520px" :close-on-click-modal="false" destroy-on-close>
-		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="150px">
-			<el-form-item :label="t('common.name')" prop="name">
-				<el-input v-model="editForm.name" />
-			</el-form-item>
-			<el-form-item :label="t('nodes.editDialog.heartbeatInterval')" prop="heartbeat_interval_seconds">
-				<el-input-number v-model="editForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
-			</el-form-item>
-			<el-form-item :label="t('common.enabled')" prop="enabled">
-				<el-switch v-model="editForm.enabled" />
-			</el-form-item>
-		</el-form>
-		<template #footer>
-			<el-button @click="closeEdit">{{ t('common.cancel') }}</el-button>
-			<el-button type="primary" :loading="saving" @click="submitEdit">{{ t('common.save') }}</el-button>
-		</template>
-	</el-dialog>
 
 	<el-dialog
 		v-model="enrollCreateVisible"

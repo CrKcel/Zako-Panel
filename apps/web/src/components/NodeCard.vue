@@ -13,7 +13,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-	edit: [nodeId: string];
 	delete: [node: Node];
 }>();
 
@@ -139,12 +138,9 @@ function usageTone(percent: number): string {
 		</div>
 
 		<footer class="card-actions">
-			<div class="actions-left">
-				<RouterLink :to="`/nodes/${node.id}`" custom v-slot="{ navigate }">
-					<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
-				</RouterLink>
-				<el-button link type="primary" @click="emit('edit', node.id)">{{ t('common.edit') }}</el-button>
-			</div>
+			<RouterLink :to="`/nodes/${node.id}`" custom v-slot="{ navigate }">
+				<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
+			</RouterLink>
 			<el-button link type="danger" :loading="deleting" @click="emit('delete', node)">
 				{{ node.status === 'uninstalling' ? t('common.forceDelete') : t('common.delete') }}
 			</el-button>
@@ -405,13 +401,6 @@ function usageTone(percent: number): string {
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
-	flex-wrap: wrap;
-}
-
-.actions-left {
-	display: flex;
-	align-items: center;
-	gap: 12px;
 	flex-wrap: wrap;
 }
 

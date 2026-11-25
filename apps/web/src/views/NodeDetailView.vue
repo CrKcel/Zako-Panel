@@ -166,6 +166,60 @@ function backToList(): void {
 	void router.push({ name: 'nodes' });
 }
 
+interface NodeEditForm {
+	name: string;
+	heartbeat_interval_seconds: number;
+	enabled: boolean;
+}
+
+const editForm = ref<NodeEditForm>({ name: '', heartbeat_interval_seconds: 300, enabled: true });
+const editFormRef = ref<FormInstance>();
+
+const editRules = computed<FormRules>(() => ({
+	name: [{ required: true, message: t('nodes.editDialog.nameRequired'), trigger: 'blur' }],
+}));
+
+const {
+	visible: editVisible,
+	submitting: nodeSaving,
+	openEdit: openEditNodeDialog,
+	close: closeEditNode,
+	submit: submitEditNodeTask,
+} = useCrudDialog({
+	load: () => {
+		if (!node.value) return;
+		editForm.value = {
+			name: node.value.name,
+			heartbeat_interval_seconds: node.value.heartbeat_interval_seconds,
+			enabled: node.value.enabled,
+		};
+	},
+});
+
+function openEditNode(): void {
+	if (!node.value) return;
+	void openEditNodeDialog(node.value.id);
+}
+
+async function submitEditNode(): Promise<void> {
+	if (!node.value) return;
+	if (!(await editFormRef.value?.validate().catch(() => false))) return;
+	const id = node.value.id;
+	const saved = await submitEditNodeTask(
+		async () => {
+			await nodesApi.update(id, {
+				name: editForm.value.name,
+				heartbeat_interval_seconds: editForm.value.heartbeat_interval_seconds,
+				enabled: editForm.value.enabled,
+			});
+			closeEditNode();
+			showSuccess(t('nodes.editDialog.updated'));
+		},
+		(error) => showError(error, t('nodes.editDialog.updateFailed')),
+	);
+	if (saved) await reloadNode();
+}
+
 const deleteDialogVisible = ref(false);
 const deleteForce = ref(false);
 const deleteRemoveXray = ref(false);
@@ -207,6 +261,7 @@ async function submitDeleteNode(): Promise<void> {
 			<template #left>
 				<el-button @click="backToList">{{ t('nodeDetail.backToList') }}</el-button>
 			</template>
+			<el-button v-if="node" type="primary" plain @click="openEditNode">{{ t('nodes.editDialog.title') }}</el-button>
 			<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
 				{{ node.status === 'uninstalling' ? t('nodeDetail.forceDeleteNode') : t('nodeDetail.deleteNode') }}
 			</el-button>
@@ -352,6 +407,24 @@ async function submitDeleteNode(): Promise<void> {
 
 		<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" :title="t('nodeDetail.trafficLast24h')" />
 	</div>
+
+	<el-dialog v-model="editVisible" :title="t('nodes.editDialog.title')" width="520px" :close-on-click-modal="false" destroy-on-close>
+		<el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="150px">
+			<el-form-item :label="t('common.name')" prop="name">
+				<el-input v-model="editForm.name" />
+			</el-form-item>
+			<el-form-item :label="t('nodes.editDialog.heartbeatInterval')" prop="heartbeat_interval_seconds">
+				<el-input-number v-model="editForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
+			</el-form-item>
+			<el-form-item :label="t('common.enabled')" prop="enabled">
+				<el-switch v-model="editForm.enabled" />
+			</el-form-item>
+		</el-form>
+		<template #footer>
+			<el-button @click="closeEditNode">{{ t('common.cancel') }}</el-button>
+			<el-button type="primary" :loading="nodeSaving" @click="submitEditNode">{{ t('common.save') }}</el-button>
+		</template>
+	</el-dialog>
 
 	<el-dialog v-model="deleteDialogVisible" :title="t('nodes.delete.title')" width="500px" destroy-on-close>
 		<p class="delete-confirm">

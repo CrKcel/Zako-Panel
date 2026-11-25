@@ -32,7 +32,6 @@ import {
 	markNodeUninstalling,
 	recordAgentUpdateOutcome,
 	setDesiredAgentVersion,
-	updateAgentTokenHash,
 	updateNode as updateNodeRow,
 	type NodeRow,
 } from '../repositories/nodes';
@@ -282,15 +281,6 @@ export async function updateNode(db: D1Database, nodeId: string, input: UpdateNo
 	const updated = await findNodeById(db, nodeId);
 	if (!updated) throw nodeNotFound();
 	return toNode(updated, nowSeconds());
-}
-
-export async function rotateAgentToken(db: D1Database, nodeId: string): Promise<{ agent_token: string }> {
-	const existing = await findNodeById(db, nodeId);
-	if (!existing) throw nodeNotFound();
-	const secret = generateToken();
-	const tokenHash = await sha256Hex(secret);
-	await updateAgentTokenHash(db, nodeId, tokenHash, nowSeconds());
-	return { agent_token: `${nodeId}.${secret}` };
 }
 
 export async function getNodeStatus(db: D1Database, nodeId: string): Promise<NodeStatusDetail> {

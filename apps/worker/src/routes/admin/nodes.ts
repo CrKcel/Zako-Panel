@@ -11,7 +11,6 @@ import {
 	listNodeClients,
 	listNodes,
 	requestNodeAgentUpdate,
-	rotateAgentToken,
 	updateEndpoint,
 	updateNode,
 } from '../../services/node-service';
@@ -56,11 +55,6 @@ nodeRoutes.delete('/:nodeId', async (c) => {
 		return noContent(c);
 	}
 	return ok(c, result.node, 202);
-});
-
-nodeRoutes.post('/:nodeId/agent-token/rotate', async (c) => {
-	const nodeId = pathId(c, 'nodeId');
-	return ok(c, await rotateAgentToken(c.env.DB, nodeId));
 });
 
 nodeRoutes.post('/:nodeId/agent-update', async (c) => {

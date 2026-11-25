@@ -130,7 +130,6 @@ export const zhCN = {
 			statsHealth: '统计',
 		},
 		actions: {
-			rotateToken: '轮换 Token',
 			revoke: '作废',
 		},
 		editDialog: {
@@ -139,12 +138,6 @@ export const zhCN = {
 			nameRequired: '请输入节点名称',
 			updated: '节点已更新',
 			updateFailed: '节点更新失败',
-		},
-		rotate: {
-			confirm: '轮换「{name}」的 Agent token？',
-			success: 'Agent token 已轮换',
-			failed: 'Agent token 轮换失败',
-			dialogTitle: 'Agent Token',
 		},
 		enroll: {
 			createTitle: '一键部署节点',
@@ -605,7 +598,6 @@ export const enUS: Messages = {
 			statsHealth: 'Stats',
 		},
 		actions: {
-			rotateToken: 'Rotate Token',
 			revoke: 'Revoke',
 		},
 		editDialog: {
@@ -614,12 +606,6 @@ export const enUS: Messages = {
 			nameRequired: 'Please enter a node name',
 			updated: 'Node updated',
 			updateFailed: 'Failed to update node',
-		},
-		rotate: {
-			confirm: 'Rotate the Agent token for "{name}"?',
-			success: 'Agent token rotated',
-			failed: 'Failed to rotate Agent token',
-			dialogTitle: 'Agent Token',
 		},
 		enroll: {
 			createTitle: 'Deploy Node',

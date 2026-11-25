@@ -9,13 +9,11 @@ import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps<{
 	node: Node;
-	rotating?: boolean;
 	deleting?: boolean;
 }>();
 
 const emit = defineEmits<{
 	edit: [nodeId: string];
-	rotateToken: [node: Node];
 	delete: [node: Node];
 }>();
 
@@ -146,9 +144,6 @@ function usageTone(percent: number): string {
 					<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
 				</RouterLink>
 				<el-button link type="primary" @click="emit('edit', node.id)">{{ t('common.edit') }}</el-button>
-				<el-button link type="primary" :disabled="node.status === 'uninstalling'" :loading="rotating" @click="emit('rotateToken', node)">
-					{{ t('nodes.actions.rotateToken') }}
-				</el-button>
 			</div>
 			<el-button link type="danger" :loading="deleting" @click="emit('delete', node)">
 				{{ node.status === 'uninstalling' ? t('common.forceDelete') : t('common.delete') }}

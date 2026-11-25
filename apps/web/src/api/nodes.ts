@@ -61,11 +61,6 @@ export const nodesApi = {
 			},
 		});
 	},
-	rotateAgentToken(nodeId: string): Promise<{ agent_token: string }> {
-		return apiRequest<{ agent_token: string }>(`/api/v1/admin/nodes/${nodeId}/agent-token/rotate`, {
-			method: 'POST',
-		});
-	},
 	listClients(nodeId: string): Promise<NodeClient[]> {
 		return apiRequest<{ items: NodeClient[] }>(`/api/v1/admin/nodes/${nodeId}/clients`).then((data) => data.items);
 	},

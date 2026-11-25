@@ -27,8 +27,6 @@ const statusFilter = ref<'all' | Node['status']>('all');
 
 const editForm = ref<EditForm>({ name: '', heartbeat_interval_seconds: 300, enabled: true });
 const editFormRef = ref<FormInstance>();
-const agentToken = ref('');
-const tokenVisible = ref(false);
 
 const enrollCreateVisible = ref(false);
 const enrollResultVisible = ref(false);
@@ -123,21 +121,6 @@ async function submitEdit(): Promise<void> {
 		(error) => showError(error, t('nodes.editDialog.updateFailed')),
 	);
 	if (saved) await reload();
-}
-
-const rotateAction = useAsyncAction(
-	async (node: Node) => {
-		const result = await nodesApi.rotateAgentToken(node.id);
-		agentToken.value = result.agent_token;
-		tokenVisible.value = true;
-		showSuccess(t('nodes.rotate.success'));
-	},
-	{ onError: (error) => showError(error, t('nodes.rotate.failed')) },
-);
-
-async function rotateAgentToken(node: Node): Promise<void> {
-	if (!(await confirmAction(t('nodes.rotate.confirm', { name: node.name })))) return;
-	await rotateAction.runFor(node.id, node);
 }
 
 function openEnrollCreate(): void {
@@ -274,10 +257,8 @@ async function submitDeleteNode(): Promise<void> {
 				v-for="node in filteredNodes"
 				:key="node.id"
 				:node="node"
-				:rotating="rotateAction.isRunning(node.id)"
 				:deleting="deleteAction.isRunning(node.id)"
 				@edit="openEdit"
-				@rotate-token="rotateAgentToken"
 				@delete="openDeleteDialog"
 			/>
 		</div>
@@ -305,14 +286,6 @@ async function submitDeleteNode(): Promise<void> {
 			<el-button @click="closeEdit">{{ t('common.cancel') }}</el-button>
 			<el-button type="primary" :loading="saving" @click="submitEdit">{{ t('common.save') }}</el-button>
 		</template>
-	</el-dialog>
-
-	<el-dialog v-model="tokenVisible" :title="t('nodes.rotate.dialogTitle')" width="560px" :close-on-click-modal="false" destroy-on-close>
-		<el-input :model-value="agentToken" readonly class="mono">
-			<template #append>
-				<el-button @click="copyText(agentToken)">{{ t('common.copy') }}</el-button>
-			</template>
-		</el-input>
 	</el-dialog>
 
 	<el-dialog

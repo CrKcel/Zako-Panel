@@ -34,7 +34,7 @@
 
 由 Cloudflare Access 保护，仅接受同源请求，通过 JWT 里的邮箱识别管理员身份（用于审计记录）。资源按功能拆分为：
 
-- **节点与端点**：`/nodes`（含 `DELETE /nodes/{nodeId}` 优雅卸载或强制删除）、`/nodes/{nodeId}/endpoints`、`/nodes/{nodeId}/status`、`/nodes/{nodeId}/clients`、`/nodes/{nodeId}/agent-token/rotate`
+- **节点与端点**：`/nodes`（含 `DELETE /nodes/{nodeId}` 优雅卸载或强制删除）、`/nodes/{nodeId}/endpoints`、`/nodes/{nodeId}/status`、`/nodes/{nodeId}/clients`
 - **端点协议**：创建时用 `protocol` 指定协议（`vless-reality`、`vmess`、`trojan`、`shadowsocks`、`hysteria2`），参数按协议校验，不匹配返回 `422`；协议创建后不可修改，`PATCH` 只接受该协议的参数。
 - **一次性节点注册令牌**：`/node-enrollment-tokens`（默认 24 小时有效，用完即作废）
 - **节点配置版本**：`/nodes/{nodeId}/configs`（下发、查看 diff、基于历史版本生成新版本回滚）

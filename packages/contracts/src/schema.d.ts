@@ -57,23 +57,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/nodes/{nodeId}/agent-token/rotate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rotate the agent token and return the plaintext once */
-        post: operations["rotateAgentToken"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/admin/nodes/{nodeId}/status": {
         parameters: {
             query?: never;
@@ -1301,36 +1284,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-        };
-    };
-    rotateAgentToken: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                nodeId: components["parameters"]["NodeId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Rotated token */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: {
-                            agent_token: string;
-                        };
-                        meta: components["schemas"]["Meta"];
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     getNodeStatus: {

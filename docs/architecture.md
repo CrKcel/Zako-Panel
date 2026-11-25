@@ -87,7 +87,7 @@ flowchart LR
 | --- | --- | --- |
 | 工程组织 | Monorepo | Worker、Web、Agent 和 OpenAPI 契约放一起，改接口不容易漏 |
 | 管理端鉴权 | Cloudflare Access JWT | 直接用 Access 校验好的邮箱当管理员身份，省掉密码哈希 CPU 消耗和独立管理员表 |
-| Agent 鉴权 | `node_id.secret` Bearer Token | 数据库只存 SHA-256 哈希；单台节点泄露可单独轮换，不影响其他节点 |
+| Agent 鉴权 | `node_id.secret` Bearer Token | 数据库只存 SHA-256 哈希；每台节点独立凭证，不影响其他节点 |
 | Agent 分发 | 独立静态 Downloads Worker | 下载安装包走 CDN 静态分发，不扣主 Worker 的请求和 CPU 额度 |
 | 心跳与流量 | 合并在同一个上报接口 | 减少请求次数；每次上报顺便把状态和用量一起提交 |
 | 流量防重 | 客户端 `report_id` + 载荷哈希 | 网络超时重试不会重复算流量；同 ID 但内容变了直接报 `409` |

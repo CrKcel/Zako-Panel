@@ -196,38 +196,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/admin/nodes/{nodeId}/agent-token/rotate:
-    post:
-      operationId: rotateAgentToken
-      tags: [admin]
-      summary: Rotate the agent token and return the plaintext once
-      security:
-        - AccessJwt: []
-      parameters:
-        - $ref: '#/components/parameters/NodeId'
-      responses:
-        '200':
-          description: Rotated token
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: object
-                    required: [agent_token]
-                    properties:
-                      agent_token:
-                        type: string
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
   /api/v1/admin/nodes/{nodeId}/status:
     get:
       operationId: getNodeStatus

@@ -146,10 +146,6 @@ export async function updateNode(db: D1Database, nodeId: string, input: NodeUpda
 		.run();
 }
 
-export async function updateAgentTokenHash(db: D1Database, nodeId: string, tokenHash: string, now: number): Promise<void> {
-	await db.prepare('UPDATE nodes SET agent_token_hash = ?, updated_at = ? WHERE id = ?').bind(tokenHash, now, nodeId).run();
-}
-
 export async function markNodeUninstalling(db: D1Database, nodeId: string, removeXray: boolean, now: number): Promise<void> {
 	await db
 		.prepare(

@@ -1,8 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../src/lib/errors';
-import { sha256Hex } from '../src/lib/hash';
-import { parseAgentToken } from '../src/lib/token';
 import { createEnrollmentToken, enrollNode } from '../src/services/enrollment-service';
 import {
 	createEndpoint,
@@ -11,7 +9,6 @@ import {
 	listEndpoints,
 	listNodeClients,
 	listNodes,
-	rotateAgentToken,
 	updateEndpoint,
 } from '../src/services/node-service';
 import { getClashSubscription } from '../src/services/subscription-service';
@@ -149,18 +146,6 @@ describe('node listing and status', () => {
 		expect((await getNodeStatus(env.DB, degraded)).status).toBe('degraded');
 		expect((await getNodeStatus(env.DB, disabled)).status).toBe('disabled');
 		await expect(getNodeStatus(env.DB, '01J2Z6Q8Y3V9M4K7T1B5C0D2E6')).rejects.toBeInstanceOf(AppError);
-	});
-
-	it('rotates the agent token so the previous secret no longer matches', async () => {
-		const nodeId = await seedNode({ name: 'rotate', secret: 'old-secret' });
-		const rotated = await rotateAgentToken(env.DB, nodeId);
-		const parsed = parseAgentToken(rotated.agent_token);
-		expect(parsed?.nodeId).toBe(nodeId);
-		const stored = await env.DB.prepare('SELECT agent_token_hash FROM nodes WHERE id = ?')
-			.bind(nodeId)
-			.first<{ agent_token_hash: string }>();
-		expect(stored?.agent_token_hash).toBe(await sha256Hex(parsed?.secret ?? ''));
-		expect(stored?.agent_token_hash).not.toBe(await sha256Hex('old-secret'));
 	});
 });
 

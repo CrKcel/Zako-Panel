@@ -29,16 +29,21 @@ interface OverviewTraffic {
 const {
 	data: nodes,
 	loading: nodeLoading,
+	refreshing: nodeRefreshing,
+	updatedAt: nodeUpdatedAt,
 	reload: reloadNodes,
 } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	immediate: false,
 	initialValue: [],
+	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('overview.loadNodesError')),
 });
 
 const {
 	data: traffic,
 	loading: trafficLoading,
+	refreshing: trafficRefreshing,
+	updatedAt: trafficUpdatedAt,
 	reload: reloadTraffic,
 } = useAsyncResource<OverviewTraffic | null>(
 	async () => {
@@ -52,6 +57,7 @@ const {
 	{
 		immediate: false,
 		initialValue: null,
+		cacheKey: 'overview:traffic:24h',
 		onError: (error) => showError(error, t('overview.loadTrafficError')),
 	},
 );
@@ -82,15 +88,22 @@ const anomalies = computed(() =>
 		.sort((a, b) => (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0)),
 );
 
-const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(async () => {
-	await Promise.all([reloadNodes(), reloadTraffic()]);
-}, 30_000);
+const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(
+	async () => {
+		await Promise.all([reloadNodes(), reloadTraffic()]);
+	},
+	30_000,
+	{
+		initialUpdatedAt: () =>
+			nodeUpdatedAt.value !== null && trafficUpdatedAt.value !== null ? Math.min(nodeUpdatedAt.value, trafficUpdatedAt.value) : null,
+	},
+);
 </script>
 
 <template>
 	<PageToolbar>
 		<PollingPill :last-updated-at="lastUpdatedAt" :paused="paused" @toggle="togglePause" />
-		<el-button :loading="nodeLoading || trafficLoading" @click="refresh">
+		<el-button :loading="nodeRefreshing || trafficRefreshing" @click="refresh">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>

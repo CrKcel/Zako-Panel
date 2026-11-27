@@ -4,6 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
+import { getCachedResource } from '../composables/resourceCache';
+import { useAsyncResource } from '../composables/useAsyncResource';
 import { nodeStatusDescriptor, subscriberStatusDescriptor } from '../domain/status';
 import { useI18n } from '../i18n';
 import AppIcon, { type IconName } from './AppIcon.vue';
@@ -23,10 +25,26 @@ const router = useRouter();
 const query = ref('');
 const inputRef = ref<HTMLInputElement | null>(null);
 const activeIndex = ref(0);
-const loading = ref(false);
-const nodes = ref<Node[]>([]);
-const subscribers = ref<Subscriber[]>([]);
-let loadedOnce = false;
+
+const {
+	data: nodes,
+	refreshing: nodesRefreshing,
+	reload: reloadNodes,
+} = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
+	immediate: false,
+	initialValue: [],
+	cacheKey: 'nodes:list',
+});
+
+const {
+	data: subscribers,
+	refreshing: subscribersRefreshing,
+	reload: reloadSubscribers,
+} = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
+	immediate: false,
+	initialValue: [],
+	cacheKey: 'subscribers:list',
+});
 
 interface PaletteItem {
 	id: string;
@@ -112,17 +130,15 @@ function selectItem(item: PaletteItem): void {
 }
 
 async function ensureEntitiesLoaded(): Promise<void> {
-	if (loadedOnce || loading.value) return;
-	loading.value = true;
-	try {
-		const [nodePage, subPage] = await Promise.all([nodesApi.list(), subscribersApi.list()]);
-		nodes.value = nodePage.items;
-		subscribers.value = subPage.items;
-		loadedOnce = true;
-	} catch {
-		// Fail silently inside command palette; pages remain accessible.
-	} finally {
-		loading.value = false;
+	const tasks: Promise<void>[] = [];
+	if (!getCachedResource('nodes:list') && !nodesRefreshing.value) {
+		tasks.push(reloadNodes());
+	}
+	if (!getCachedResource('subscribers:list') && !subscribersRefreshing.value) {
+		tasks.push(reloadSubscribers());
+	}
+	if (tasks.length > 0) {
+		await Promise.all(tasks);
 	}
 }
 

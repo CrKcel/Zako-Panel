@@ -9,6 +9,7 @@ import { subscriptionsApi } from '../api/subscriptions';
 import AppIcon from '../components/AppIcon.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import { invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -45,19 +46,23 @@ const tokenVisible = ref(false);
 const {
 	data: subscriptions,
 	loading,
+	refreshing,
 	reload,
 } = useAsyncResource<Subscription[]>(() => subscriptionsApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'subscriptions:list',
 	onError: (error) => showError(error, t('subscriptions.loadError')),
 });
 
 const { data: profiles } = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'profiles:list',
 	onError: (error) => showError(error, t('subscriptions.loadProfilesError')),
 });
 
 const { data: subscribers } = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'subscribers:list',
 	onError: (error) => showError(error, t('subscriptions.loadSubscribersError')),
 });
 
@@ -139,7 +144,10 @@ async function submit(): Promise<void> {
 		},
 		(error) => showError(error, t('subscriptions.form.createFailed')),
 	);
-	if (saved) await reload();
+	if (saved) {
+		invalidateCachedResource('subscriptions:list');
+		await reload();
+	}
 }
 
 const rotateAction = useAsyncAction(
@@ -148,6 +156,7 @@ const rotateAction = useAsyncAction(
 		token.value = result.token;
 		tokenVisible.value = true;
 		showSuccess(t('subscriptions.rotate.success'));
+		invalidateCachedResource('subscriptions:list');
 		await reload();
 	},
 	{ onError: (error) => showError(error, t('subscriptions.rotate.failed')) },
@@ -157,6 +166,7 @@ const revokeAction = useAsyncAction(
 	async (row: Subscription) => {
 		await subscriptionsApi.revoke(row.id);
 		showSuccess(t('subscriptions.revoke.success'));
+		invalidateCachedResource('subscriptions:list');
 		await reload();
 	},
 	{ onError: (error) => showError(error, t('subscriptions.revoke.failed')) },
@@ -194,7 +204,7 @@ async function revoke(row: Subscription): Promise<void> {
 				<el-input v-model="search" :placeholder="t('subscriptions.searchPlaceholder')" clearable class="search-input" />
 			</div>
 		</template>
-		<el-button :loading="loading" @click="reload">
+		<el-button :loading="refreshing" @click="reload">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>

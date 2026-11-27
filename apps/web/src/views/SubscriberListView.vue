@@ -9,6 +9,7 @@ import AppIcon from '../components/AppIcon.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { subscriberStatusDescriptor } from '../domain/status';
@@ -52,14 +53,17 @@ const grantTarget = ref<Subscriber | null>(null);
 const {
 	data: subscribers,
 	loading,
+	refreshing,
 	reload,
 } = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'subscribers:list',
 	onError: (error) => showError(error, t('subscribers.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
@@ -153,12 +157,27 @@ async function submit(): Promise<void> {
 		},
 		(error) => showError(error, t('subscribers.form.saveFailed')),
 	);
-	if (saved) await reload();
+	if (saved) {
+		invalidateCachedResource('subscribers:list');
+		if (subscriberId !== null) {
+			invalidateCachedResource(`subscribers:detail:${subscriberId}`);
+		}
+		await reload();
+	}
 }
 
 function openGrant(row: Subscriber): void {
 	grantTarget.value = row;
 	grantVisible.value = true;
+}
+
+async function onGrantSaved(): Promise<void> {
+	invalidateCachedResource('subscribers:list');
+	if (grantTarget.value) {
+		invalidateCachedResource(`subscribers:detail:${grantTarget.value.id}`);
+	}
+	invalidateCachedPrefix('nodes:clients:');
+	await reload();
 }
 </script>
 
@@ -183,7 +202,7 @@ function openGrant(row: Subscriber): void {
 				<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
 			</div>
 		</template>
-		<el-button :loading="loading" @click="reload">
+		<el-button :loading="refreshing" @click="reload">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>
@@ -296,7 +315,7 @@ function openGrant(row: Subscriber): void {
 		</template>
 	</el-dialog>
 
-	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="reload" />
+	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="onGrantSaved" />
 </template>
 
 <style scoped>

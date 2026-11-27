@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Node, SubscriberDetail, TrafficSummary } from '@zako/contracts';
+import type { Node, Subscriber, SubscriberDetail, TrafficSummary } from '@zako/contracts';
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
@@ -10,6 +10,7 @@ import EntityHeader from '../components/EntityHeader.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
+import { getCachedResource, invalidateCachedPrefix, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
 import { nodeStatusDescriptor, subscriberStatusDescriptor } from '../domain/status';
@@ -35,20 +36,24 @@ const subscriberId = computed(() => String(route.params.subscriberId ?? ''));
 const {
 	data: subscriber,
 	loading,
+	refreshing: subscriberRefreshing,
 	reload: reloadSubscriber,
 } = useAsyncResource<SubscriberDetail | null>(() => subscribersApi.get(subscriberId.value), {
 	initialValue: null,
+	cacheKey: () => (subscriberId.value ? `subscribers:detail:${subscriberId.value}` : null),
 	onError: (error) => showError(error, t('subscribers.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
 const {
 	data: traffic,
 	loading: trafficLoading,
+	refreshing: trafficRefreshing,
 	reload: reloadTraffic,
 } = useAsyncResource<SubscriberTraffic | null>(
 	async () => {
@@ -59,8 +64,14 @@ const {
 		]);
 		return { totals, byNode };
 	},
-	{ initialValue: null, onError: (error) => showError(error, t('traffic.loadError')) },
+	{
+		initialValue: null,
+		cacheKey: () => (subscriberId.value ? `subscribers:traffic:24h:${subscriberId.value}` : null),
+		onError: (error) => showError(error, t('traffic.loadError')),
+	},
 );
+
+const refreshing = computed(() => subscriberRefreshing.value || trafficRefreshing.value);
 
 const grantVisible = ref(false);
 
@@ -96,6 +107,16 @@ function openGrant(): void {
 
 function onGrantSaved(detail: SubscriberDetail): void {
 	subscriber.value = detail;
+	const cachedList = getCachedResource<Subscriber[]>('subscribers:list');
+	if (cachedList) {
+		setCachedResource(
+			'subscribers:list',
+			cachedList.data.map((item) => (item.id === detail.id ? { ...item, node_count: detail.node_ids.length } : item)),
+			cachedList.updatedAt,
+		);
+	}
+	invalidateCachedResource('subscribers:list');
+	invalidateCachedPrefix('nodes:clients:');
 }
 
 function backToList(): void {
@@ -125,7 +146,7 @@ async function refresh(): Promise<void> {
 			</template>
 			<template #actions>
 				<el-button type="primary" plain @click="openGrant">{{ t('subscribers.actions.nodeGrant') }}</el-button>
-				<el-button :loading="loading" @click="refresh">
+				<el-button :loading="refreshing" @click="refresh">
 					<AppIcon name="refresh" :size="14" class="btn-icon" />
 					<span>{{ t('common.refresh') }}</span>
 				</el-button>

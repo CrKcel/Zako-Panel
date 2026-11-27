@@ -10,16 +10,21 @@ export interface PollingHandle {
 	togglePause: () => void;
 }
 
+export interface PollingOptions {
+	/** Optional seed timestamp (e.g. from cache) shown before the first tick finishes. */
+	initialUpdatedAt?: () => number | null;
+}
+
 /**
  * Runs `task` immediately and then every `intervalMs`, pausing while the tab is
  * hidden so background tabs do not keep issuing requests.
  */
-export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000): PollingHandle {
+export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000, options: PollingOptions = {}): PollingHandle {
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let running = false;
 	let stopped = false;
 
-	const lastUpdatedAt = ref<number | null>(null);
+	const lastUpdatedAt = ref<number | null>(options.initialUpdatedAt?.() ?? null);
 	const paused = ref(false);
 
 	function clearTimer(): void {

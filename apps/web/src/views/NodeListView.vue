@@ -9,6 +9,7 @@ import NodeCard from '../components/NodeCard.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import PollingPill from '../components/PollingPill.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import { evictCachedResource, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { usePolling } from '../composables/usePolling';
@@ -47,10 +48,13 @@ const enrollCommand = computed(
 const {
 	data: nodes,
 	loading,
+	refreshing,
+	updatedAt,
 	reload,
 } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	immediate: false,
 	initialValue: [],
+	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('nodes.loadError')),
 });
 
@@ -107,7 +111,9 @@ function clearFilters(): void {
 	statusFilter.value = 'all';
 }
 
-const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(reload, 30_000);
+const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(reload, 30_000, {
+	initialUpdatedAt: () => updatedAt.value,
+});
 
 function openEnrollCreate(): void {
 	enrollForm.value = {
@@ -203,6 +209,11 @@ const deleteAction = useAsyncAction(
 		} else {
 			showSuccess(t('nodes.delete.deleted'));
 		}
+		evictCachedResource(`nodes:detail:${target.id}`);
+		evictCachedResource(`nodes:clients:${target.id}`);
+		evictCachedResource(`nodes:configs:${target.id}`);
+		evictCachedResource(`nodes:traffic:24h:${target.id}`);
+		invalidateCachedResource('nodes:list');
 		await reload();
 	},
 	{ onError: (error) => showError(error, t('nodes.delete.failed')) },
@@ -265,7 +276,7 @@ async function submitDeleteNode(): Promise<void> {
 				<AppIcon name="list" :size="14" />
 			</button>
 		</div>
-		<el-button :loading="loading" @click="refresh">
+		<el-button :loading="refreshing" @click="refresh">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>

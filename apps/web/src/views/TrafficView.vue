@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TrafficGroupBy, TrafficItem } from '@zako/contracts';
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { trafficApi } from '../api/traffic';
 import AppIcon from '../components/AppIcon.vue';
 import PageToolbar from '../components/PageToolbar.vue';
@@ -29,9 +29,11 @@ const orientation = ref<'vertical' | 'horizontal'>('vertical');
 const {
 	data: summary,
 	loading,
+	refreshing,
 	reload,
 } = useAsyncResource(() => trafficApi.summary({ ...trafficWindow(TRAFFIC_WINDOWS[range.value]), groupBy: groupBy.value }), {
 	initialValue: null,
+	cacheKey: () => `traffic:summary:${range.value}:${groupBy.value}`,
 	onError: (error) => showError(error, t('traffic.loadError')),
 });
 
@@ -43,10 +45,6 @@ function sharePercent(item: TrafficItem): number {
 	if (totals.value.total <= 0) return 0;
 	return Math.round((trafficItemTotal(item) / totals.value.total) * 1000) / 10;
 }
-
-watch([range, groupBy], () => {
-	void reload();
-});
 </script>
 
 <template>
@@ -69,7 +67,7 @@ watch([range, groupBy], () => {
 			<el-radio-button value="vertical">{{ t('traffic.chartModeVertical') }}</el-radio-button>
 			<el-radio-button value="horizontal">{{ t('traffic.chartModeHorizontal') }}</el-radio-button>
 		</el-radio-group>
-		<el-button :loading="loading" @click="reload">
+		<el-button :loading="refreshing" @click="reload">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>

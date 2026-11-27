@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Endpoint, NodeClient, TrafficSummary } from '@zako/contracts';
+import type { Endpoint, Node, NodeClient, TrafficSummary } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
@@ -14,6 +14,7 @@ import ProtocolBadge from '../components/ProtocolBadge.vue';
 import StatCard from '../components/StatCard.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
+import { evictCachedResource, getCachedResource, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
@@ -44,31 +45,43 @@ const clientsSearch = ref('');
 const {
 	data: detail,
 	loading,
+	refreshing: detailRefreshing,
+	updatedAt: detailUpdatedAt,
 	reload: reloadNode,
 } = useAsyncResource(() => nodesApi.get(nodeId.value), {
 	immediate: false,
 	initialValue: null,
+	cacheKey: () => (nodeId.value ? `nodes:detail:${nodeId.value}` : null),
 	onError: (error) => showError(error, t('nodeDetail.loadNodeError')),
 });
 
-const { data: clients, reload: reloadClients } = useAsyncResource<NodeClient[]>(() => nodesApi.listClients(nodeId.value), {
+const {
+	data: clients,
+	refreshing: clientsRefreshing,
+	reload: reloadClients,
+} = useAsyncResource<NodeClient[]>(() => nodesApi.listClients(nodeId.value), {
 	immediate: false,
 	initialValue: [],
+	cacheKey: () => (nodeId.value ? `nodes:clients:${nodeId.value}` : null),
 	onError: (error) => showError(error, t('nodeDetail.loadNodeError')),
 });
 
 const {
 	data: traffic,
 	loading: trafficLoading,
+	refreshing: trafficRefreshing,
 	reload: reloadTraffic,
 } = useAsyncResource<TrafficSummary | null>(
 	() => trafficApi.summary({ ...trafficWindow(DAY_SECONDS), groupBy: 'node', nodeId: nodeId.value }),
 	{
 		immediate: false,
 		initialValue: null,
+		cacheKey: () => (nodeId.value ? `nodes:traffic:24h:${nodeId.value}` : null),
 		onError: (error) => showError(error, t('nodeDetail.loadTrafficError')),
 	},
 );
+
+const refreshing = computed(() => detailRefreshing.value || clientsRefreshing.value || trafficRefreshing.value);
 
 const node = computed(() => detail.value?.node ?? null);
 const endpoints = computed(() => detail.value?.endpoints ?? []);
@@ -85,9 +98,25 @@ const filteredClients = computed(() => {
 const cpuPercent = computed(() => (sys.value ? Math.round(sys.value.cpu * 100) : null));
 const memPercent = computed(() => (sys.value ? Math.round(sys.value.mem * 100) : null));
 
-const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(async () => {
-	await Promise.all([reloadNode(), reloadClients(), reloadTraffic()]);
-}, 30_000);
+const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(
+	async () => {
+		await Promise.all([reloadNode(), reloadClients(), reloadTraffic()]);
+	},
+	30_000,
+	{ initialUpdatedAt: () => detailUpdatedAt.value },
+);
+
+watch(nodeId, (next, prev) => {
+	if (next && next !== prev) {
+		void refresh();
+	}
+});
+
+async function reloadNodeAndInvalidate(): Promise<void> {
+	invalidateCachedResource(`nodes:detail:${nodeId.value}`);
+	invalidateCachedResource('nodes:list');
+	await reloadNode();
+}
 
 const endpointForm = ref<EndpointFormValue>(emptyEndpointFormValue());
 const endpointFormRef = ref<FormInstance>();
@@ -150,14 +179,14 @@ async function submitEndpoint(): Promise<void> {
 		},
 		(error) => showError(error, t('nodeDetail.endpoints.saveFailed')),
 	);
-	if (saved) await reloadNode();
+	if (saved) await reloadNodeAndInvalidate();
 }
 
 const disableAction = useAsyncAction(
 	async (endpoint: Endpoint) => {
 		await nodesApi.disableEndpoint(nodeId.value, endpoint.id);
 		showSuccess(t('nodeDetail.endpoints.disabled'));
-		await reloadNode();
+		await reloadNodeAndInvalidate();
 	},
 	{ onError: (error) => showError(error, t('nodeDetail.endpoints.disableFailed')) },
 );
@@ -166,7 +195,7 @@ const enableAction = useAsyncAction(
 	async (endpoint: Endpoint) => {
 		await nodesApi.updateEndpoint(nodeId.value, endpoint.id, { enabled: true });
 		showSuccess(t('nodeDetail.endpoints.enabled'));
-		await reloadNode();
+		await reloadNodeAndInvalidate();
 	},
 	{ onError: (error) => showError(error, t('nodeDetail.endpoints.enableFailed')) },
 );
@@ -235,7 +264,7 @@ async function submitEditNode(): Promise<void> {
 		},
 		(error) => showError(error, t('nodes.editDialog.updateFailed')),
 	);
-	if (saved) await reloadNode();
+	if (saved) await reloadNodeAndInvalidate();
 }
 
 const deleteDialogVisible = ref(false);
@@ -252,15 +281,29 @@ function openDeleteDialog(): void {
 const deleteNodeAction = useAsyncAction(
 	async () => {
 		if (!node.value) return;
-		const res = await nodesApi.remove(node.value.id, {
+		const id = node.value.id;
+		const res = await nodesApi.remove(id, {
 			force: deleteForce.value,
 			removeXray: deleteRemoveXray.value,
 		});
 		deleteDialogVisible.value = false;
 		if (res) {
 			showSuccess(t('nodes.delete.uninstallQueued'));
-			await reloadNode();
+			await reloadNodeAndInvalidate();
 		} else {
+			evictCachedResource(`nodes:detail:${id}`);
+			evictCachedResource(`nodes:clients:${id}`);
+			evictCachedResource(`nodes:configs:${id}`);
+			evictCachedResource(`nodes:traffic:24h:${id}`);
+			const cachedNodes = getCachedResource<Node[]>('nodes:list');
+			if (cachedNodes) {
+				setCachedResource(
+					'nodes:list',
+					cachedNodes.data.filter((item) => item.id !== id),
+					cachedNodes.updatedAt,
+				);
+			}
+			invalidateCachedResource('nodes:list');
 			showSuccess(t('nodes.delete.deleted'));
 			backToList();
 		}
@@ -303,7 +346,7 @@ async function submitDeleteNode(): Promise<void> {
 					<AppIcon name="trash" :size="14" class="btn-icon" />
 					<span>{{ node.status === 'uninstalling' ? t('nodeDetail.forceDeleteNode') : t('nodeDetail.deleteNode') }}</span>
 				</el-button>
-				<el-button :loading="loading" @click="refresh">
+				<el-button :loading="refreshing" @click="refresh">
 					<AppIcon name="refresh" :size="14" class="btn-icon" />
 					<span>{{ t('common.refresh') }}</span>
 				</el-button>
@@ -453,7 +496,7 @@ async function submitDeleteNode(): Promise<void> {
 					:applied-version="node.applied_config_version"
 					:desired-version="node.desired_config_version"
 					:endpoints="endpoints"
-					@changed="reloadNode"
+					@changed="reloadNodeAndInvalidate"
 				/>
 			</el-tab-pane>
 

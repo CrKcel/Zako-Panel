@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { ConfigVersion, Endpoint, VlessRealityParams } from '@zako/contracts';
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
+import type { Page } from '../api/client';
 import { nodesApi } from '../api/nodes';
+import { invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
+import { useAsyncResource } from '../composables/useAsyncResource';
 import { endpointParamsOf } from '../domain/endpoint-form';
 import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
@@ -24,9 +27,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const configs = ref<ConfigVersion[]>([]);
-const nextCursor = ref<string | null>(null);
-const loading = ref(false);
 const loadingMore = ref(false);
 
 const publishVisible = ref(false);
@@ -37,41 +37,35 @@ const detailVisible = ref(false);
 const inspecting = ref<ConfigVersion | null>(null);
 const compareTarget = ref<ConfigVersion | null>(null);
 
-async function loadConfigs(): Promise<void> {
-	if (!props.nodeId) return;
-	loading.value = true;
-	try {
-		const page = await nodesApi.listConfigs(props.nodeId);
-		configs.value = page.items;
-		nextCursor.value = page.next_cursor;
-	} catch (error) {
-		showError(error, t('nodeConfig.loadError'));
-	} finally {
-		loading.value = false;
-	}
-}
+const {
+	data: configPage,
+	loading,
+	refreshing,
+	reload: loadConfigs,
+} = useAsyncResource<Page<ConfigVersion>>(() => nodesApi.listConfigs(props.nodeId), {
+	initialValue: { items: [], next_cursor: null },
+	cacheKey: () => (props.nodeId ? `nodes:configs:${props.nodeId}` : null),
+	onError: (error) => showError(error, t('nodeConfig.loadError')),
+});
+
+const configs = computed(() => configPage.value.items);
+const nextCursor = computed(() => configPage.value.next_cursor);
 
 async function loadMore(): Promise<void> {
 	if (!nextCursor.value || loadingMore.value) return;
 	loadingMore.value = true;
 	try {
 		const page = await nodesApi.listConfigs(props.nodeId, { cursor: nextCursor.value });
-		configs.value = [...configs.value, ...page.items];
-		nextCursor.value = page.next_cursor;
+		configPage.value = {
+			items: [...configPage.value.items, ...page.items],
+			next_cursor: page.next_cursor,
+		};
 	} catch (error) {
 		showError(error, t('nodeConfig.loadMoreError'));
 	} finally {
 		loadingMore.value = false;
 	}
 }
-
-watch(
-	() => props.nodeId,
-	() => {
-		void loadConfigs();
-	},
-	{ immediate: true },
-);
 
 function versionTag(row: ConfigVersion): { label: string; type: 'success' | 'warning' | 'danger' | 'info' } {
 	if (row.version === props.appliedVersion && row.version === props.desiredVersion) {
@@ -205,6 +199,7 @@ const { running: publishing, run: runPublish } = useAsyncAction(
 		await nodesApi.publishConfig(props.nodeId, parsed as Record<string, unknown>);
 		publishVisible.value = false;
 		showSuccess(t('nodeConfig.publish.success'));
+		invalidateCachedResource(`nodes:configs:${props.nodeId}`);
 		await loadConfigs();
 		emit('changed');
 	},
@@ -234,6 +229,7 @@ async function handleRollback(row: ConfigVersion): Promise<void> {
 	try {
 		const created = await nodesApi.rollbackConfig(props.nodeId, row.version);
 		showSuccess(t('nodeConfig.rollback.success', { prev: row.version, next: created.version }));
+		invalidateCachedResource(`nodes:configs:${props.nodeId}`);
 		await loadConfigs();
 		emit('changed');
 	} catch (error) {
@@ -253,7 +249,7 @@ defineExpose({ reload: loadConfigs });
 			<div class="ui-card-header">
 				<span class="ui-card-title">{{ t('nodeConfig.title') }}</span>
 				<div class="header-actions">
-					<el-button :loading="loading" @click="loadConfigs">{{ t('nodeConfig.refreshList') }}</el-button>
+					<el-button :loading="refreshing" @click="loadConfigs">{{ t('nodeConfig.refreshList') }}</el-button>
 					<el-button type="primary" @click="openPublish">{{ t('nodeConfig.publishNew') }}</el-button>
 				</div>
 			</div>

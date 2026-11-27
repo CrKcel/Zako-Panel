@@ -8,6 +8,7 @@ import AppIcon from '../components/AppIcon.vue';
 import CodeBlock from '../components/CodeBlock.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import { invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -59,14 +60,17 @@ function formatFormError(error: ProfileFormError): string {
 const {
 	data: profiles,
 	loading,
+	refreshing,
 	reload,
 } = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'profiles:list',
 	onError: (error) => showError(error, t('profiles.loadError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
+	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('profiles.loadNodesError')),
 });
 
@@ -123,7 +127,10 @@ async function submit(): Promise<void> {
 		},
 		(error) => showError(error, t('profiles.form.saveFailed')),
 	);
-	if (saved) await reload();
+	if (saved) {
+		invalidateCachedResource('profiles:list');
+		await reload();
+	}
 }
 
 const { running: previewLoading, run: runPreview } = useAsyncAction(
@@ -149,6 +156,7 @@ const removeAction = useAsyncAction(
 	async (profile: Profile) => {
 		await profilesApi.remove(profile.id);
 		showSuccess(t('profiles.delete.success'));
+		invalidateCachedResource('profiles:list');
 		await reload();
 	},
 	{ onError: (error) => showError(error, t('profiles.delete.failed')) },
@@ -162,7 +170,7 @@ async function remove(profile: Profile): Promise<void> {
 
 <template>
 	<PageToolbar>
-		<el-button :loading="loading" @click="reload">
+		<el-button :loading="refreshing" @click="reload">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>

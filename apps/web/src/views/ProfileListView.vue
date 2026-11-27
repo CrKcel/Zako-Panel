@@ -4,6 +4,8 @@ import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
+import AppIcon from '../components/AppIcon.vue';
+import CodeBlock from '../components/CodeBlock.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
@@ -159,15 +161,24 @@ async function remove(profile: Profile): Promise<void> {
 </script>
 
 <template>
+	<PageToolbar>
+		<el-button :loading="loading" @click="reload">
+			<AppIcon name="refresh" :size="14" class="btn-icon" />
+			<span>{{ t('common.refresh') }}</span>
+		</el-button>
+		<el-button type="primary" @click="openCreate">
+			<AppIcon name="plus" :size="14" class="btn-icon" />
+			<span>{{ t('profiles.create') }}</span>
+		</el-button>
+	</PageToolbar>
+
 	<el-card shadow="never">
-		<PageToolbar>
-			<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
-			<el-button type="primary" @click="openCreate">{{ t('profiles.create') }}</el-button>
-		</PageToolbar>
 		<el-table v-loading="loading" :data="profiles" :empty-text="t('common.noData')">
-			<el-table-column prop="name" :label="t('common.name')" min-width="160" />
-			<el-table-column :label="t('profiles.columns.description')" min-width="200">
-				<template #default="{ row }">{{ row.description ?? '—' }}</template>
+			<el-table-column prop="name" :label="t('common.name')" min-width="160">
+				<template #default="{ row }">
+					<div class="profile-name">{{ row.name }}</div>
+					<div v-if="row.description" class="profile-desc">{{ row.description }}</div>
+				</template>
 			</el-table-column>
 			<el-table-column :label="t('profiles.columns.nodeSelection')" width="130">
 				<template #default="{ row }">
@@ -182,19 +193,19 @@ async function remove(profile: Profile): Promise<void> {
 					<StatusBadge :label="row.online_only ? t('common.enabled') : t('common.off')" :type="row.online_only ? 'success' : 'info'" />
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('profiles.columns.proxyGroups')" width="90">
+			<el-table-column :label="t('profiles.columns.proxyGroups')" width="95">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.proxy_groups.length }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('profiles.columns.rulesCount')" width="85">
+			<el-table-column :label="t('profiles.columns.rulesCount')" width="90">
 				<template #default="{ row }">
 					<span class="tnum">{{ row.rules.length }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('profiles.columns.revision')" width="80">
+			<el-table-column :label="t('profiles.columns.revision')" width="85">
 				<template #default="{ row }">
-					<span class="tnum">v{{ row.revision }}</span>
+					<span class="tnum mono">v{{ row.revision }}</span>
 				</template>
 			</el-table-column>
 			<el-table-column :label="t('profiles.columns.updatedAt')" width="180">
@@ -212,33 +223,37 @@ async function remove(profile: Profile): Promise<void> {
 		</el-table>
 	</el-card>
 
-	<el-dialog
+	<el-drawer
 		v-model="dialogVisible"
 		:title="editingId === null ? t('profiles.create') : t('profiles.edit')"
-		width="780px"
+		size="min(840px, 94vw)"
 		:close-on-click-modal="false"
 		destroy-on-close
 	>
-		<el-form ref="formRef" :model="form" :rules="rules" label-width="140px">
-			<el-form-item :label="t('common.name')" prop="name">
-				<el-input v-model="form.name" />
-			</el-form-item>
-			<el-form-item :label="t('profiles.form.description')" prop="description">
-				<el-input v-model="form.description" />
-			</el-form-item>
-			<el-form-item :label="t('profiles.form.nodeSelection')" prop="node_selection">
-				<el-radio-group v-model="form.node_selection">
-					<el-radio value="all">{{ t('profiles.selection.all') }}</el-radio>
-					<el-radio value="selected">{{ t('profiles.selection.selected') }}</el-radio>
-				</el-radio-group>
-			</el-form-item>
+		<el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+			<div class="drawer-grid">
+				<el-form-item :label="t('common.name')" prop="name">
+					<el-input v-model="form.name" />
+				</el-form-item>
+				<el-form-item :label="t('profiles.form.description')" prop="description">
+					<el-input v-model="form.description" />
+				</el-form-item>
+			</div>
+			<div class="drawer-grid">
+				<el-form-item :label="t('profiles.form.nodeSelection')" prop="node_selection">
+					<el-radio-group v-model="form.node_selection">
+						<el-radio value="all">{{ t('profiles.selection.all') }}</el-radio>
+						<el-radio value="selected">{{ t('profiles.selection.selected') }}</el-radio>
+					</el-radio-group>
+				</el-form-item>
+				<el-form-item :label="t('profiles.form.onlineOnly')" prop="online_only">
+					<el-switch v-model="form.online_only" />
+				</el-form-item>
+			</div>
 			<el-form-item v-if="form.node_selection === 'selected'" :label="t('profiles.form.nodes')" prop="node_ids">
 				<el-select v-model="form.node_ids" multiple filterable class="full-width">
 					<el-option v-for="node in nodes" :key="node.id" :label="node.name" :value="node.id" />
 				</el-select>
-			</el-form-item>
-			<el-form-item :label="t('profiles.form.onlineOnly')" prop="online_only">
-				<el-switch v-model="form.online_only" />
 			</el-form-item>
 			<el-form-item :label="t('profiles.form.clashYaml')" prop="clash_yaml">
 				<div class="yaml-editor-wrap">
@@ -249,7 +264,7 @@ async function remove(profile: Profile): Promise<void> {
 					<el-input
 						v-model="form.clash_yaml"
 						type="textarea"
-						:rows="16"
+						:rows="20"
 						class="code-input"
 						:placeholder="DEFAULT_MIHOMO_YAML_TEMPLATE"
 						@input="yamlError = ''"
@@ -262,9 +277,9 @@ async function remove(profile: Profile): Promise<void> {
 			<el-button @click="closeDialog">{{ t('common.cancel') }}</el-button>
 			<el-button type="primary" :loading="submitting" @click="submit">{{ t('common.save') }}</el-button>
 		</template>
-	</el-dialog>
+	</el-drawer>
 
-	<el-dialog v-model="previewVisible" :title="t('profiles.preview.title', { name: previewName })" width="820px" destroy-on-close>
+	<el-dialog v-model="previewVisible" :title="t('profiles.preview.title', { name: previewName })" width="840px" destroy-on-close>
 		<div v-loading="previewLoading">
 			<template v-if="preview">
 				<el-alert
@@ -275,7 +290,7 @@ async function remove(profile: Profile): Promise<void> {
 					show-icon
 					class="preview-alert"
 				/>
-				<el-descriptions :column="3" border size="small">
+				<el-descriptions :column="3" border size="small" class="preview-desc">
 					<el-descriptions-item :label="t('profiles.preview.subscriber')">{{ preview.subscriber.name }}</el-descriptions-item>
 					<el-descriptions-item :label="t('profiles.preview.proxiesCount')">
 						<span class="tnum">{{ preview.proxies.length }}</span>
@@ -284,7 +299,12 @@ async function remove(profile: Profile): Promise<void> {
 						<span class="tnum">{{ preview.skipped.length }}</span>
 					</el-descriptions-item>
 				</el-descriptions>
-				<el-input class="preview-document code-input" type="textarea" :model-value="preview.document" :rows="16" readonly />
+				<CodeBlock
+					:code="preview.document"
+					:label="`${previewName || 'clash'}.yaml`"
+					:filename="`${previewName || 'clash'}.yaml`"
+					max-height="380px"
+				/>
 				<el-table v-if="preview.skipped.length > 0" :data="preview.skipped" size="small" class="preview-skipped">
 					<el-table-column prop="node_name" :label="t('profiles.preview.node')" min-width="160" />
 					<el-table-column :label="t('profiles.preview.reason')" min-width="160">
@@ -297,6 +317,27 @@ async function remove(profile: Profile): Promise<void> {
 </template>
 
 <style scoped>
+.btn-icon {
+	margin-right: 5px;
+}
+
+.profile-name {
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.profile-desc {
+	font-size: 12px;
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
+.drawer-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0 16px;
+}
+
 .full-width {
 	width: 100%;
 }
@@ -330,18 +371,24 @@ async function remove(profile: Profile): Promise<void> {
 .code-input :deep(textarea) {
 	font-family: var(--font-mono);
 	font-size: 12px;
-	line-height: 1.5;
+	line-height: 1.55;
 }
 
 .preview-alert {
 	margin-bottom: 12px;
 }
 
-.preview-document {
-	margin: 12px 0;
+.preview-desc {
+	margin-bottom: 12px;
 }
 
 .preview-skipped {
-	margin-top: 4px;
+	margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+	.drawer-grid {
+		grid-template-columns: 1fr;
+	}
 }
 </style>

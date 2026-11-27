@@ -29,6 +29,7 @@ const metrics = computed<Array<{ label: string; value: string; icon: IconName; t
 		<template v-if="title" #header>
 			<div class="ui-card-header">
 				<span class="ui-card-title">{{ title }}</span>
+				<slot name="header-extra" />
 			</div>
 		</template>
 		<div class="metric-grid">

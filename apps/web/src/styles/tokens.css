@@ -1,0 +1,69 @@
+:root {
+	/* Typography */
+	--font-sans:
+		'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+		sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+
+	/* Radii */
+	--radius-xs: 4px;
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+	--radius-xl: 18px;
+	--radius-pill: 9999px;
+
+	/* Layout Dimensions */
+	--sidebar-width: 236px;
+	--sidebar-collapsed-width: 68px;
+	--header-height: 56px;
+	--content-max-width: 1320px;
+
+	/* Motion */
+	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--duration-fast: 140ms;
+	--duration-normal: 200ms;
+
+	/* Primitive Palette */
+	--p-slate-50: #f8fafc;
+	--p-slate-100: #f1f5f9;
+	--p-slate-200: #e2e8f0;
+	--p-slate-300: #cbd5e1;
+	--p-slate-400: #94a3b8;
+	--p-slate-500: #576475;
+	--p-slate-600: #475569;
+	--p-slate-700: #334155;
+	--p-slate-800: #1e293b;
+	--p-slate-900: #0f172a;
+
+	--p-obsidian-950: #090d16;
+	--p-obsidian-900: #0c121e;
+	--p-obsidian-850: #101726;
+	--p-obsidian-800: #162033;
+	--p-obsidian-700: #1d2940;
+
+	--p-blue-50: #eff6ff;
+	--p-blue-200: #bfdbfe;
+	--p-blue-400: #60a5fa;
+	--p-blue-500: #3b82f6;
+	--p-blue-600: #2563eb;
+	--p-blue-700: #1d4ed8;
+
+	--p-emerald-50: #ecfdf5;
+	--p-emerald-400: #34d399;
+	--p-emerald-500: #10b981;
+	--p-emerald-600: #059669;
+	--p-emerald-700: #047857;
+
+	--p-amber-50: #fffbeb;
+	--p-amber-400: #fbbf24;
+	--p-amber-500: #f59e0b;
+	--p-amber-600: #d97706;
+	--p-amber-700: #b45309;
+
+	--p-rose-50: #fff1f2;
+	--p-rose-400: #fb7185;
+	--p-rose-500: #f43f5e;
+	--p-rose-600: #e11d48;
+	--p-rose-700: #be123c;
+}

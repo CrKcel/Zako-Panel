@@ -6,6 +6,7 @@ import { RouterLink } from 'vue-router';
 import { profilesApi } from '../api/profiles';
 import { subscribersApi } from '../api/subscribers';
 import { subscriptionsApi } from '../api/subscriptions';
+import AppIcon from '../components/AppIcon.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
@@ -18,6 +19,8 @@ import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 import { subscriptionLinks } from '../utils/subscription';
 import { toUnixSeconds } from '../utils/time';
+
+type SubscriptionStatusKey = 'active' | 'expired' | 'revoked';
 
 const { t } = useI18n();
 
@@ -33,6 +36,7 @@ function emptySubscriptionForm(): SubscriptionForm {
 }
 
 const search = ref('');
+const statusFilter = ref<'all' | SubscriptionStatusKey>('all');
 const form = ref<SubscriptionForm>(emptySubscriptionForm());
 const formRef = ref<FormInstance>();
 const token = ref('');
@@ -85,15 +89,36 @@ function subscriberName(subscriberId: string): string {
 	return subscribers.value.find((subscriber) => subscriber.id === subscriberId)?.name ?? subscriberId;
 }
 
+function resolveStatus(row: Subscription, nowMs = Date.now()): SubscriptionStatusKey {
+	if (row.revoked_at !== null) return 'revoked';
+	if (row.expires_at !== null && row.expires_at * 1000 <= nowMs) return 'expired';
+	return 'active';
+}
+
+const statusOptions = computed<Array<{ value: 'all' | SubscriptionStatusKey; label: string; count: number }>>(() => {
+	const nowMs = Date.now();
+	const list = subscriptions.value;
+	const countOf = (key: SubscriptionStatusKey) => list.filter((row) => resolveStatus(row, nowMs) === key).length;
+	return [
+		{ value: 'all', label: t('common.all'), count: list.length },
+		{ value: 'active', label: t('status.subscription.active'), count: countOf('active') },
+		{ value: 'expired', label: t('status.subscription.expired'), count: countOf('expired') },
+		{ value: 'revoked', label: t('status.subscription.revoked'), count: countOf('revoked') },
+	];
+});
+
 const filteredSubscriptions = computed(() => {
 	const q = search.value.trim().toLowerCase();
-	if (!q) return subscriptions.value;
-	return subscriptions.value.filter(
-		(row) =>
+	const nowMs = Date.now();
+	return subscriptions.value.filter((row) => {
+		if (statusFilter.value !== 'all' && resolveStatus(row, nowMs) !== statusFilter.value) return false;
+		if (!q) return true;
+		return (
 			row.name.toLowerCase().includes(q) ||
 			subscriberName(row.subscriber_id).toLowerCase().includes(q) ||
-			profileName(row.profile_id).toLowerCase().includes(q),
-	);
+			profileName(row.profile_id).toLowerCase().includes(q)
+		);
+	});
 });
 
 async function submit(): Promise<void> {
@@ -149,14 +174,37 @@ async function revoke(row: Subscription): Promise<void> {
 </script>
 
 <template>
-	<el-card shadow="never">
-		<PageToolbar spread>
-			<template #left>
+	<PageToolbar spread>
+		<template #left>
+			<div class="filters">
+				<div class="filter-pills" role="group">
+					<button
+						v-for="opt in statusOptions"
+						:key="opt.value"
+						type="button"
+						class="filter-pill"
+						:class="{ 'is-active': statusFilter === opt.value }"
+						:aria-pressed="statusFilter === opt.value"
+						@click="statusFilter = opt.value"
+					>
+						<span>{{ opt.label }}</span>
+						<span class="filter-pill-count">{{ opt.count }}</span>
+					</button>
+				</div>
 				<el-input v-model="search" :placeholder="t('subscriptions.searchPlaceholder')" clearable class="search-input" />
-			</template>
-			<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
-			<el-button type="primary" @click="openCreate">{{ t('subscriptions.create') }}</el-button>
-		</PageToolbar>
+			</div>
+		</template>
+		<el-button :loading="loading" @click="reload">
+			<AppIcon name="refresh" :size="14" class="btn-icon" />
+			<span>{{ t('common.refresh') }}</span>
+		</el-button>
+		<el-button type="primary" @click="openCreate">
+			<AppIcon name="plus" :size="14" class="btn-icon" />
+			<span>{{ t('subscriptions.create') }}</span>
+		</el-button>
+	</PageToolbar>
+
+	<el-card shadow="never">
 		<el-table v-loading="loading" :data="filteredSubscriptions" :empty-text="t('common.noData')">
 			<el-table-column prop="name" :label="t('common.name')" min-width="160" />
 			<el-table-column :label="t('subscriptions.columns.subscriber')" min-width="160">
@@ -174,6 +222,7 @@ async function revoke(row: Subscription): Promise<void> {
 					<StatusBadge
 						:label="subscriptionStatusDescriptor(row as Subscription).label"
 						:type="subscriptionStatusDescriptor(row as Subscription).tag"
+						:pulse="resolveStatus(row as Subscription) === 'active'"
 					/>
 				</template>
 			</el-table-column>
@@ -226,6 +275,7 @@ async function revoke(row: Subscription): Promise<void> {
 	</el-dialog>
 
 	<el-dialog v-model="tokenVisible" :title="t('subscriptions.links.title')" width="720px" :close-on-click-modal="false">
+		<el-alert type="info" :closable="false" show-icon class="links-alert" :title="t('subscriptions.links.oneTimeHint')" />
 		<div class="link-list">
 			<div class="link-row">
 				<span class="link-label">{{ t('subscriptions.links.token') }}</span>
@@ -248,12 +298,27 @@ async function revoke(row: Subscription): Promise<void> {
 </template>
 
 <style scoped>
+.btn-icon {
+	margin-right: 5px;
+}
+
+.filters {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
 .search-input {
-	width: 280px;
+	width: 240px;
 }
 
 .full-width {
 	width: 100%;
+}
+
+.links-alert {
+	margin-bottom: 14px;
 }
 
 .link-list {
@@ -274,5 +339,13 @@ async function revoke(row: Subscription): Promise<void> {
 	font-size: 13px;
 	font-weight: 500;
 	color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+	.link-row {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 6px;
+	}
 }
 </style>

@@ -5,14 +5,18 @@ import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { trafficApi } from '../api/traffic';
+import AppIcon from '../components/AppIcon.vue';
 import EndpointFormFields from '../components/EndpointFormFields.vue';
+import EntityHeader from '../components/EntityHeader.vue';
 import NodeConfigPanel from '../components/NodeConfigPanel.vue';
-import PageToolbar from '../components/PageToolbar.vue';
+import PollingPill from '../components/PollingPill.vue';
+import ProtocolBadge from '../components/ProtocolBadge.vue';
 import StatCard from '../components/StatCard.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
+import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
 import { useCrudDialog } from '../composables/useCrudDialog';
 import { usePolling } from '../composables/usePolling';
 import {
@@ -33,6 +37,9 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const nodeId = computed(() => String(route.params.nodeId ?? ''));
+
+const activeTab = ref<'endpoints' | 'clients' | 'configs' | 'traffic'>('endpoints');
+const clientsSearch = ref('');
 
 const {
 	data: detail,
@@ -67,7 +74,18 @@ const node = computed(() => detail.value?.node ?? null);
 const endpoints = computed(() => detail.value?.endpoints ?? []);
 const sys = computed(() => node.value?.sys ?? null);
 
-const { refresh } = usePolling(async () => {
+useEntityBreadcrumb(() => node.value?.name);
+
+const filteredClients = computed(() => {
+	const q = clientsSearch.value.trim().toLowerCase();
+	if (!q) return clients.value;
+	return clients.value.filter((client) => client.subscriber_name.toLowerCase().includes(q) || client.xray_email.toLowerCase().includes(q));
+});
+
+const cpuPercent = computed(() => (sys.value ? Math.round(sys.value.cpu * 100) : null));
+const memPercent = computed(() => (sys.value ? Math.round(sys.value.mem * 100) : null));
+
+const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(async () => {
 	await Promise.all([reloadNode(), reloadClients(), reloadTraffic()]);
 }, 30_000);
 
@@ -257,155 +275,192 @@ async function submitDeleteNode(): Promise<void> {
 
 <template>
 	<div v-loading="loading">
-		<PageToolbar spread>
-			<template #left>
-				<el-button @click="backToList">{{ t('nodeDetail.backToList') }}</el-button>
+		<EntityHeader
+			:title="node?.name ?? '—'"
+			:back-label="t('nodeDetail.backToList')"
+			:subtitle="
+				node
+					? `${t('nodeDetail.fields.lastHeartbeat')}: ${formatTimestamp(node.last_seen_at)} · ${node.heartbeat_interval_seconds}s`
+					: undefined
+			"
+			@back="backToList"
+		>
+			<template #badge>
+				<StatusBadge
+					v-if="node"
+					:label="nodeStatusDescriptor(node.status).label"
+					:type="nodeStatusDescriptor(node.status).tag"
+					:pulse="node.status === 'online'"
+				/>
 			</template>
-			<el-button v-if="node" type="primary" plain @click="openEditNode">{{ t('nodes.editDialog.title') }}</el-button>
-			<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
-				{{ node.status === 'uninstalling' ? t('nodeDetail.forceDeleteNode') : t('nodeDetail.deleteNode') }}
-			</el-button>
-			<el-button :loading="loading" @click="refresh">{{ t('common.refresh') }}</el-button>
-		</PageToolbar>
-
-		<el-card shadow="never" class="ui-section">
-			<template #header>
-				<div class="ui-card-header">
-					<span class="ui-card-title">{{ node?.name ?? '—' }}</span>
-					<StatusBadge v-if="node" :label="nodeStatusDescriptor(node.status).label" :type="nodeStatusDescriptor(node.status).tag" />
+			<template #actions>
+				<PollingPill :last-updated-at="lastUpdatedAt" :paused="paused" @toggle="togglePause" />
+				<el-button v-if="node" @click="openEditNode">
+					<AppIcon name="edit" :size="14" class="btn-icon" />
+					<span>{{ t('common.edit') }}</span>
+				</el-button>
+				<el-button v-if="node" type="danger" plain :loading="deleteNodeAction.isRunning('delete')" @click="openDeleteDialog">
+					<AppIcon name="trash" :size="14" class="btn-icon" />
+					<span>{{ node.status === 'uninstalling' ? t('nodeDetail.forceDeleteNode') : t('nodeDetail.deleteNode') }}</span>
+				</el-button>
+				<el-button :loading="loading" @click="refresh">
+					<AppIcon name="refresh" :size="14" class="btn-icon" />
+					<span>{{ t('common.refresh') }}</span>
+				</el-button>
+			</template>
+			<template #meta>
+				<div class="meta-cell">
+					<span class="meta-label">{{ t('nodeDetail.fields.agentVersion') }}</span>
+					<span class="meta-value mono">{{ node?.agent_version ?? '—' }}</span>
+				</div>
+				<div class="meta-cell">
+					<span class="meta-label">{{ t('nodeDetail.fields.xrayVersion') }}</span>
+					<span class="meta-value mono">{{ node?.xray_version ?? '—' }}</span>
+				</div>
+				<div class="meta-cell">
+					<span class="meta-label">{{ t('nodeDetail.fields.configVersion') }}</span>
+					<span class="meta-value tnum">
+						{{ node ? `v${node.applied_config_version} / v${node.desired_config_version}` : '—' }}
+					</span>
+				</div>
+				<div class="meta-cell">
+					<span class="meta-label">{{ t('nodeDetail.fields.xrayHealth') }}</span>
+					<StatusBadge :label="healthDescriptor(node?.xray_healthy).label" :type="healthDescriptor(node?.xray_healthy).tag" />
+				</div>
+				<div class="meta-cell">
+					<span class="meta-label">{{ t('nodeDetail.fields.statsHealth') }}</span>
+					<StatusBadge :label="healthDescriptor(node?.stats_healthy).label" :type="healthDescriptor(node?.stats_healthy).tag" />
 				</div>
 			</template>
-			<el-descriptions :column="3" border>
-				<el-descriptions-item :label="t('common.status')">
-					<StatusBadge v-if="node" :label="nodeStatusDescriptor(node.status).label" :type="nodeStatusDescriptor(node.status).tag" />
-					<span v-else>—</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.heartbeatInterval')">
-					<span class="tnum">{{ node ? `${node.heartbeat_interval_seconds}s` : '—' }}</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.lastHeartbeat')">
-					<span class="tnum">{{ formatTimestamp(node?.last_seen_at) }}</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.agentVersion')">
-					<span class="mono">{{ node?.agent_version ?? '—' }}</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.xrayVersion')">
-					<span class="mono">{{ node?.xray_version ?? '—' }}</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.configVersion')">
-					<span class="tnum">{{ node ? `${node.applied_config_version} / ${node.desired_config_version}` : '—' }}</span>
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.xrayHealth')">
-					<StatusBadge :label="healthDescriptor(node?.xray_healthy).label" :type="healthDescriptor(node?.xray_healthy).tag" />
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.statsHealth')">
-					<StatusBadge :label="healthDescriptor(node?.stats_healthy).label" :type="healthDescriptor(node?.stats_healthy).tag" />
-				</el-descriptions-item>
-				<el-descriptions-item :label="t('nodeDetail.fields.configError')">
-					<span :class="{ 'error-text': Boolean(node?.last_config_error) }">{{ node?.last_config_error ?? '—' }}</span>
-				</el-descriptions-item>
-			</el-descriptions>
-		</el-card>
+		</EntityHeader>
+
+		<el-alert v-if="node?.last_config_error" type="error" :closable="false" show-icon class="ui-section" :title="node.last_config_error" />
 
 		<div class="stats-grid ui-section">
-			<StatCard :label="t('nodeDetail.stats.cpu')" :value="formatPercent(sys?.cpu)" />
-			<StatCard :label="t('nodeDetail.stats.memory')" :value="formatPercent(sys?.mem)" />
-			<StatCard :label="t('nodeDetail.stats.load')" :value="sys ? sys.load.toFixed(2) : '—'" />
-			<StatCard :label="t('nodeDetail.stats.uptime')" :value="formatDuration(sys?.uptime)" />
+			<StatCard
+				:label="t('nodeDetail.stats.cpu')"
+				:value="formatPercent(sys?.cpu)"
+				:progress="cpuPercent"
+				icon="cpu"
+				:tone="cpuPercent !== null && cpuPercent >= 85 ? 'warning' : 'primary'"
+			/>
+			<StatCard
+				:label="t('nodeDetail.stats.memory')"
+				:value="formatPercent(sys?.mem)"
+				:progress="memPercent"
+				icon="hard-drive"
+				:tone="memPercent !== null && memPercent >= 85 ? 'warning' : 'success'"
+			/>
+			<StatCard :label="t('nodeDetail.stats.load')" :value="sys ? sys.load.toFixed(2) : '—'" icon="activity" />
+			<StatCard :label="t('nodeDetail.stats.uptime')" :value="formatDuration(sys?.uptime)" icon="clock" />
 		</div>
 
-		<el-card shadow="never" class="ui-section">
-			<template #header>
-				<div class="ui-card-header">
-					<span class="ui-card-title">{{ t('nodeDetail.clients.title') }}</span>
-				</div>
-			</template>
-			<el-table :data="clients" :empty-text="t('common.noData')">
-				<el-table-column prop="subscriber_name" :label="t('nodeDetail.clients.subscriber')" min-width="140" />
-				<el-table-column :label="t('nodeDetail.clients.email')" min-width="220">
-					<template #default="{ row }">
-						<span class="credential">{{ row.xray_email }}</span>
-						<el-button link type="primary" @click="copyText(row.xray_email)">{{ t('common.copy') }}</el-button>
+		<el-tabs v-model="activeTab" class="detail-tabs">
+			<el-tab-pane :label="`${t('nodeDetail.tabs.endpoints')} (${endpoints.length})`" name="endpoints">
+				<el-card shadow="never">
+					<template #header>
+						<div class="ui-card-header">
+							<span class="ui-card-title">{{ t('nodeDetail.endpoints.title') }}</span>
+							<el-button type="primary" @click="openCreateEndpoint">
+								<AppIcon name="plus" :size="14" class="btn-icon" />
+								<span>{{ t('nodeDetail.endpoints.add') }}</span>
+							</el-button>
+						</div>
 					</template>
-				</el-table-column>
-				<el-table-column :label="t('nodeDetail.clients.uuid')" min-width="280">
-					<template #default="{ row }">
-						<span class="credential">{{ row.vless_uuid }}</span>
-						<el-button link type="primary" @click="copyText(row.vless_uuid)">{{ t('common.copy') }}</el-button>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('common.status')" width="105">
-					<template #default="{ row }">
-						<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
-					</template>
-				</el-table-column>
-			</el-table>
-		</el-card>
+					<el-table v-loading="loading" :data="endpoints" :empty-text="t('common.noData')">
+						<el-table-column prop="name" :label="t('common.name')" min-width="140" />
+						<el-table-column prop="protocol" :label="t('nodeDetail.endpoints.protocol')" width="150">
+							<template #default="{ row }">
+								<ProtocolBadge :protocol="row.protocol" />
+							</template>
+						</el-table-column>
+						<el-table-column prop="host" :label="t('nodeDetail.endpoints.host')" min-width="170">
+							<template #default="{ row }">
+								<span class="mono">{{ row.host }}</span>
+							</template>
+						</el-table-column>
+						<el-table-column prop="port" :label="t('nodeDetail.endpoints.port')" width="86">
+							<template #default="{ row }">
+								<span class="tnum mono">{{ row.port }}</span>
+							</template>
+						</el-table-column>
+						<el-table-column :label="t('nodeDetail.endpoints.params')" min-width="250">
+							<template #default="{ row }">
+								<span class="mono params-text">{{ endpointParamsSummary(row as Endpoint) }}</span>
+							</template>
+						</el-table-column>
+						<el-table-column :label="t('common.status')" width="105">
+							<template #default="{ row }">
+								<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
+							</template>
+						</el-table-column>
+						<el-table-column :label="t('common.actions')" width="145" fixed="right">
+							<template #default="{ row }">
+								<el-button link type="primary" @click="openEditEndpoint(row.id)">{{ t('common.edit') }}</el-button>
+								<el-button
+									v-if="row.enabled"
+									link
+									type="danger"
+									:loading="disableAction.isRunning(row.id)"
+									@click="disableEndpoint(row as Endpoint)"
+								>
+									{{ t('common.disabled') }}
+								</el-button>
+								<el-button v-else link type="primary" :loading="enableAction.isRunning(row.id)" @click="enableEndpoint(row as Endpoint)">
+									{{ t('common.enabled') }}
+								</el-button>
+							</template>
+						</el-table-column>
+					</el-table>
+				</el-card>
+			</el-tab-pane>
 
-		<el-card shadow="never" class="ui-section">
-			<template #header>
-				<div class="ui-card-header">
-					<span class="ui-card-title">{{ t('nodeDetail.endpoints.title') }}</span>
-					<el-button type="primary" @click="openCreateEndpoint">{{ t('nodeDetail.endpoints.add') }}</el-button>
-				</div>
-			</template>
-			<el-table v-loading="loading" :data="endpoints" :empty-text="t('common.noData')">
-				<el-table-column prop="name" :label="t('common.name')" min-width="140" />
-				<el-table-column prop="protocol" :label="t('nodeDetail.endpoints.protocol')" width="130">
-					<template #default="{ row }">
-						<span class="mono">{{ row.protocol }}</span>
+			<el-tab-pane :label="`${t('nodeDetail.tabs.clients')} (${clients.length})`" name="clients">
+				<el-card shadow="never">
+					<template #header>
+						<div class="ui-card-header">
+							<span class="ui-card-title">{{ t('nodeDetail.clients.title') }}</span>
+							<el-input v-model="clientsSearch" :placeholder="t('nodeDetail.clientsSearchPlaceholder')" clearable class="clients-search" />
+						</div>
 					</template>
-				</el-table-column>
-				<el-table-column prop="host" :label="t('nodeDetail.endpoints.host')" min-width="180">
-					<template #default="{ row }">
-						<span class="mono">{{ row.host }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column prop="port" :label="t('nodeDetail.endpoints.port')" width="90">
-					<template #default="{ row }">
-						<span class="tnum">{{ row.port }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('nodeDetail.endpoints.params')" min-width="260">
-					<template #default="{ row }">
-						<span class="mono">{{ endpointParamsSummary(row as Endpoint) }}</span>
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('common.status')" width="105">
-					<template #default="{ row }">
-						<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
-					</template>
-				</el-table-column>
-				<el-table-column :label="t('common.actions')" width="150" fixed="right">
-					<template #default="{ row }">
-						<el-button link type="primary" @click="openEditEndpoint(row.id)">{{ t('common.edit') }}</el-button>
-						<el-button
-							v-if="row.enabled"
-							link
-							type="danger"
-							:loading="disableAction.isRunning(row.id)"
-							@click="disableEndpoint(row as Endpoint)"
-						>
-							{{ t('common.disabled') }}
-						</el-button>
-						<el-button v-else link type="primary" :loading="enableAction.isRunning(row.id)" @click="enableEndpoint(row as Endpoint)">
-							{{ t('common.enabled') }}
-						</el-button>
-					</template>
-				</el-table-column>
-			</el-table>
-		</el-card>
+					<el-table :data="filteredClients" :empty-text="t('common.noData')">
+						<el-table-column prop="subscriber_name" :label="t('nodeDetail.clients.subscriber')" min-width="140" />
+						<el-table-column :label="t('nodeDetail.clients.email')" min-width="220">
+							<template #default="{ row }">
+								<span class="credential">{{ row.xray_email }}</span>
+								<el-button link type="primary" @click="copyText(row.xray_email)">{{ t('common.copy') }}</el-button>
+							</template>
+						</el-table-column>
+						<el-table-column :label="t('nodeDetail.clients.uuid')" min-width="280">
+							<template #default="{ row }">
+								<span class="credential">{{ row.vless_uuid }}</span>
+								<el-button link type="primary" @click="copyText(row.vless_uuid)">{{ t('common.copy') }}</el-button>
+							</template>
+						</el-table-column>
+						<el-table-column :label="t('common.status')" width="105">
+							<template #default="{ row }">
+								<StatusBadge :label="row.enabled ? t('common.enabled') : t('common.disabled')" :type="row.enabled ? 'success' : 'info'" />
+							</template>
+						</el-table-column>
+					</el-table>
+				</el-card>
+			</el-tab-pane>
 
-		<NodeConfigPanel
-			v-if="node"
-			:node-id="node.id"
-			:applied-version="node.applied_config_version"
-			:desired-version="node.desired_config_version"
-			:endpoints="endpoints"
-			@changed="reloadNode"
-		/>
+			<el-tab-pane :label="t('nodeDetail.tabs.configs')" name="configs">
+				<NodeConfigPanel
+					v-if="node"
+					:node-id="node.id"
+					:applied-version="node.applied_config_version"
+					:desired-version="node.desired_config_version"
+					:endpoints="endpoints"
+					@changed="reloadNode"
+				/>
+			</el-tab-pane>
 
-		<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" :title="t('nodeDetail.trafficLast24h')" />
+			<el-tab-pane :label="t('nodeDetail.tabs.traffic')" name="traffic">
+				<TrafficTotalsCard :summary="traffic" :loading="trafficLoading" :title="t('nodeDetail.trafficLast24h')" />
+			</el-tab-pane>
+		</el-tabs>
 	</div>
 
 	<el-dialog v-model="editVisible" :title="t('nodes.editDialog.title')" width="520px" :close-on-click-modal="false" destroy-on-close>
@@ -467,10 +522,46 @@ async function submitDeleteNode(): Promise<void> {
 </template>
 
 <style scoped>
+.btn-icon {
+	margin-right: 5px;
+}
+
+.meta-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+}
+
+.meta-label {
+	font-size: 11.5px;
+	font-weight: 500;
+	color: var(--text-muted);
+}
+
+.meta-value {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-primary);
+}
+
 .stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 	gap: 14px;
+}
+
+.detail-tabs {
+	margin-top: 4px;
+}
+
+.params-text {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.clients-search {
+	width: 240px;
 }
 
 .credential {
@@ -478,10 +569,6 @@ async function submitDeleteNode(): Promise<void> {
 	font-family: var(--font-mono);
 	font-size: 12px;
 	color: var(--text-primary);
-}
-
-.error-text {
-	color: var(--tone-danger);
 }
 
 .delete-confirm {

@@ -6,8 +6,8 @@ export type ResolvedTheme = 'light' | 'dark';
 const STORAGE_KEY = 'zako-panel.theme';
 const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 const THEME_COLORS: Record<ResolvedTheme, string> = {
-	light: '#f8fafc',
-	dark: '#0b1120',
+	light: '#f5f7fa',
+	dark: '#090d16',
 };
 
 export const THEME_OPTIONS: ReadonlyArray<{ value: ThemePreference; labelKey: 'nav.themeSystem' | 'nav.themeLight' | 'nav.themeDark' }> = [

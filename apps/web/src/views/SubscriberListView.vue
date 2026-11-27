@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import type { CreateSubscriberRequest, Node, Subscriber, UpdateSubscriberRequest } from '@zako/contracts';
+import type { CreateSubscriberRequest, Node, Subscriber, SubscriberStatus, UpdateSubscriberRequest } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
 import { subscribersApi } from '../api/subscribers';
+import AppIcon from '../components/AppIcon.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
+import { subscriberStatusDescriptor } from '../domain/status';
 import {
 	LIMIT_UNITS,
 	limitBytes,
@@ -19,7 +21,6 @@ import {
 	usageLabel,
 	type LimitUnit,
 } from '../domain/subscriber';
-import { subscriberStatusDescriptor } from '../domain/status';
 import { useI18n } from '../i18n';
 import { showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
@@ -41,7 +42,7 @@ function emptySubscriberForm(): SubscriberForm {
 }
 
 const search = ref('');
-const statusFilter = ref<'all' | Subscriber['status']>('all');
+const statusFilter = ref<'all' | SubscriberStatus>('all');
 
 const form = ref<SubscriberForm>(emptySubscriberForm());
 const formRef = ref<FormInstance>();
@@ -60,6 +61,18 @@ const {
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
 	initialValue: [],
 	onError: (error) => showError(error, t('subscribers.loadNodesError')),
+});
+
+const statusOptions = computed<Array<{ value: 'all' | SubscriberStatus; label: string; count: number }>>(() => {
+	const list = subscribers.value;
+	const countOf = (status: SubscriberStatus) => list.filter((item) => item.status === status).length;
+	return [
+		{ value: 'all', label: t('common.all'), count: list.length },
+		{ value: 'active', label: t('status.subscriber.active'), count: countOf('active') },
+		{ value: 'limited', label: t('status.subscriber.limited'), count: countOf('limited') },
+		{ value: 'expired', label: t('status.subscriber.expired'), count: countOf('expired') },
+		{ value: 'disabled', label: t('status.subscriber.disabled'), count: countOf('disabled') },
+	];
 });
 
 const filteredSubscribers = computed(() => {
@@ -150,42 +163,62 @@ function openGrant(row: Subscriber): void {
 </script>
 
 <template>
-	<el-card shadow="never">
-		<PageToolbar spread>
-			<template #left>
-				<div class="filters">
-					<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
-					<el-select v-model="statusFilter" class="status-select">
-						<el-option :label="t('common.allStatuses')" value="all" />
-						<el-option :label="t('status.subscriber.active')" value="active" />
-						<el-option :label="t('status.subscriber.limited')" value="limited" />
-						<el-option :label="t('status.subscriber.expired')" value="expired" />
-						<el-option :label="t('status.subscriber.disabled')" value="disabled" />
-					</el-select>
+	<PageToolbar spread>
+		<template #left>
+			<div class="filters">
+				<div class="filter-pills" role="group">
+					<button
+						v-for="opt in statusOptions"
+						:key="opt.value"
+						type="button"
+						class="filter-pill"
+						:class="{ 'is-active': statusFilter === opt.value }"
+						:aria-pressed="statusFilter === opt.value"
+						@click="statusFilter = opt.value"
+					>
+						<span>{{ opt.label }}</span>
+						<span class="filter-pill-count">{{ opt.count }}</span>
+					</button>
 				</div>
-			</template>
-			<el-button :loading="loading" @click="reload">{{ t('common.refresh') }}</el-button>
-			<el-button type="primary" @click="openCreate">{{ t('subscribers.create') }}</el-button>
-		</PageToolbar>
+				<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
+			</div>
+		</template>
+		<el-button :loading="loading" @click="reload">
+			<AppIcon name="refresh" :size="14" class="btn-icon" />
+			<span>{{ t('common.refresh') }}</span>
+		</el-button>
+		<el-button type="primary" @click="openCreate">
+			<AppIcon name="plus" :size="14" class="btn-icon" />
+			<span>{{ t('subscribers.create') }}</span>
+		</el-button>
+	</PageToolbar>
 
+	<el-card shadow="never">
 		<el-table v-loading="loading" :data="filteredSubscribers" :empty-text="t('common.noData')">
 			<el-table-column prop="name" :label="t('common.name')" min-width="150">
 				<template #default="{ row }">
-					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
+					<div class="name-cell">
+						<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
+						<span v-if="row.email" class="email-sub">{{ row.email }}</span>
+					</div>
 				</template>
-			</el-table-column>
-			<el-table-column :label="t('subscribers.columns.email')" min-width="190">
-				<template #default="{ row }">{{ row.email ?? '—' }}</template>
 			</el-table-column>
 			<el-table-column :label="t('common.status')" width="115">
 				<template #default="{ row }">
-					<StatusBadge :label="subscriberStatusDescriptor(row.status).label" :type="subscriberStatusDescriptor(row.status).tag" />
+					<StatusBadge
+						:label="subscriberStatusDescriptor(row.status).label"
+						:type="subscriberStatusDescriptor(row.status).tag"
+						:pulse="row.status === 'active'"
+					/>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="200">
+			<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="260">
 				<template #default="{ row }">
 					<div class="usage-cell">
-						<span class="tnum">{{ usageLabel(row as Subscriber) }}</span>
+						<div class="usage-top">
+							<span class="tnum usage-text">{{ usageLabel(row as Subscriber) }}</span>
+							<span v-if="usageRatio(row as Subscriber) !== null" class="tnum usage-pct"> {{ usageRatio(row as Subscriber) }}% </span>
+						</div>
 						<div v-if="usageRatio(row as Subscriber) !== null" class="usage-bar">
 							<div
 								class="usage-bar-fill"
@@ -193,27 +226,23 @@ function openGrant(row: Subscriber): void {
 								:style="{ width: `${usageRatio(row as Subscriber)}%` }"
 							/>
 						</div>
+						<span class="cycle-sub tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
 					</div>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('subscribers.columns.cycle')" min-width="310">
-				<template #default="{ row }">
-					<span class="tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('subscribers.columns.expiresAt')" width="180">
+			<el-table-column :label="t('subscribers.columns.expiresAt')" width="175">
 				<template #default="{ row }">
 					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('subscribers.columns.grantedNodes')" width="130">
+			<el-table-column :label="t('subscribers.columns.grantedNodes')" width="110">
 				<template #default="{ row }">
 					<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
 						{{ row.node_count }}
 					</RouterLink>
 				</template>
 			</el-table-column>
-			<el-table-column :label="t('common.actions')" width="220" fixed="right">
+			<el-table-column :label="t('common.actions')" width="210" fixed="right">
 				<template #default="{ row }">
 					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
 					<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
@@ -271,6 +300,10 @@ function openGrant(row: Subscriber): void {
 </template>
 
 <style scoped>
+.btn-icon {
+	margin-right: 5px;
+}
+
 .filters {
 	display: flex;
 	align-items: center;
@@ -282,29 +315,54 @@ function openGrant(row: Subscriber): void {
 	width: 220px;
 }
 
-.status-select {
-	width: 140px;
+.name-cell {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.email-sub {
+	font-size: 12px;
+	color: var(--text-muted);
 }
 
 .usage-cell {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 5px;
+	max-width: 240px;
+}
+
+.usage-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.usage-text {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-primary);
+}
+
+.usage-pct {
+	font-size: 11.5px;
+	color: var(--text-muted);
 }
 
 .usage-bar {
 	width: 100%;
-	max-width: 160px;
 	height: 5px;
 	background: var(--bg-subtle);
-	border-radius: 9999px;
+	border-radius: var(--radius-pill);
 	overflow: hidden;
 }
 
 .usage-bar-fill {
 	height: 100%;
-	border-radius: 9999px;
-	transition: width 0.2s ease;
+	border-radius: var(--radius-pill);
+	transition: width var(--duration-normal) var(--ease-standard);
 }
 
 .usage-bar-fill.is-primary {
@@ -317,6 +375,11 @@ function openGrant(row: Subscriber): void {
 
 .usage-bar-fill.is-danger {
 	background: var(--tone-danger);
+}
+
+.cycle-sub {
+	font-size: 11.5px;
+	color: var(--text-muted);
 }
 
 .full-width {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router';
 import type { IconName } from './AppIcon.vue';
 import AppIcon from './AppIcon.vue';
 
@@ -11,15 +12,18 @@ withDefaults(
 		hint?: string;
 		icon?: IconName;
 		tone?: StatTone;
+		progress?: number | null;
+		to?: string;
 	}>(),
 	{
 		tone: 'default',
+		progress: null,
 	},
 );
 </script>
 
 <template>
-	<div class="stat-card">
+	<component :is="to ? RouterLink : 'div'" :to="to" class="stat-card" :class="[`tone-${tone}`, { 'is-clickable': Boolean(to) }]">
 		<div class="stat-top">
 			<span class="stat-label">{{ label }}</span>
 			<span v-if="icon" class="stat-icon" :class="`tone-${tone}`">
@@ -28,8 +32,11 @@ withDefaults(
 			<span v-else-if="tone !== 'default'" class="stat-dot" :class="`tone-${tone}`" />
 		</div>
 		<div class="stat-value tnum">{{ value }}</div>
-		<div v-if="hint" class="stat-hint">{{ hint }}</div>
-	</div>
+		<div v-if="progress !== null" class="stat-bar" aria-hidden="true">
+			<div class="stat-bar-fill" :class="`tone-${tone}`" :style="{ width: `${Math.min(100, Math.max(0, progress))}%` }" />
+		</div>
+		<div v-if="hint" class="stat-hint tnum">{{ hint }}</div>
+	</component>
 </template>
 
 <style scoped>
@@ -42,6 +49,19 @@ withDefaults(
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	text-decoration: none;
+	transition:
+		border-color var(--duration-fast) var(--ease-standard),
+		box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.stat-card.is-clickable {
+	cursor: pointer;
+}
+
+.stat-card.is-clickable:hover {
+	border-color: var(--border-hover);
+	box-shadow: var(--shadow-sm);
 }
 
 .stat-top {
@@ -52,7 +72,7 @@ withDefaults(
 }
 
 .stat-label {
-	font-size: 13px;
+	font-size: 12.5px;
 	font-weight: 500;
 	color: var(--text-muted);
 }
@@ -61,8 +81,35 @@ withDefaults(
 	font-size: 26px;
 	font-weight: 600;
 	line-height: 1.2;
-	letter-spacing: -0.02em;
+	letter-spacing: -0.025em;
 	color: var(--text-primary);
+}
+
+.stat-bar {
+	width: 100%;
+	height: 4px;
+	border-radius: var(--radius-pill);
+	background: var(--bg-subtle);
+	overflow: hidden;
+}
+
+.stat-bar-fill {
+	height: 100%;
+	border-radius: var(--radius-pill);
+	background: var(--accent-primary);
+	transition: width var(--duration-normal) var(--ease-standard);
+}
+
+.stat-bar-fill.tone-success {
+	background: var(--tone-success);
+}
+
+.stat-bar-fill.tone-warning {
+	background: var(--tone-warning);
+}
+
+.stat-bar-fill.tone-danger {
+	background: var(--tone-danger);
 }
 
 .stat-hint {
@@ -73,7 +120,7 @@ withDefaults(
 .stat-icon {
 	width: 28px;
 	height: 28px;
-	border-radius: 7px;
+	border-radius: 8px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;

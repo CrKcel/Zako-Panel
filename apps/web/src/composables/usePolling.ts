@@ -1,8 +1,13 @@
-import { onBeforeUnmount, onMounted } from 'vue';
+import { onBeforeUnmount, onMounted, readonly, ref, type DeepReadonly, type Ref } from 'vue';
 
 export interface PollingHandle {
 	/** Runs the task now and restarts the countdown; an in-flight run absorbs the call. */
 	refresh: () => Promise<void>;
+	/** Unix ms timestamp of the last completed refresh. */
+	lastUpdatedAt: DeepReadonly<Ref<number | null>>;
+	/** True when automatic background ticks are paused by the user. */
+	paused: DeepReadonly<Ref<boolean>>;
+	togglePause: () => void;
 }
 
 /**
@@ -14,6 +19,9 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 	let running = false;
 	let stopped = false;
 
+	const lastUpdatedAt = ref<number | null>(null);
+	const paused = ref(false);
+
 	function clearTimer(): void {
 		if (timer !== null) {
 			clearTimeout(timer);
@@ -23,7 +31,7 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 
 	function schedule(): void {
 		clearTimer();
-		if (stopped || document.hidden) return;
+		if (stopped || paused.value || document.hidden) return;
 		timer = setTimeout(() => {
 			void tick();
 		}, intervalMs);
@@ -35,6 +43,7 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 		running = true;
 		try {
 			await task();
+			lastUpdatedAt.value = Date.now();
 		} catch {
 			// The task reports its own failures; swallowing here keeps the loop alive.
 		} finally {
@@ -43,10 +52,19 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 		}
 	}
 
+	function togglePause(): void {
+		paused.value = !paused.value;
+		if (paused.value) {
+			clearTimer();
+		} else {
+			void tick();
+		}
+	}
+
 	function onVisibilityChange(): void {
 		if (document.hidden) {
 			clearTimer();
-		} else {
+		} else if (!paused.value) {
 			void tick();
 		}
 	}
@@ -62,5 +80,10 @@ export function usePolling(task: () => Promise<void> | void, intervalMs = 30_000
 		document.removeEventListener('visibilitychange', onVisibilityChange);
 	});
 
-	return { refresh: tick };
+	return {
+		refresh: tick,
+		lastUpdatedAt: readonly(lastUpdatedAt),
+		paused: readonly(paused),
+		togglePause,
+	};
 }

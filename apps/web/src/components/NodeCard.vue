@@ -52,12 +52,12 @@ function usageTone(percent: number): string {
 					</RouterLink>
 				</div>
 				<div class="heartbeat-meta tnum">
-					<span>{{ t('nodes.columns.lastHeartbeat') }}: {{ lastHeartbeatLabel }}</span>
+					<span>{{ lastHeartbeatLabel }}</span>
 					<span class="meta-sep">·</span>
 					<span>{{ node.heartbeat_interval_seconds }}s</span>
 				</div>
 			</div>
-			<StatusBadge :label="statusDescriptor.label" :type="statusDescriptor.tag" />
+			<StatusBadge :label="statusDescriptor.label" :type="statusDescriptor.tag" :pulse="node.status === 'online'" />
 		</header>
 
 		<div class="metrics-grid">
@@ -94,12 +94,8 @@ function usageTone(percent: number): string {
 
 		<dl class="meta-grid">
 			<div class="meta-item">
-				<dt>{{ t('nodes.columns.agent') }}</dt>
-				<dd class="mono">{{ node.agent_version ?? '—' }}</dd>
-			</div>
-			<div class="meta-item">
-				<dt>{{ t('nodes.columns.xray') }}</dt>
-				<dd class="mono">{{ node.xray_version ?? '—' }}</dd>
+				<dt>{{ t('nodes.columns.agent') }} / {{ t('nodes.columns.xray') }}</dt>
+				<dd class="mono">{{ node.agent_version ?? '—' }} · {{ node.xray_version ?? '—' }}</dd>
 			</div>
 			<div class="meta-item">
 				<dt>{{ t('nodes.columns.configVersion') }}</dt>
@@ -108,17 +104,7 @@ function usageTone(percent: number): string {
 					<span v-if="configPending" class="pending-pill">{{ t('nodes.configPending') }}</span>
 				</dd>
 			</div>
-			<div class="meta-item">
-				<dt>{{ t('common.enabled') }}</dt>
-				<dd>
-					<span class="inline-state">
-						<span class="state-dot" :class="node.enabled ? 'is-success' : 'is-info'" />
-						<span>{{ node.enabled ? t('common.enabled') : t('common.disabled') }}</span>
-					</span>
-				</dd>
-			</div>
 			<div class="meta-item meta-item-wide">
-				<dt>{{ t('nodes.columns.xrayHealth') }} / {{ t('nodes.columns.statsHealth') }}</dt>
 				<dd class="health-pair">
 					<span class="inline-state">
 						<span class="state-dot" :class="`is-${xrayHealth.tag}`" />
@@ -159,20 +145,23 @@ function usageTone(percent: number): string {
 	flex-direction: column;
 	gap: 14px;
 	min-width: 0;
-	transition: border-color 0.15s ease;
+	transition:
+		border-color var(--duration-fast) var(--ease-standard),
+		box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .node-card:hover {
 	border-color: var(--border-hover);
+	box-shadow: var(--shadow-sm);
 }
 
 .node-card.has-error {
-	border-color: color-mix(in srgb, var(--tone-danger) 40%, var(--border-color));
+	border-color: var(--tone-danger-border);
 }
 
 .node-card.is-disabled .metrics-grid,
 .node-card.is-disabled .meta-grid {
-	opacity: 0.72;
+	opacity: 0.68;
 }
 
 .card-header {
@@ -205,7 +194,7 @@ function usageTone(percent: number): string {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	transition: color 0.15s ease;
+	transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .node-name:hover {
@@ -272,14 +261,14 @@ function usageTone(percent: number): string {
 	width: 100%;
 	height: 4px;
 	background: var(--bg-subtle);
-	border-radius: 9999px;
+	border-radius: var(--radius-pill);
 	overflow: hidden;
 }
 
 .usage-bar-fill {
 	height: 100%;
-	border-radius: 9999px;
-	transition: width 0.2s ease;
+	border-radius: var(--radius-pill);
+	transition: width var(--duration-normal) var(--ease-standard);
 }
 
 .usage-bar-fill.is-primary {
@@ -335,7 +324,7 @@ function usageTone(percent: number): string {
 
 .pending-pill {
 	padding: 1px 6px;
-	border-radius: 9999px;
+	border-radius: var(--radius-pill);
 	font-size: 11px;
 	font-weight: 500;
 	background: var(--tone-warning-soft);
@@ -353,6 +342,8 @@ function usageTone(percent: number): string {
 	align-items: center;
 	flex-wrap: wrap;
 	gap: 6px;
+	font-size: 12px;
+	color: var(--text-muted);
 }
 
 .state-dot {
@@ -383,6 +374,7 @@ function usageTone(percent: number): string {
 	padding: 8px 10px;
 	border-radius: var(--radius-sm);
 	background: var(--tone-danger-soft);
+	border: 1px solid var(--tone-danger-border);
 	color: var(--tone-danger-text);
 	font-size: 12px;
 	line-height: 1.45;
@@ -395,7 +387,7 @@ function usageTone(percent: number): string {
 
 .card-actions {
 	margin-top: auto;
-	padding-top: 12px;
+	padding-top: 10px;
 	border-top: 1px solid var(--border-subtle);
 	display: flex;
 	align-items: center;

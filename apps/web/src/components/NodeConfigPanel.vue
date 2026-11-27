@@ -8,6 +8,7 @@ import { useI18n } from '../i18n';
 import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
+import JsonDiffViewer from './JsonDiffViewer.vue';
 import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps<{
@@ -172,6 +173,18 @@ function fillDefaultTemplate(): void {
 	jsonInput.value = JSON.stringify(buildDefaultTemplate(), null, 2);
 }
 
+function formatJsonInput(): void {
+	try {
+		const parsed = JSON.parse(jsonInput.value);
+		jsonInput.value = JSON.stringify(parsed, null, 2);
+		jsonError.value = '';
+		showSuccess(t('nodeConfig.publish.jsonFormatted'));
+	} catch (error) {
+		jsonError.value =
+			error instanceof Error ? t('nodeConfig.publish.jsonErrorWithReason', { message: error.message }) : t('nodeConfig.publish.jsonError');
+	}
+}
+
 const { running: publishing, run: runPublish } = useAsyncAction(
 	async () => {
 		let parsed: unknown;
@@ -235,10 +248,10 @@ defineExpose({ reload: loadConfigs });
 </script>
 
 <template>
-	<el-card shadow="never" class="section">
+	<el-card shadow="never" class="ui-section">
 		<template #header>
-			<div class="card-header">
-				<span class="card-title">{{ t('nodeConfig.title') }}</span>
+			<div class="ui-card-header">
+				<span class="ui-card-title">{{ t('nodeConfig.title') }}</span>
 				<div class="header-actions">
 					<el-button :loading="loading" @click="loadConfigs">{{ t('nodeConfig.refreshList') }}</el-button>
 					<el-button type="primary" @click="openPublish">{{ t('nodeConfig.publishNew') }}</el-button>
@@ -248,7 +261,9 @@ defineExpose({ reload: loadConfigs });
 
 		<el-table v-loading="loading" :data="configs" :empty-text="t('nodeConfig.empty')">
 			<el-table-column :label="t('nodeConfig.columns.version')" width="90">
-				<template #default="{ row }">v{{ row.version }}</template>
+				<template #default="{ row }">
+					<span class="tnum">v{{ row.version }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column :label="t('common.status')" width="130">
 				<template #default="{ row }">
@@ -257,15 +272,19 @@ defineExpose({ reload: loadConfigs });
 			</el-table-column>
 			<el-table-column :label="t('nodeConfig.columns.sha256')" min-width="180">
 				<template #default="{ row }">
-					<span class="mono">{{ row.definition_sha256.slice(0, 12) }}…</span>
+					<span class="mono sha-prefix">{{ row.definition_sha256.slice(0, 12) }}…</span>
 					<el-button link type="primary" @click="copyText(row.definition_sha256)">{{ t('common.copy') }}</el-button>
 				</template>
 			</el-table-column>
 			<el-table-column :label="t('nodeConfig.columns.publishedAt')" min-width="165">
-				<template #default="{ row }">{{ formatTimestamp(row.created_at) }}</template>
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.created_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column :label="t('nodeConfig.columns.appliedAt')" min-width="165">
-				<template #default="{ row }">{{ formatTimestamp(row.applied_at) }}</template>
+				<template #default="{ row }">
+					<span class="tnum">{{ formatTimestamp(row.applied_at) }}</span>
+				</template>
 			</el-table-column>
 			<el-table-column :label="t('nodeConfig.columns.error')" min-width="200" show-overflow-tooltip>
 				<template #default="{ row }">{{ row.last_error ?? '—' }}</template>
@@ -285,14 +304,22 @@ defineExpose({ reload: loadConfigs });
 		</div>
 	</el-card>
 
-	<el-dialog v-model="publishVisible" :title="t('nodeConfig.publish.title')" width="760px" :close-on-click-modal="false" destroy-on-close>
+	<el-dialog v-model="publishVisible" :title="t('nodeConfig.publish.title')" width="780px" :close-on-click-modal="false" destroy-on-close>
 		<div class="editor-toolbar">
 			<el-button size="small" :disabled="configs.length === 0" @click="fillFromLatest">{{ t('nodeConfig.publish.fillLatest') }}</el-button>
 			<el-button size="small" @click="fillDefaultTemplate">{{ t('nodeConfig.publish.loadTemplate') }}</el-button>
+			<el-button size="small" @click="formatJsonInput">{{ t('nodeConfig.publish.formatJson') }}</el-button>
 			<span class="hint">{{ t('nodeConfig.publish.hint') }}</span>
 		</div>
-		<el-input v-model="jsonInput" type="textarea" :rows="18" class="json-editor" :placeholder="t('nodeConfig.publish.placeholder')" />
-		<div v-if="jsonError" class="json-error">{{ jsonError }}</div>
+		<el-input
+			v-model="jsonInput"
+			type="textarea"
+			:rows="18"
+			class="json-editor"
+			:placeholder="t('nodeConfig.publish.placeholder')"
+			@input="jsonError = ''"
+		/>
+		<div v-if="jsonError" class="json-error mono">{{ jsonError }}</div>
 		<template #footer>
 			<el-button @click="publishVisible = false">{{ t('common.cancel') }}</el-button>
 			<el-button type="primary" :loading="publishing" @click="runPublish">{{ t('nodeConfig.publish.submit') }}</el-button>
@@ -302,7 +329,7 @@ defineExpose({ reload: loadConfigs });
 	<el-dialog
 		v-model="detailVisible"
 		:title="inspecting ? t('nodeConfig.detail.titleWithVersion', { version: inspecting.version }) : t('nodeConfig.detail.title')"
-		width="920px"
+		width="940px"
 		destroy-on-close
 	>
 		<div v-if="inspecting" class="detail-meta">
@@ -313,16 +340,13 @@ defineExpose({ reload: loadConfigs });
 				t('nodeConfig.detail.errorPrefix', { error: inspecting.last_error })
 			}}</span>
 		</div>
-		<div class="compare-grid" :class="{ single: !compareTarget }">
-			<div>
-				<div class="pane-title">{{ t('nodeConfig.detail.versionPane', { version: inspecting?.version ?? '' }) }}</div>
-				<pre class="json-preview">{{ formattedInspectJson }}</pre>
-			</div>
-			<div v-if="compareTarget">
-				<div class="pane-title">{{ t('nodeConfig.detail.activePane', { version: compareTarget.version }) }}</div>
-				<pre class="json-preview">{{ formattedCompareJson }}</pre>
-			</div>
-		</div>
+		<JsonDiffViewer
+			v-if="inspecting"
+			:left-title="t('nodeConfig.detail.versionPane', { version: inspecting.version })"
+			:left-text="formattedInspectJson"
+			:right-title="compareTarget ? t('nodeConfig.detail.activePane', { version: compareTarget.version }) : undefined"
+			:right-text="compareTarget ? formattedCompareJson : undefined"
+		/>
 		<template #footer>
 			<el-button @click="detailVisible = false">{{ t('common.close') }}</el-button>
 		</template>
@@ -330,28 +354,12 @@ defineExpose({ reload: loadConfigs });
 </template>
 
 <style scoped>
-.section {
-	margin-bottom: 16px;
-}
-
-.card-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-}
-
-.card-title {
-	font-size: 14px;
-	font-weight: 600;
-}
-
 .header-actions {
 	display: flex;
 	gap: 8px;
 }
 
-.mono {
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.sha-prefix {
 	font-size: 12px;
 	margin-right: 6px;
 }
@@ -376,7 +384,7 @@ defineExpose({ reload: loadConfigs });
 }
 
 .json-editor :deep(textarea) {
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--font-mono);
 	font-size: 12px;
 	line-height: 1.5;
 }
@@ -384,7 +392,7 @@ defineExpose({ reload: loadConfigs });
 .json-error {
 	margin-top: 8px;
 	font-size: 12px;
-	color: var(--tone-danger);
+	color: var(--tone-danger-text);
 }
 
 .detail-meta {
@@ -397,37 +405,6 @@ defineExpose({ reload: loadConfigs });
 }
 
 .error-text {
-	color: var(--tone-danger);
-}
-
-.compare-grid {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 12px;
-}
-
-.compare-grid.single {
-	grid-template-columns: 1fr;
-}
-
-.pane-title {
-	margin-bottom: 6px;
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--text-secondary);
-}
-
-.json-preview {
-	margin: 0;
-	padding: 12px;
-	max-height: 460px;
-	overflow: auto;
-	background: var(--bg-muted);
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	font-size: 12px;
-	line-height: 1.45;
-	color: var(--text-primary);
+	color: var(--tone-danger-text);
 }
 </style>

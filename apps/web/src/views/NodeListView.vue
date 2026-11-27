@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CreateNodeEnrollmentTokenRequest, Node, NodeEnrollmentToken, NodeStatus } from '@zako/contracts';
+import type { Node, NodeEnrollmentTokenStatus, NodeStatus } from '@zako/contracts';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
@@ -15,6 +15,7 @@ import { useAsyncResource } from '../composables/useAsyncResource';
 import { usePolling } from '../composables/usePolling';
 import { nodeStatusDescriptor } from '../domain/status';
 import { useI18n } from '../i18n';
+import { copyText } from '../utils/clipboard';
 import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatDuration, formatPercent, formatTimestamp } from '../utils/format';
 
@@ -26,23 +27,15 @@ const statusFilter = ref<'all' | NodeStatus>('all');
 const sortBy = ref<SortKey>('status');
 const viewMode = ref<'card' | 'table'>('card');
 
-const enrollCreateVisible = ref(false);
-const enrollResultVisible = ref(false);
-const enrollListVisible = ref(false);
-const enrollToken = ref('');
-const enrollTokens = ref<NodeEnrollmentToken[]>([]);
-const enrollTokensLoading = ref(false);
-const enrollForm = ref<{
-	name_prefix: string;
-	heartbeat_interval_seconds: number;
-}>({
-	name_prefix: '',
-	heartbeat_interval_seconds: 300,
-});
+const deployDialogVisible = ref(false);
+const tokenStatusLoading = ref(false);
+const tokenStatus = ref<NodeEnrollmentTokenStatus>({ configured: false, rotated_at: null });
+const rotatedToken = ref('');
 
 const panelOrigin = computed(() => (typeof window !== 'undefined' ? window.location.origin : 'https://panel.example.com'));
-const enrollCommand = computed(
-	() => `curl -fsSL ${panelOrigin.value}/dl/agent/install.sh | sudo bash -s -- --panel ${panelOrigin.value} --token ${enrollToken.value}`,
+const deployCommand = computed(
+	() =>
+		`curl -fsSL ${panelOrigin.value}/dl/agent/install.sh | sudo bash -s -- --panel ${panelOrigin.value} --token ${rotatedToken.value || '<ENROLLMENT_TOKEN>'}`,
 );
 
 const {
@@ -115,72 +108,37 @@ const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(reload, 30_00
 	initialUpdatedAt: () => updatedAt.value,
 });
 
-function openEnrollCreate(): void {
-	enrollForm.value = {
-		name_prefix: '',
-		heartbeat_interval_seconds: 300,
-	};
-	enrollCreateVisible.value = true;
-}
-
-const createEnrollAction = useAsyncAction(
-	async () => {
-		const payload: CreateNodeEnrollmentTokenRequest = {
-			heartbeat_interval_seconds: enrollForm.value.heartbeat_interval_seconds,
-			ttl_seconds: 86_400,
-			...(enrollForm.value.name_prefix.trim() ? { name_prefix: enrollForm.value.name_prefix.trim() } : {}),
-		};
-		const result = await nodesApi.createEnrollmentToken(payload);
-		enrollCreateVisible.value = false;
-		enrollToken.value = result.token;
-		enrollResultVisible.value = true;
-		showSuccess(t('nodes.enroll.generatedSuccess'));
-	},
-	{ onError: (error) => showError(error, t('nodes.enroll.createFailed')) },
-);
-
-async function loadEnrollmentTokens(): Promise<void> {
-	enrollTokensLoading.value = true;
+async function openDeployDialog(): Promise<void> {
+	rotatedToken.value = '';
+	deployDialogVisible.value = true;
+	tokenStatusLoading.value = true;
 	try {
-		const page = await nodesApi.listEnrollmentTokens();
-		enrollTokens.value = page.items;
+		tokenStatus.value = await nodesApi.getEnrollmentToken();
 	} catch (error) {
-		showError(error, t('nodes.enroll.listLoadFailed'));
+		showError(error, t('nodes.enroll.loadFailed'));
 	} finally {
-		enrollTokensLoading.value = false;
+		tokenStatusLoading.value = false;
 	}
 }
 
-async function openEnrollList(): Promise<void> {
-	enrollListVisible.value = true;
-	await loadEnrollmentTokens();
-}
-
-const revokeEnrollAction = useAsyncAction(
-	async (token: NodeEnrollmentToken) => {
-		await nodesApi.revokeEnrollmentToken(token.id);
-		showSuccess(t('nodes.enroll.revokeSuccess'));
-		await loadEnrollmentTokens();
+const rotateTokenAction = useAsyncAction(
+	async () => {
+		const wasConfigured = tokenStatus.value.configured;
+		const result = await nodesApi.rotateEnrollmentToken();
+		rotatedToken.value = result.token;
+		tokenStatus.value = { configured: true, rotated_at: result.rotated_at };
+		showSuccess(t(wasConfigured ? 'nodes.enroll.rotatedSuccess' : 'nodes.enroll.generatedSuccess'));
 	},
-	{ onError: (error) => showError(error, t('nodes.enroll.revokeFailed')) },
+	{ onError: (error) => showError(error, t('nodes.enroll.rotateFailed')) },
 );
 
-async function revokeEnrollToken(token: NodeEnrollmentToken): Promise<void> {
-	if (!(await confirmAction(t('nodes.enroll.revokeConfirm')))) return;
-	await revokeEnrollAction.runFor(token.id, token);
+async function rotateEnrollmentToken(): Promise<void> {
+	if (tokenStatus.value.configured && !(await confirmAction(t('nodes.enroll.rotateConfirm')))) return;
+	await rotateTokenAction.run();
 }
 
-function enrollStatusTag(status: NodeEnrollmentToken['status']): { label: string; type: 'success' | 'info' | 'warning' | 'danger' } {
-	switch (status) {
-		case 'active':
-			return { label: t('status.enrollment.active'), type: 'success' };
-		case 'used':
-			return { label: t('status.enrollment.used'), type: 'info' };
-		case 'expired':
-			return { label: t('status.enrollment.expired'), type: 'warning' };
-		case 'revoked':
-			return { label: t('status.enrollment.revoked'), type: 'danger' };
-	}
+function resetDeployDialog(): void {
+	rotatedToken.value = '';
 }
 
 const deleteDialogVisible = ref(false);
@@ -280,8 +238,7 @@ async function submitDeleteNode(): Promise<void> {
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
 		</el-button>
-		<el-button @click="openEnrollList">{{ t('nodes.enrollmentTokens') }}</el-button>
-		<el-button type="primary" @click="openEnrollCreate">
+		<el-button type="primary" @click="openDeployDialog">
 			<AppIcon name="plus" :size="14" class="btn-icon" />
 			<span>{{ t('nodes.deployNode') }}</span>
 		</el-button>
@@ -354,86 +311,71 @@ async function submitDeleteNode(): Promise<void> {
 		</template>
 		<el-card v-else-if="!loading" shadow="never" class="empty-card">
 			<el-empty :description="nodes.length === 0 ? t('nodes.empty') : t('nodes.emptyFiltered')">
-				<el-button v-if="nodes.length === 0" type="primary" @click="openEnrollCreate">{{ t('nodes.deployNode') }}</el-button>
+				<el-button v-if="nodes.length === 0" type="primary" @click="openDeployDialog">{{ t('nodes.deployNode') }}</el-button>
 				<el-button v-else @click="clearFilters">{{ t('nodes.clearFilters') }}</el-button>
 			</el-empty>
 		</el-card>
 	</div>
 
 	<el-dialog
-		v-model="enrollCreateVisible"
-		:title="t('nodes.enroll.createTitle')"
-		width="560px"
-		:close-on-click-modal="false"
-		destroy-on-close
-	>
-		<el-form :model="enrollForm" label-width="160px">
-			<el-form-item :label="t('nodes.enroll.namePrefix')">
-				<el-input v-model="enrollForm.name_prefix" :placeholder="t('nodes.enroll.namePrefixPlaceholder')" />
-			</el-form-item>
-			<el-form-item :label="t('nodes.enroll.heartbeatIntervalSec')">
-				<el-input-number v-model="enrollForm.heartbeat_interval_seconds" :min="60" :max="900" :step="30" />
-			</el-form-item>
-		</el-form>
-		<template #footer>
-			<el-button @click="enrollCreateVisible = false">{{ t('common.cancel') }}</el-button>
-			<el-button type="primary" :loading="createEnrollAction.isRunning('create')" @click="createEnrollAction.runFor('create')">
-				{{ t('nodes.enroll.generateCommand') }}
-			</el-button>
-		</template>
-	</el-dialog>
-
-	<el-dialog
-		v-model="enrollResultVisible"
-		:title="t('nodes.enroll.resultTitle')"
+		v-model="deployDialogVisible"
+		:title="t('nodes.enroll.title')"
 		width="680px"
 		:close-on-click-modal="false"
 		destroy-on-close
+		@closed="resetDeployDialog"
 	>
-		<el-alert type="info" :closable="false" show-icon class="dialog-alert">
-			{{ t('nodes.enroll.resultAlert') }}
-		</el-alert>
-		<CodeBlock :code="enrollCommand" label="bash" wrap />
-		<template #footer>
-			<el-button type="primary" @click="enrollResultVisible = false">{{ t('common.close') }}</el-button>
-		</template>
-	</el-dialog>
+		<div v-loading="tokenStatusLoading" class="deploy-dialog-body">
+			<template v-if="!tokenStatus.configured && !rotatedToken">
+				<el-alert type="info" :closable="false" show-icon class="dialog-alert" :title="t('nodes.enroll.unconfiguredHint')" />
+			</template>
+			<template v-else>
+				<el-alert
+					v-if="rotatedToken"
+					type="success"
+					:closable="false"
+					show-icon
+					class="dialog-alert"
+					:title="t('nodes.enroll.rotatedHint')"
+				/>
+				<template v-else>
+					<p class="deploy-status">
+						{{
+							tokenStatus.rotated_at !== null
+								? t('nodes.enroll.configuredStatus', { time: formatTimestamp(tokenStatus.rotated_at) })
+								: t('nodes.enroll.configuredStatusNoTime')
+						}}
+					</p>
+					<el-alert type="info" :closable="false" show-icon class="dialog-alert" :title="t('nodes.enroll.configuredHint')" />
+				</template>
 
-	<el-dialog v-model="enrollListVisible" :title="t('nodes.enroll.listTitle')" width="780px" destroy-on-close>
-		<el-table v-loading="enrollTokensLoading" :data="enrollTokens" :empty-text="t('nodes.enroll.listEmpty')">
-			<el-table-column :label="t('common.status')" width="110">
-				<template #default="{ row }">
-					<StatusBadge :label="enrollStatusTag(row.status).label" :type="enrollStatusTag(row.status).type" />
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.enroll.colPrefix')" width="120">
-				<template #default="{ row }">{{ row.name_prefix ?? '—' }}</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.enroll.colHeartbeatInterval')" min-width="140">
-				<template #default="{ row }">
-					<span class="tnum">{{ row.heartbeat_interval_seconds }}s</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('nodes.enroll.colExpiresAt')" width="180">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.actions')" width="100" fixed="right">
-				<template #default="{ row }">
-					<el-button
-						v-if="row.status === 'active'"
-						link
-						type="danger"
-						:loading="revokeEnrollAction.isRunning(row.id)"
-						@click="revokeEnrollToken(row as NodeEnrollmentToken)"
-					>
-						{{ t('nodes.actions.revoke') }}
-					</el-button>
-					<span v-else>—</span>
-				</template>
-			</el-table-column>
-		</el-table>
+				<div v-if="rotatedToken" class="token-row">
+					<span class="token-label">{{ t('nodes.enroll.tokenLabel') }}</span>
+					<el-input :model-value="rotatedToken" readonly class="mono">
+						<template #append>
+							<el-button @click="copyText(rotatedToken)">{{ t('common.copy') }}</el-button>
+						</template>
+					</el-input>
+				</div>
+
+				<CodeBlock :code="deployCommand" label="bash" wrap />
+				<p class="deploy-note">{{ t('nodes.enroll.adoptNote') }}</p>
+			</template>
+		</div>
+		<template #footer>
+			<template v-if="!tokenStatus.configured && !rotatedToken">
+				<el-button @click="deployDialogVisible = false">{{ t('common.cancel') }}</el-button>
+				<el-button type="primary" :loading="rotateTokenAction.running.value" @click="rotateEnrollmentToken">
+					{{ t('nodes.enroll.generate') }}
+				</el-button>
+			</template>
+			<template v-else>
+				<el-button type="warning" plain :loading="rotateTokenAction.running.value" @click="rotateEnrollmentToken">
+					{{ t('nodes.enroll.rotate') }}
+				</el-button>
+				<el-button type="primary" @click="deployDialogVisible = false">{{ t('common.close') }}</el-button>
+			</template>
+		</template>
 	</el-dialog>
 
 	<el-dialog v-model="deleteDialogVisible" :title="t('nodes.delete.title')" width="500px" destroy-on-close>
@@ -534,6 +476,36 @@ async function submitDeleteNode(): Promise<void> {
 
 .dialog-alert {
 	margin-bottom: 12px;
+}
+
+.deploy-dialog-body {
+	min-height: 72px;
+}
+
+.deploy-status {
+	margin: 0 0 10px;
+	font-size: 13px;
+	color: var(--text-secondary);
+}
+
+.token-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.token-label {
+	flex: none;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.deploy-note {
+	margin: 10px 0 0;
+	font-size: 12.5px;
+	color: var(--text-muted);
 }
 
 .delete-confirm {

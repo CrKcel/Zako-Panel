@@ -74,7 +74,7 @@ node upgrades the binary and systemd units in place.
 
 Options:
   --panel <url>        Control plane HTTPS URL for node enrollment
-  --token <token>      One-time enrollment token issued by the panel
+  --token <token>      Reusable enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)
   --xray-mirror <url>  Override Xray-core download base URL
@@ -137,7 +137,7 @@ if [[ -n "${PANEL_URL}" && -z "${ENROLL_TOKEN}" ]] || [[ -z "${PANEL_URL}" && -n
 fi
 if [[ -z "${PANEL_URL}" && -z "${ENROLL_TOKEN}" ]]; then
 	if [[ ! -s "${TOKEN_PATH}" || ! -s "${CONFIG_PATH}" ]]; then
-		die "--panel and --token are required for new node deployment (generate a one-time deployment command in the panel)"
+		die "--panel and --token are required for new node deployment (get or rotate the deployment token in the panel)"
 	fi
 fi
 

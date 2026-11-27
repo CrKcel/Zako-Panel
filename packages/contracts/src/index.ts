@@ -54,8 +54,8 @@ export type AgentEnrollRequest = Schemas['AgentEnrollRequest'];
 export type AgentEnrollResponse = Schemas['AgentEnrollResponse'];
 
 export type RequestNodeAgentUpdateRequest = Schemas['RequestNodeAgentUpdateRequest'];
-export type NodeEnrollmentToken = Schemas['NodeEnrollmentToken'];
-export type CreateNodeEnrollmentTokenRequest = Schemas['CreateNodeEnrollmentTokenRequest'];
+export type NodeEnrollmentTokenStatus = Schemas['NodeEnrollmentTokenStatus'];
+export type RotateNodeEnrollmentTokenResponse = Schemas['RotateNodeEnrollmentTokenResponse'];
 export type UpdateNodeRequest = Schemas['UpdateNodeRequest'];
 export type CreateEndpointRequest = Schemas['CreateEndpointRequest'];
 export type UpdateEndpointRequest = Schemas['UpdateEndpointRequest'];

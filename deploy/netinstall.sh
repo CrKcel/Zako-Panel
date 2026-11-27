@@ -38,7 +38,7 @@ already-enrolled node, omit --panel and --token to upgrade in place.
 Options:
   --base-url <url>     Override the agent download base URL
   --panel <url>        Control plane HTTPS URL for node enrollment
-  --token <token>      One-time enrollment token issued by the panel
+  --token <token>      Reusable enrollment token issued by the panel
   --name <name>        Node name (defaults to hostname)
   --host <host>        Public IP or domain (auto-detected if omitted)
   --xray-mirror <url>  Override Xray-core download base URL

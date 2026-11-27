@@ -233,12 +233,6 @@ export const subscriptionEncodingSchema = z.object({
 	encoding: z.enum(['base64', 'plain']).default('base64'),
 });
 
-export const createEnrollmentTokenSchema = z.object({
-	name_prefix: z.string().trim().min(1).max(32).nullable().optional(),
-	heartbeat_interval_seconds: z.number().int().min(60).max(900).optional(),
-	ttl_seconds: z.number().int().min(300).max(604_800).optional(),
-});
-
 const agentEnrollEndpointSchema = z.object({
 	// The agent reports inbound tags, which Xray does not length-limit. The service
 	// truncates to the panel's endpoint-name limit.

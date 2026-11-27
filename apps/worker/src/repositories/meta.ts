@@ -1,11 +1,33 @@
+import { sqlPlaceholders } from '../lib/sql';
+
 export const META_KEYS = {
 	usersVersion: 'users_ver',
 	defaultSubscriberId: 'default_subscriber_id',
+	enrollmentTokenHash: 'enrollment_token_hash',
+	enrollmentTokenRotatedAt: 'enrollment_token_rotated_at',
 } as const;
 
 export async function getMetaValue(db: D1Database, key: string): Promise<string | null> {
 	const row = await db.prepare('SELECT v FROM meta WHERE k = ? LIMIT 1').bind(key).first<{ v: string }>();
 	return row?.v ?? null;
+}
+
+export async function getMetaValues(db: D1Database, keys: string[]): Promise<Map<string, string>> {
+	if (keys.length === 0) return new Map();
+	const rows = await db
+		.prepare(`SELECT k, v FROM meta WHERE k IN (${sqlPlaceholders(keys.length)})`)
+		.bind(...keys)
+		.all<{ k: string; v: string }>();
+	return new Map(rows.results.map((row) => [row.k, row.v]));
+}
+
+export function upsertMetaStatement(db: D1Database, key: string, value: string): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO meta (k, v) VALUES (?, ?)
+			 ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
+		)
+		.bind(key, value);
 }
 
 export async function getUsersVersion(db: D1Database): Promise<number> {

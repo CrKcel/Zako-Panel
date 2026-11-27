@@ -1,7 +1,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../src/lib/errors';
-import { createEnrollmentToken, enrollNode } from '../src/services/enrollment-service';
+import { enrollNode, rotateEnrollmentToken } from '../src/services/enrollment-service';
 import {
 	createEndpoint,
 	disableEndpoint,
@@ -28,8 +28,8 @@ import {
 } from './helpers';
 
 async function enrollTestNode(name: string) {
-	const createdToken = await createEnrollmentToken(env.DB, {}, 'admin@example.com');
-	return enrollNode(env.DB, `Bearer ${createdToken.token}`, {
+	const rotated = await rotateEnrollmentToken(env.DB, 'admin@example.com');
+	return enrollNode(env.DB, `Bearer ${rotated.token}`, {
 		name,
 		host: '203.0.113.10',
 		endpoints: [

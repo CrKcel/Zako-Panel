@@ -220,7 +220,7 @@ func New(baseURL, token string, client *http.Client) (*Reporter, error) {
 	return &Reporter{baseURL: parsed, token: token, client: client}, nil
 }
 
-// EnrollRequest registers a new node using a one-time enrollment token and the
+// EnrollRequest registers a new node using the panel's enrollment token and the
 // endpoints the node already serves.
 type EnrollRequest struct {
 	Name         string           `json:"name"`
@@ -298,7 +298,7 @@ type EnrollResponse struct {
 	Endpoints                []EnrolledEndpoint `json:"endpoints"`
 }
 
-// Enroll registers a new node with a one-time enrollment token and returns the
+// Enroll registers a new node with the panel's enrollment token and returns the
 // permanent agent token and assigned node configuration.
 func (r *Reporter) Enroll(ctx context.Context, req *EnrollRequest) (*EnrollResponse, error) {
 	if req == nil {

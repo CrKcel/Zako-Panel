@@ -10,7 +10,7 @@ import { usersRoutes } from './users';
 
 export const agentRoutes = new Hono<AppEnv>();
 
-// Enrollment authenticates with a one-time enrollment token rather than a node agent token.
+// Enrollment authenticates with the panel's reusable enrollment token rather than a node agent token.
 agentRoutes.route('/enroll', enrollRoutes);
 
 agentRoutes.use('*', agentAuth);

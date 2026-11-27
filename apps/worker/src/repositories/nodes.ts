@@ -86,6 +86,11 @@ export async function findNodeById(db: D1Database, nodeId: string): Promise<Node
 	return row ?? null;
 }
 
+export async function findNodeByName(db: D1Database, name: string): Promise<{ id: string } | null> {
+	const row = await db.prepare('SELECT id FROM nodes WHERE name = ? LIMIT 1').bind(name).first<{ id: string }>();
+	return row ?? null;
+}
+
 export async function findNodeRuntimeById(db: D1Database, nodeId: string): Promise<NodeRuntimeRow | null> {
 	const row = await db
 		.prepare(

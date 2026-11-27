@@ -361,25 +361,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/node-enrollment-tokens": {
+    "/api/v1/admin/node-enrollment-token": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List one-time node enrollment tokens */
-        get: operations["listNodeEnrollmentTokens"];
+        /** Get the panel-wide reusable node enrollment token status */
+        get: operations["getNodeEnrollmentToken"];
         put?: never;
-        /** Create a one-time node enrollment token */
-        post: operations["createNodeEnrollmentToken"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/node-enrollment-tokens/{tokenId}": {
+    "/api/v1/admin/node-enrollment-token/rotate": {
         parameters: {
             query?: never;
             header?: never;
@@ -388,9 +387,9 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
-        /** Revoke an unused node enrollment token */
-        delete: operations["revokeNodeEnrollmentToken"];
+        /** Generate or rotate the panel-wide reusable node enrollment token */
+        post: operations["rotateNodeEnrollmentToken"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -405,7 +404,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enroll a new node using a one-time enrollment token */
+        /** Enroll a new node using the reusable panel enrollment token */
         post: operations["enrollAgent"];
         delete?: never;
         options?: never;
@@ -967,25 +966,14 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        NodeEnrollmentToken: {
-            id: string;
-            name_prefix: string | null;
-            heartbeat_interval_seconds: number;
-            created_by: string;
-            expires_at: number;
-            used_at: number | null;
-            used_node_id: string | null;
-            revoked_at: number | null;
-            /** @enum {string} */
-            status: "active" | "used" | "expired" | "revoked";
-            created_at: number;
+        NodeEnrollmentTokenStatus: {
+            configured: boolean;
+            rotated_at: number | null;
         };
-        CreateNodeEnrollmentTokenRequest: {
-            name_prefix?: string | null;
-            /** @default 300 */
-            heartbeat_interval_seconds: number;
-            /** @default 86400 */
-            ttl_seconds: number;
+        RotateNodeEnrollmentTokenResponse: {
+            /** @description Plaintext reusable enrollment token returned once upon creation or rotation. */
+            token: string;
+            rotated_at: number;
         };
         AgentEnrollRequest: {
             name: string;
@@ -2069,29 +2057,24 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
-    listNodeEnrollmentTokens: {
+    getNodeEnrollmentToken: {
         parameters: {
-            query?: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Enrollment token page */
+            /** @description Enrollment token status */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        data: {
-                            items: components["schemas"]["NodeEnrollmentToken"][];
-                        };
-                        meta: components["schemas"]["ListMeta"];
+                        data: components["schemas"]["NodeEnrollmentTokenStatus"];
+                        meta: components["schemas"]["Meta"];
                     };
                 };
             };
@@ -2099,62 +2082,29 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    createNodeEnrollmentToken: {
+    rotateNodeEnrollmentToken: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateNodeEnrollmentTokenRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Enrollment token created */
-            201: {
+            /** @description Rotated enrollment token */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        data: {
-                            enrollment_token: components["schemas"]["NodeEnrollmentToken"];
-                            /** @description Plaintext one-time enrollment token returned once. */
-                            token: string;
-                        };
+                        data: components["schemas"]["RotateNodeEnrollmentTokenResponse"];
                         meta: components["schemas"]["Meta"];
                     };
                 };
             };
-            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    revokeNodeEnrollmentToken: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tokenId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Enrollment token revoked */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     enrollAgent: {

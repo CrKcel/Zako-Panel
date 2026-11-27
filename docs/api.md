@@ -36,7 +36,7 @@
 
 - **节点与端点**：`/nodes`（含 `DELETE /nodes/{nodeId}` 优雅卸载或强制删除）、`/nodes/{nodeId}/endpoints`、`/nodes/{nodeId}/status`、`/nodes/{nodeId}/clients`
 - **端点协议**：创建时用 `protocol` 指定协议（`vless-reality`、`vmess`、`trojan`、`shadowsocks`、`hysteria2`），参数按协议校验，不匹配返回 `422`；协议创建后不可修改，`PATCH` 只接受该协议的参数。
-- **一次性节点注册令牌**：`/node-enrollment-tokens`（默认 24 小时有效，用完即作废）
+- **全局节点注册令牌**：`/node-enrollment-token`（`GET` 查询配置状态，`POST /node-enrollment-token/rotate` 生成或轮换，可跨节点重复使用）
 - **节点配置版本**：`/nodes/{nodeId}/configs`（下发、查看 diff、基于历史版本生成新版本回滚）
 - **订阅档案与预览**：`/profiles`、`/profiles/{profileId}/preview`
 - **订阅链接**：`/subscriptions`（创建、轮换、撤销）
@@ -53,11 +53,11 @@
 
 ### 2.2 Agent 通信 API（`/api/v1/agent/*`）
 
-常规请求携带 `Authorization: Bearer <node_id>.<secret>`；首次节点注册携带一次性令牌 `Authorization: Bearer <token_id>.<secret>`。
+常规请求携带 `Authorization: Bearer <node_id>.<secret>`；首次节点注册携带面板注册令牌 `Authorization: Bearer <enrollment_token>`。
 
 | 端点 | 用途 | 关键机制 |
 | --- | --- | --- |
-| `POST /agent/enroll` | 一键安装时自动注册节点 | 校验一次性 Token 并原子核销，按节点上报的接入端点创建节点与 Endpoint，返回永久 `agent_token` |
+| `POST /agent/enroll` | 一键安装时自动注册节点 | 校验全局可复用注册 Token 哈希，按节点上报的接入端点创建节点与 Endpoint，返回该节点专属的永久 `agent_token` |
 | `POST /agent/report` | 心跳 + 流量上报 | 心跳和流量解耦（流量冲突不影响心跳落盘）；单次最多 40 个用户条目、64 KB；报表不能跨自然小时；同 `report_id` 重试哈希一致则幂等确认，内容不同返回 `409 REPORT_CONFLICT` |
 | `GET /agent/users` | 拉取当前节点有效用户 | 支持 `ETag` / `If-None-Match`，版本没变直接返回 `304 Not Modified` |
 | `GET /agent/config` | 拉取目标 Xray 配置 | 返回规范化 JSON 与 SHA-256 哈希；已是目标版本则返回 `204 No Content` |

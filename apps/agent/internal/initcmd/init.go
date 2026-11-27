@@ -1,4 +1,4 @@
-// Package initcmd implements `zako-agent init` for one-time node enrollment.
+// Package initcmd implements `zako-agent init` for node enrollment.
 //
 // Enrollment adopts the node's existing Xray configuration: the document is
 // inspected for inbounds the panel can manage, each becomes a panel endpoint with
@@ -76,7 +76,7 @@ func Run(ctx context.Context, args []string, agentVersion string, stdout io.Writ
 	opts.AgentVersion = agentVersion
 
 	fs.StringVar(&opts.PanelURL, "panel", "", "control plane HTTPS URL")
-	fs.StringVar(&opts.Token, "token", "", "one-time enrollment token from the panel")
+	fs.StringVar(&opts.Token, "token", "", "reusable panel enrollment token")
 	fs.StringVar(&opts.NodeName, "name", "", "node name (defaults to hostname)")
 	fs.StringVar(&opts.Host, "host", "", "public IP or domain for the node endpoints")
 	fs.StringVar(&opts.ConfigPath, "config", "/etc/zako-agent/config.yaml", "path to write agent config.yaml")

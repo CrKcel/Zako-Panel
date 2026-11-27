@@ -1059,19 +1059,16 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
-  /api/v1/admin/node-enrollment-tokens:
+  /api/v1/admin/node-enrollment-token:
     get:
-      operationId: listNodeEnrollmentTokens
+      operationId: getNodeEnrollmentToken
       tags: [admin]
-      summary: List one-time node enrollment tokens
+      summary: Get the panel-wide reusable node enrollment token status
       security:
         - AccessJwt: []
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Enrollment token page
+          description: Enrollment token status
           content:
             application/json:
               schema:
@@ -1079,86 +1076,42 @@ paths:
                 required: [data, meta]
                 properties:
                   data:
-                    type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/NodeEnrollmentToken'
-                  meta:
-                    $ref: '#/components/schemas/ListMeta'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-    post:
-      operationId: createNodeEnrollmentToken
-      tags: [admin]
-      summary: Create a one-time node enrollment token
-      security:
-        - AccessJwt: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateNodeEnrollmentTokenRequest'
-      responses:
-        '201':
-          description: Enrollment token created
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: object
-                    required: [enrollment_token, token]
-                    properties:
-                      enrollment_token:
-                        $ref: '#/components/schemas/NodeEnrollmentToken'
-                      token:
-                        type: string
-                        description: Plaintext one-time enrollment token returned once.
+                    $ref: '#/components/schemas/NodeEnrollmentTokenStatus'
                   meta:
                     $ref: '#/components/schemas/Meta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-  /api/v1/admin/node-enrollment-tokens/{tokenId}:
-    delete:
-      operationId: revokeNodeEnrollmentToken
+  /api/v1/admin/node-enrollment-token/rotate:
+    post:
+      operationId: rotateNodeEnrollmentToken
       tags: [admin]
-      summary: Revoke an unused node enrollment token
+      summary: Generate or rotate the panel-wide reusable node enrollment token
       security:
         - AccessJwt: []
-      parameters:
-        - name: tokenId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
-        '204':
-          description: Enrollment token revoked
+        '200':
+          description: Rotated enrollment token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RotateNodeEnrollmentTokenResponse'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
   /api/v1/agent/enroll:
     post:
       operationId: enrollAgent
       tags: [agent]
-      summary: Enroll a new node using a one-time enrollment token
+      summary: Enroll a new node using the reusable panel enrollment token
       security:
         - AgentToken: []
       requestBody:
@@ -2442,46 +2395,23 @@ components:
         definition:
           type: object
           additionalProperties: true
-    NodeEnrollmentToken:
+    NodeEnrollmentTokenStatus:
       type: object
-      required: [id, name_prefix, heartbeat_interval_seconds, created_by, expires_at, used_at, used_node_id, revoked_at, status, created_at]
+      required: [configured, rotated_at]
       properties:
-        id:
-          type: string
-        name_prefix:
-          type: [string, 'null']
-        heartbeat_interval_seconds:
-          type: integer
-        created_by:
-          type: string
-        expires_at:
-          type: integer
-        used_at:
+        configured:
+          type: boolean
+        rotated_at:
           type: [integer, 'null']
-        used_node_id:
-          type: [string, 'null']
-        revoked_at:
-          type: [integer, 'null']
-        status:
-          type: string
-          enum: [active, used, expired, revoked]
-        created_at:
-          type: integer
-    CreateNodeEnrollmentTokenRequest:
+    RotateNodeEnrollmentTokenResponse:
       type: object
+      required: [token, rotated_at]
       properties:
-        name_prefix:
-          type: [string, 'null']
-        heartbeat_interval_seconds:
+        token:
+          type: string
+          description: Plaintext reusable enrollment token returned once upon creation or rotation.
+        rotated_at:
           type: integer
-          minimum: 60
-          maximum: 900
-          default: 300
-        ttl_seconds:
-          type: integer
-          minimum: 300
-          maximum: 604800
-          default: 86400
     AgentEnrollRequest:
       type: object
       required: [name, host, endpoints]

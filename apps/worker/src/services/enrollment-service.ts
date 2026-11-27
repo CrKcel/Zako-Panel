@@ -1,22 +1,19 @@
-import type { AgentEndpointProtocol, AgentEnrollResponse, CreateNodeEnrollmentTokenRequest, NodeEnrollmentToken } from '@zako/contracts';
+import type {
+	AgentEndpointProtocol,
+	AgentEnrollResponse,
+	NodeEnrollmentTokenStatus,
+	RotateNodeEnrollmentTokenResponse,
+} from '@zako/contracts';
 import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { sha256Hex, timingSafeEqualHex } from '../lib/hash';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
-import { generateToken, parseAgentToken } from '../lib/token';
+import { generateToken, isTokenShaped } from '../lib/token';
 import { getProtocolAdapter, isAgentProtocol } from '../protocols';
-import {
-	consumeEnrollmentToken,
-	type EnrollmentTokenRow,
-	findEnrollmentTokenById,
-	findNodeByName,
-	insertEnrollmentToken,
-	linkEnrollmentTokenNodeStatement,
-	listEnrollmentTokenRows,
-	revokeEnrollmentTokenRow,
-} from '../repositories/enrollment-tokens';
-import type { ListQuery, Paginated } from '../types';
+import { insertAuditEventStatement } from '../repositories/audit-events';
+import { getMetaValue, getMetaValues, META_KEYS, upsertMetaStatement } from '../repositories/meta';
+import { findNodeByName } from '../repositories/nodes';
 import { prepareNodeProvision, type ProvisionEndpoint } from './node-service';
 
 /**
@@ -43,77 +40,42 @@ interface ValidatedEndpoint extends ProvisionEndpoint {
 	protocol: AgentEndpointProtocol;
 }
 
-const DEFAULT_TTL_SECONDS = 86_400; // 24 hours
+const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 300;
 const MAX_ENDPOINTS = 16;
 
-function deriveStatus(row: EnrollmentTokenRow, now: number): NodeEnrollmentToken['status'] {
-	if (row.used_at !== null) return 'used';
-	if (row.revoked_at !== null) return 'revoked';
-	if (row.expires_at <= now) return 'expired';
-	return 'active';
-}
-
-function toEnrollmentToken(row: EnrollmentTokenRow, now: number): NodeEnrollmentToken {
-	return {
-		id: row.id,
-		name_prefix: row.name_prefix,
-		heartbeat_interval_seconds: row.heartbeat_interval_seconds,
-		created_by: row.created_by,
-		expires_at: row.expires_at,
-		used_at: row.used_at,
-		used_node_id: row.used_node_id,
-		revoked_at: row.revoked_at,
-		status: deriveStatus(row, now),
-		created_at: row.created_at,
-	};
-}
-
-export async function createEnrollmentToken(
-	db: D1Database,
-	input: Partial<CreateNodeEnrollmentTokenRequest>,
-	createdBy: string,
-): Promise<{ enrollment_token: NodeEnrollmentToken; token: string }> {
-	const now = nowSeconds();
-	const id = newId();
-	const secret = generateToken();
-	const tokenHash = await sha256Hex(secret);
-	const ttl = input.ttl_seconds ?? DEFAULT_TTL_SECONDS;
-	const row: EnrollmentTokenRow = {
-		id,
-		token_hash: tokenHash,
-		name_prefix: input.name_prefix ?? null,
-		heartbeat_interval_seconds: input.heartbeat_interval_seconds ?? 300,
-		created_by: createdBy,
-		expires_at: now + ttl,
-		used_at: null,
-		used_node_id: null,
-		revoked_at: null,
-		created_at: now,
-	};
-
-	await insertEnrollmentToken(db, row);
-	return {
-		enrollment_token: toEnrollmentToken(row, now),
-		token: `${id}.${secret}`,
-	};
-}
-
-export async function listEnrollmentTokens(db: D1Database, query: ListQuery): Promise<Paginated<NodeEnrollmentToken>> {
-	const rows = await listEnrollmentTokenRows(db, query.limit + 1, query.cursor);
-	const hasMore = rows.length > query.limit;
-	const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
-	const now = nowSeconds();
-	const items = pageRows.map((row) => toEnrollmentToken(row, now));
-	const last = items[items.length - 1];
-	return { items, next_cursor: hasMore && last ? last.id : null };
-}
-
-export async function revokeEnrollmentToken(db: D1Database, tokenId: string): Promise<void> {
-	const existing = await findEnrollmentTokenById(db, tokenId);
-	if (!existing) {
-		throw new AppError('NOT_FOUND', 'Enrollment token not found', 404);
+export async function getEnrollmentTokenStatus(db: D1Database): Promise<NodeEnrollmentTokenStatus> {
+	const values = await getMetaValues(db, [META_KEYS.enrollmentTokenHash, META_KEYS.enrollmentTokenRotatedAt]);
+	const hash = values.get(META_KEYS.enrollmentTokenHash);
+	const configured = Boolean(hash && hash.length > 0);
+	if (!configured) {
+		return { configured: false, rotated_at: null };
 	}
-	await revokeEnrollmentTokenRow(db, tokenId, nowSeconds());
+	const rawRotatedAt = values.get(META_KEYS.enrollmentTokenRotatedAt);
+	const parsedRotatedAt = rawRotatedAt !== undefined ? Number(rawRotatedAt) : NaN;
+	const rotatedAt = Number.isSafeInteger(parsedRotatedAt) && parsedRotatedAt >= 0 ? parsedRotatedAt : null;
+	return { configured: true, rotated_at: rotatedAt };
+}
+
+export async function rotateEnrollmentToken(db: D1Database, actorEmail?: string): Promise<RotateNodeEnrollmentTokenResponse> {
+	const now = nowSeconds();
+	const token = generateToken();
+	const tokenHash = await sha256Hex(token);
+
+	await db.batch([
+		upsertMetaStatement(db, META_KEYS.enrollmentTokenHash, tokenHash),
+		upsertMetaStatement(db, META_KEYS.enrollmentTokenRotatedAt, String(now)),
+		insertAuditEventStatement(db, {
+			id: newId(),
+			actor_email: actorEmail ?? null,
+			action: 'enrollment_token.rotate',
+			target_type: 'enrollment_token',
+			target_id: null,
+			detail_json: null,
+			created_at: now,
+		}),
+	]);
+
+	return { token, rotated_at: now };
 }
 
 /**
@@ -136,8 +98,8 @@ function uniqueEndpointNames(endpoints: EnrollEndpointInput[]): string[] {
 
 /**
  * The agent reports what the node already serves. Parameters are validated by
- * the protocol adapter so a malformed value is rejected before the token is
- * consumed and the node row is written.
+ * the protocol adapter so a malformed value is rejected before the node row is
+ * written.
  */
 function validateEndpoints(endpoints: EnrollEndpointInput[]): ValidatedEndpoint[] {
 	if (endpoints.length === 0) {
@@ -170,67 +132,55 @@ function validateEndpoints(endpoints: EnrollEndpointInput[]): ValidatedEndpoint[
 	});
 }
 
-/**
- * Validates a one-time enrollment token from `Authorization: Bearer <id>.<secret>`,
- * atomically consumes it, and provisions a new node plus the endpoints the node
- * reported, along with a default subscriber grant.
- */
 /** Truncates by code point so a name cannot be split inside a surrogate pair. */
 function truncateName(name: string, limit: number): string {
 	const points = Array.from(name);
 	return points.length > limit ? points.slice(0, limit).join('') : name;
 }
 
+/**
+ * Validates the panel-wide reusable enrollment token from
+ * `Authorization: Bearer <token>` and provisions a new node plus the endpoints
+ * the node reported, along with a default subscriber grant.
+ */
 export async function enrollNode(
 	db: D1Database,
 	authorizationHeader: string | undefined,
 	input: EnrollInput,
 ): Promise<AgentEnrollResponse> {
 	const bearer = authorizationHeader?.startsWith('Bearer ') ? authorizationHeader.slice('Bearer '.length).trim() : undefined;
-	const parsed = parseAgentToken(bearer);
-	if (!parsed) {
+	if (!bearer || !isTokenShaped(bearer)) {
 		throw new AppError('UNAUTHORIZED', 'Invalid enrollment token', 401);
 	}
 
-	const row = await findEnrollmentTokenById(db, parsed.nodeId);
-	if (!row) {
+	const storedHash = await getMetaValue(db, META_KEYS.enrollmentTokenHash);
+	if (!storedHash) {
 		throw new AppError('UNAUTHORIZED', 'Invalid enrollment token', 401);
 	}
-	const presentedHash = await sha256Hex(parsed.secret);
-	if (!timingSafeEqualHex(presentedHash, row.token_hash)) {
+	const presentedHash = await sha256Hex(bearer);
+	if (!timingSafeEqualHex(presentedHash, storedHash)) {
 		throw new AppError('UNAUTHORIZED', 'Invalid enrollment token', 401);
 	}
 
-	const now = nowSeconds();
-	if (row.revoked_at !== null || row.used_at !== null || row.expires_at <= now) {
-		throw new AppError('UNAUTHORIZED', 'Enrollment token is expired or already used', 401);
-	}
-
-	const nodeName = truncateName(row.name_prefix ? `${row.name_prefix}-${input.name}` : input.name, 64);
-	// Pre-check name uniqueness before consuming the one-time token so a naming
-	// conflict does not burn the operator's enrollment token.
+	const nodeName = truncateName(input.name, 64);
 	if (await findNodeByName(db, nodeName)) {
 		throw new AppError('CONFLICT', 'Node name already exists', 409);
 	}
 
 	const endpoints = validateEndpoints(input.endpoints).map((endpoint) => ({ ...endpoint, host: input.host }));
 	const nodeId = newId();
-
-	const consumed = await consumeEnrollmentToken(db, row.id, now);
-	if (!consumed) {
-		throw new AppError('UNAUTHORIZED', 'Enrollment token is expired or already used', 401);
-	}
+	const now = nowSeconds();
 
 	const { statements, agentToken } = await prepareNodeProvision(db, {
 		nodeId,
 		name: nodeName,
-		heartbeatInterval: row.heartbeat_interval_seconds,
+		heartbeatInterval: DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
 		endpoints,
 		now,
 	});
 
 	try {
-		await db.batch([...statements, linkEnrollmentTokenNodeStatement(db, row.id, nodeId)]);
+		await db.batch(statements);
 	} catch (error) {
 		if (isUniqueConstraintError(error)) {
 			throw new AppError('CONFLICT', 'Node name already exists', 409);
@@ -241,7 +191,7 @@ export async function enrollNode(
 	return {
 		node_id: nodeId,
 		agent_token: agentToken,
-		heartbeat_interval_seconds: row.heartbeat_interval_seconds,
+		heartbeat_interval_seconds: DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
 		endpoints: endpoints.map((endpoint) => ({
 			id: endpoint.id,
 			name: endpoint.name,

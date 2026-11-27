@@ -40,13 +40,13 @@ npx wrangler d1 execute zako-panel --remote --file=bootstrap.sql
 
 节点支持 **Debian 12 / 13**，只需预先有 `curl`（或 `wget`）、`tar` 和 CA 证书。脚本会自动下载缺失的 Xray-core（支持 `--xray-mirror` 指定镜像）、生成缺失的 REALITY 私钥、创建低权限用户 `zako-agent` 并注册节点。
 
-1. 在管理后台 **「节点列表」** 点击 **「一键部署节点」**，填写名称前缀（可选）和心跳间隔，拿到一次性注册 Token（24 小时有效，用完即失效）。
+1. 在管理后台 **「节点列表」** 点击 **「一键部署节点」**，首次使用时生成全局注册 Token（可在多台节点重复使用，随时可轮换使旧 Token 失效）。
 2. 在节点上执行后台生成的命令：
 
 ```bash
 curl -fsSL https://332711.xyz/dl/agent/install.sh | sudo bash -s -- \
   --panel https://332711.xyz \
-  --token <ONE_TIME_ENROLLMENT_TOKEN>
+  --token <ENROLLMENT_TOKEN>
 ```
 
 脚本会识别节点上已有的 Xray/V2Ray 配置（`/etc/xray/config.json`、`/usr/local/etc/xray/config.json`、`/etc/v2ray/config.json` 等）：VLESS + REALITY、VMess、Trojan、Shadowsocks 入站被接管为面板接入端点，其他协议的入站保持原样；没有配置时写入默认模板。接入端点由节点上报后自动创建，面板侧不需要填写协议参数。Hysteria2 不走 Xray，端点需要在节点详情页手工创建。一次注册最多上报 16 个接入端点，超出的入站在节点上继续提供代理但不受面板管理。

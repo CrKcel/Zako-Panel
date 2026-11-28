@@ -1,19 +1,19 @@
 import type { CreateProfileRequest, Profile, ProfileDetail, ProxyGroup, UpdateProfileRequest } from '@zako/contracts';
-import { isUniqueConstraintError, isForeignKeyConstraintError } from '../lib/db-errors';
+import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { findNodesByIds } from '../repositories/nodes';
 import {
-	deleteProfileRow,
 	findProfileById,
 	findProfileByName,
+	hasActiveSubscriptionsForProfile,
 	insertProfileStatement,
 	listProfileNodeIds,
 	listProfileRows,
 	replaceProfileNodesStatements,
+	softDeleteProfileRow,
 	updateProfile as updateProfileRow,
-	type ProfileRow,
 } from '../repositories/profiles';
 import type { ListQuery, Paginated } from '../types';
 import { toProfile, toProfileDetail } from './profile-mapping';
@@ -169,12 +169,8 @@ export async function updateProfile(db: D1Database, profileId: string, input: Up
 export async function deleteProfile(db: D1Database, profileId: string): Promise<void> {
 	const existing = await findProfileById(db, profileId);
 	if (!existing) throw profileNotFound();
-	try {
-		await deleteProfileRow(db, profileId);
-	} catch (error) {
-		if (isForeignKeyConstraintError(error)) {
-			throw new AppError('CONFLICT', 'Profile is referenced by a subscription', 409);
-		}
-		throw error;
+	if (await hasActiveSubscriptionsForProfile(db, profileId)) {
+		throw new AppError('CONFLICT', 'Profile is referenced by a subscription', 409);
 	}
+	await softDeleteProfileRow(db, profileId, nowSeconds());
 }

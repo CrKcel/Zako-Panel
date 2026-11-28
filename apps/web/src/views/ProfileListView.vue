@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import type { ClashPreview, DistributionSkipReason, Node, Profile } from '@zako/contracts';
+import type { ClashPreview, DistributionSkipReason, Node, Profile, RecycleBinList } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
+import { recycleBinApi } from '../api/recycle-bin';
 import AppIcon from '../components/AppIcon.vue';
 import CodeBlock from '../components/CodeBlock.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import { invalidateCachedResource } from '../composables/resourceCache';
+import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -28,6 +30,7 @@ import { formatTimestamp } from '../utils/format';
 
 const { t } = useI18n();
 
+const activeTab = ref<'list' | 'recycle-bin'>('list');
 const form = ref<ProfileFormState>(emptyProfileForm());
 const formRef = ref<FormInstance>();
 const yamlError = ref('');
@@ -72,6 +75,23 @@ const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((pag
 	initialValue: [],
 	cacheKey: 'nodes:list',
 	onError: (error) => showError(error, t('profiles.loadNodesError')),
+});
+
+const EMPTY_BIN: RecycleBinList = {
+	items: [],
+	retention_days: 30,
+	counts: { subscriber: 0, subscription: 0, profile: 0, total: 0 },
+};
+
+const {
+	data: recycleBin,
+	loading: binLoading,
+	refreshing: binRefreshing,
+	reload: reloadBin,
+} = useAsyncResource<RecycleBinList>(() => recycleBinApi.list('profile'), {
+	initialValue: EMPTY_BIN,
+	cacheKey: 'recycle-bin:profile',
+	onError: (error) => showError(error, t('recycleBin.loadError')),
 });
 
 const rules = computed<FormRules>(() => ({
@@ -157,79 +177,100 @@ const removeAction = useAsyncAction(
 		await profilesApi.remove(profile.id);
 		showSuccess(t('profiles.delete.success'));
 		invalidateCachedResource('profiles:list');
-		await reload();
+		invalidateCachedPrefix('recycle-bin:');
+		await Promise.all([reload(), reloadBin()]);
 	},
 	{ onError: (error) => showError(error, t('profiles.delete.failed')) },
 );
 
+async function onBinChanged(): Promise<void> {
+	await Promise.all([reload(), reloadBin()]);
+}
+
 async function remove(profile: Profile): Promise<void> {
-	if (!(await confirmAction(t('profiles.delete.confirm', { name: profile.name })))) return;
+	if (!(await confirmAction(t('profiles.delete.confirm', { name: profile.name, days: 30 })))) return;
 	await removeAction.run(profile);
 }
 </script>
 
 <template>
-	<PageToolbar>
-		<el-button :loading="refreshing" @click="reload">
-			<AppIcon name="refresh" :size="14" class="btn-icon" />
-			<span>{{ t('common.refresh') }}</span>
-		</el-button>
-		<el-button type="primary" @click="openCreate">
-			<AppIcon name="plus" :size="14" class="btn-icon" />
-			<span>{{ t('profiles.create') }}</span>
-		</el-button>
-	</PageToolbar>
+	<el-tabs v-model="activeTab">
+		<el-tab-pane :label="`${t('nav.profiles')} (${profiles.length})`" name="list">
+			<PageToolbar>
+				<el-button :loading="refreshing" @click="reload">
+					<AppIcon name="refresh" :size="14" class="btn-icon" />
+					<span>{{ t('common.refresh') }}</span>
+				</el-button>
+				<el-button type="primary" @click="openCreate">
+					<AppIcon name="plus" :size="14" class="btn-icon" />
+					<span>{{ t('profiles.create') }}</span>
+				</el-button>
+			</PageToolbar>
 
-	<el-card shadow="never">
-		<el-table v-loading="loading" :data="profiles" :empty-text="t('common.noData')">
-			<el-table-column prop="name" :label="t('common.name')" min-width="160">
-				<template #default="{ row }">
-					<div class="profile-name">{{ row.name }}</div>
-					<div v-if="row.description" class="profile-desc">{{ row.description }}</div>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.nodeSelection')" width="130">
-				<template #default="{ row }">
-					<StatusBadge
-						:label="row.node_selection === 'all' ? t('profiles.selection.all') : t('profiles.selection.selected')"
-						:type="row.node_selection === 'all' ? 'primary' : 'info'"
-					/>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.onlineOnly')" width="115">
-				<template #default="{ row }">
-					<StatusBadge :label="row.online_only ? t('common.enabled') : t('common.off')" :type="row.online_only ? 'success' : 'info'" />
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.proxyGroups')" width="95">
-				<template #default="{ row }">
-					<span class="tnum">{{ row.proxy_groups.length }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.rulesCount')" width="90">
-				<template #default="{ row }">
-					<span class="tnum">{{ row.rules.length }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.revision')" width="85">
-				<template #default="{ row }">
-					<span class="tnum mono">v{{ row.revision }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('profiles.columns.updatedAt')" width="180">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatTimestamp(row.updated_at) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.actions')" width="200" fixed="right">
-				<template #default="{ row }">
-					<el-button link type="primary" @click="openPreview(row as Profile)">{{ t('profiles.actions.preview') }}</el-button>
-					<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
-					<el-button link type="danger" @click="remove(row as Profile)">{{ t('common.delete') }}</el-button>
-				</template>
-			</el-table-column>
-		</el-table>
-	</el-card>
+			<el-card shadow="never">
+				<el-table v-loading="loading" :data="profiles" :empty-text="t('common.noData')">
+					<el-table-column prop="name" :label="t('common.name')" min-width="160">
+						<template #default="{ row }">
+							<div class="profile-name">{{ row.name }}</div>
+							<div v-if="row.description" class="profile-desc">{{ row.description }}</div>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.nodeSelection')" width="130">
+						<template #default="{ row }">
+							<StatusBadge
+								:label="row.node_selection === 'all' ? t('profiles.selection.all') : t('profiles.selection.selected')"
+								:type="row.node_selection === 'all' ? 'primary' : 'info'"
+							/>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.onlineOnly')" width="115">
+						<template #default="{ row }">
+							<StatusBadge :label="row.online_only ? t('common.enabled') : t('common.off')" :type="row.online_only ? 'success' : 'info'" />
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.proxyGroups')" width="95">
+						<template #default="{ row }">
+							<span class="tnum">{{ row.proxy_groups.length }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.rulesCount')" width="90">
+						<template #default="{ row }">
+							<span class="tnum">{{ row.rules.length }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.revision')" width="85">
+						<template #default="{ row }">
+							<span class="tnum mono">v{{ row.revision }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('profiles.columns.updatedAt')" width="180">
+						<template #default="{ row }">
+							<span class="tnum">{{ formatTimestamp(row.updated_at) }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('common.actions')" width="200" fixed="right">
+						<template #default="{ row }">
+							<el-button link type="primary" @click="openPreview(row as Profile)">{{ t('profiles.actions.preview') }}</el-button>
+							<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
+							<el-button link type="danger" @click="remove(row as Profile)">{{ t('common.delete') }}</el-button>
+						</template>
+					</el-table-column>
+				</el-table>
+			</el-card>
+		</el-tab-pane>
+
+		<el-tab-pane :label="`${t('recycleBin.tab')} (${recycleBin.items.length})`" name="recycle-bin">
+			<RecycleBinTab
+				item-type="profile"
+				:items="recycleBin.items"
+				:retention-days="recycleBin.retention_days"
+				:loading="binLoading"
+				:refreshing="binRefreshing"
+				@refresh="reloadBin"
+				@changed="onBinChanged"
+			/>
+		</el-tab-pane>
+	</el-tabs>
 
 	<el-drawer
 		v-model="dialogVisible"

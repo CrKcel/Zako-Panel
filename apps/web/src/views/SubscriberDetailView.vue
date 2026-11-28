@@ -3,6 +3,7 @@ import type { Node, Subscriber, SubscriberDetail, TrafficSummary } from '@zako/c
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
+import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
 import { trafficApi } from '../api/traffic';
 import AppIcon from '../components/AppIcon.vue';
@@ -11,13 +12,14 @@ import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { getCachedResource, invalidateCachedPrefix, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
+import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
 import { nodeStatusDescriptor, subscriberStatusDescriptor } from '../domain/status';
 import { subscriberUsedBytes, trafficLimitLabel, usageCycleLabel, usageLabel } from '../domain/subscriber';
 import { DAY_SECONDS, trafficChartData, trafficWindow } from '../domain/traffic';
 import { useI18n } from '../i18n';
-import { showError } from '../utils/feedback';
+import { confirmAction, showError, showSuccess } from '../utils/feedback';
 import { formatTimestamp } from '../utils/format';
 
 const TrafficChart = defineAsyncComponent(() => import('../components/TrafficChart.vue'));
@@ -126,10 +128,56 @@ function backToList(): void {
 async function refresh(): Promise<void> {
 	await Promise.all([reloadSubscriber(), reloadTraffic()]);
 }
+
+const disableAction = useAsyncAction(
+	async (sub: SubscriberDetail) => {
+		await subscribersApi.update(sub.id, { status: 'disabled' });
+		showSuccess(t('subscribers.disable.success'));
+		invalidateCachedResource('subscribers:list');
+		invalidateCachedResource(`subscribers:detail:${sub.id}`);
+		invalidateCachedPrefix('recycle-bin:');
+		invalidateCachedPrefix('nodes:clients:');
+		await reloadSubscriber();
+	},
+	{ onError: (error) => showError(error, t('subscribers.disable.failed')) },
+);
+
+const restoreAction = useAsyncAction(
+	async (sub: SubscriberDetail) => {
+		await recycleBinApi.restore('subscriber', sub.id);
+		showSuccess(t('subscribers.restore.success'));
+		invalidateCachedResource('subscribers:list');
+		invalidateCachedResource(`subscribers:detail:${sub.id}`);
+		invalidateCachedPrefix('recycle-bin:');
+		invalidateCachedPrefix('nodes:clients:');
+		await reloadSubscriber();
+	},
+	{ onError: (error) => showError(error, t('subscribers.restore.failed')) },
+);
+
+async function disableSubscriber(): Promise<void> {
+	if (!subscriber.value) return;
+	if (!(await confirmAction(t('subscribers.disable.confirm', { name: subscriber.value.name, days: 30 })))) return;
+	await disableAction.run(subscriber.value);
+}
+
+async function restoreSubscriber(): Promise<void> {
+	if (!subscriber.value) return;
+	if (!(await confirmAction(t('subscribers.restore.confirm', { name: subscriber.value.name })))) return;
+	await restoreAction.run(subscriber.value);
+}
 </script>
 
 <template>
 	<div v-loading="loading">
+		<el-alert
+			v-if="subscriber?.status === 'disabled'"
+			type="warning"
+			:closable="false"
+			show-icon
+			class="ui-section"
+			:title="t('subscriberDetail.disabledBanner')"
+		/>
 		<EntityHeader
 			:title="subscriber?.name ?? '—'"
 			:back-label="t('subscriberDetail.backToList')"
@@ -146,6 +194,17 @@ async function refresh(): Promise<void> {
 			</template>
 			<template #actions>
 				<el-button type="primary" plain @click="openGrant">{{ t('subscribers.actions.nodeGrant') }}</el-button>
+				<el-button
+					v-if="subscriber?.status === 'disabled'"
+					type="primary"
+					:loading="restoreAction.running.value"
+					@click="restoreSubscriber"
+				>
+					{{ t('subscribers.actions.restore') }}
+				</el-button>
+				<el-button v-else-if="subscriber" type="danger" plain :loading="disableAction.running.value" @click="disableSubscriber">
+					{{ t('subscribers.actions.disable') }}
+				</el-button>
 				<el-button :loading="refreshing" @click="refresh">
 					<AppIcon name="refresh" :size="14" class="btn-icon" />
 					<span>{{ t('common.refresh') }}</span>

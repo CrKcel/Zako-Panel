@@ -1,7 +1,9 @@
 export interface SubscriptionRow {
 	id: string;
 	subscriber_id: string;
+	subscriber_name: string | null;
 	profile_id: string;
+	profile_name: string | null;
 	name: string;
 	token_hash: string;
 	revoked_at: number | null;
@@ -9,7 +11,15 @@ export interface SubscriptionRow {
 	created_at: number;
 }
 
-export interface SubscriptionLookupRow extends SubscriptionRow {
+export interface SubscriptionLookupRow {
+	id: string;
+	subscriber_id: string;
+	profile_id: string;
+	name: string;
+	token_hash: string;
+	revoked_at: number | null;
+	expires_at: number | null;
+	created_at: number;
 	subscriber_name: string;
 	subscriber_status: 'active' | 'limited' | 'expired' | 'disabled';
 	subscriber_traffic_limit_bytes: number | null;
@@ -27,26 +37,28 @@ export interface NewSubscriptionRow {
 	now: number;
 }
 
-const SUBSCRIPTION_COLUMNS = 'id, subscriber_id, profile_id, name, token_hash, revoked_at, expires_at, created_at';
+const SUBSCRIPTION_SELECT = `SELECT s.id, s.subscriber_id, sub.name AS subscriber_name, s.profile_id, p.name AS profile_name,
+	s.name, s.token_hash, s.revoked_at, s.expires_at, s.created_at
+	FROM subscriptions s
+	LEFT JOIN subscribers sub ON sub.id = s.subscriber_id
+	LEFT JOIN subscription_profiles p ON p.id = s.profile_id`;
 
 export async function listSubscriptionRows(db: D1Database, limit: number, cursor?: string): Promise<SubscriptionRow[]> {
 	if (cursor) {
 		return (
 			await db
-				.prepare(`SELECT ${SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE id > ? ORDER BY id ASC LIMIT ?`)
+				.prepare(`${SUBSCRIPTION_SELECT} WHERE s.revoked_at IS NULL AND s.id > ? ORDER BY s.id ASC LIMIT ?`)
 				.bind(cursor, limit)
 				.all<SubscriptionRow>()
 		).results;
 	}
-	return (await db.prepare(`SELECT ${SUBSCRIPTION_COLUMNS} FROM subscriptions ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriptionRow>())
-		.results;
+	return (
+		await db.prepare(`${SUBSCRIPTION_SELECT} WHERE s.revoked_at IS NULL ORDER BY s.id ASC LIMIT ?`).bind(limit).all<SubscriptionRow>()
+	).results;
 }
 
 export async function findSubscriptionById(db: D1Database, subscriptionId: string): Promise<SubscriptionRow | null> {
-	const row = await db
-		.prepare(`SELECT ${SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE id = ? LIMIT 1`)
-		.bind(subscriptionId)
-		.first<SubscriptionRow>();
+	const row = await db.prepare(`${SUBSCRIPTION_SELECT} WHERE s.id = ? LIMIT 1`).bind(subscriptionId).first<SubscriptionRow>();
 	return row ?? null;
 }
 

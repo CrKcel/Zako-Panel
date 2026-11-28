@@ -162,7 +162,7 @@ export interface paths {
         get: operations["getProfile"];
         put?: never;
         post?: never;
-        /** Delete a profile with no subscriptions */
+        /** Move a profile with no active subscriptions to the recycle bin */
         delete: operations["deleteProfile"];
         options?: never;
         head?: never;
@@ -390,6 +390,58 @@ export interface paths {
         /** Generate or rotate the panel-wide reusable node enrollment token */
         post: operations["rotateNodeEnrollmentToken"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/recycle-bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List items in the recycle bin */
+        get: operations["listRecycleBinItems"];
+        put?: never;
+        post?: never;
+        /** Permanently delete all items in the recycle bin */
+        delete: operations["emptyRecycleBin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/recycle-bin/{itemType}/{itemId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore an item from the recycle bin */
+        post: operations["restoreRecycleBinItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/recycle-bin/{itemType}/{itemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Permanently delete one item from the recycle bin */
+        delete: operations["purgeRecycleBinItem"];
         options?: never;
         head?: never;
         patch?: never;
@@ -742,11 +794,38 @@ export interface components {
         Subscription: {
             id: string;
             subscriber_id: string;
+            subscriber_name?: string | null;
             profile_id: string;
+            profile_name?: string | null;
             name: string;
             revoked_at: number | null;
             expires_at: number | null;
             created_at: number;
+        };
+        /** @enum {string} */
+        RecycleBinItemType: "subscriber" | "subscription" | "profile";
+        RecycleBinCounts: {
+            subscriber: number;
+            subscription: number;
+            profile: number;
+            total: number;
+        };
+        RecycleBinItem: {
+            type: components["schemas"]["RecycleBinItemType"];
+            id: string;
+            name: string;
+            detail: string | null;
+            deleted_at: number;
+            purge_at: number;
+        };
+        RecycleBinList: {
+            items: components["schemas"]["RecycleBinItem"][];
+            retention_days: number;
+            counts: components["schemas"]["RecycleBinCounts"];
+        };
+        RecycleBinRestoreResult: {
+            type: components["schemas"]["RecycleBinItemType"];
+            id: string;
         };
         /** @enum {string} */
         SubscriberStatus: "active" | "limited" | "expired" | "disabled";
@@ -1101,6 +1180,8 @@ export interface components {
         SubscriberId: string;
         ConfigVersion: number;
         SubscriptionToken: string;
+        RecycleBinItemType: components["schemas"]["RecycleBinItemType"];
+        RecycleBinItemId: string;
     };
     requestBodies: never;
     headers: never;
@@ -2105,6 +2186,115 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listRecycleBinItems: {
+        parameters: {
+            query?: {
+                type?: components["schemas"]["RecycleBinItemType"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recycle bin items and retention metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecycleBinList"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    emptyRecycleBin: {
+        parameters: {
+            query?: {
+                type?: components["schemas"]["RecycleBinItemType"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Counts of permanently deleted items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted: components["schemas"]["RecycleBinCounts"];
+                        };
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    restoreRecycleBinItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemType: components["parameters"]["RecycleBinItemType"];
+                itemId: components["parameters"]["RecycleBinItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored item identity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecycleBinRestoreResult"];
+                        meta: components["schemas"]["Meta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    purgeRecycleBinItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemType: components["parameters"]["RecycleBinItemType"];
+                itemId: components["parameters"]["RecycleBinItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: components["responses"]["NoContent"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     enrollAgent: {

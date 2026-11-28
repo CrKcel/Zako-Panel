@@ -98,6 +98,12 @@ export const previewProfileQuerySchema = z.object({
 	subscriberId: idSchema.optional(),
 });
 
+export const recycleBinItemTypeSchema = z.enum(['subscriber', 'subscription', 'profile']);
+
+export const recycleBinQuerySchema = z.object({
+	type: recycleBinItemTypeSchema.optional(),
+});
+
 export const createSubscriptionSchema = z.object({
 	subscriber_id: idSchema,
 	profile_id: idSchema,

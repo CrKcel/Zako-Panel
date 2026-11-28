@@ -166,6 +166,11 @@ export async function updateSubscriber(db: D1Database, subscriberId: string, inp
 	);
 
 	const update: SubscriberUpdateInput = { status };
+	if (status === 'disabled' && existing.status !== 'disabled') {
+		update.disabled_at = now;
+	} else if (status !== 'disabled' && existing.status === 'disabled') {
+		update.disabled_at = null;
+	}
 	if (input.name !== undefined) update.name = input.name;
 	if (input.email !== undefined) update.email = normalizeEmail(input.email);
 	if (input.traffic_limit_bytes !== undefined) update.traffic_limit_bytes = input.traffic_limit_bytes;

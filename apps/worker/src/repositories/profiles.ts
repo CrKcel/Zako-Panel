@@ -8,6 +8,7 @@ export interface ProfileRow {
 	proxy_groups_json: string;
 	rules_json: string;
 	revision: number;
+	deleted_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -35,23 +36,27 @@ export interface ProfileUpdateInput {
 }
 
 const PROFILE_COLUMNS = `id, name, description, node_selection, online_only, clash_base_json,
-	proxy_groups_json, rules_json, revision, created_at, updated_at`;
+	proxy_groups_json, rules_json, revision, deleted_at, created_at, updated_at`;
 
 export async function listProfileRows(db: D1Database, limit: number, cursor?: string): Promise<ProfileRow[]> {
 	if (cursor) {
 		return (
 			await db
-				.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles WHERE id > ? ORDER BY id ASC LIMIT ?`)
+				.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles WHERE deleted_at IS NULL AND id > ? ORDER BY id ASC LIMIT ?`)
 				.bind(cursor, limit)
 				.all<ProfileRow>()
 		).results;
 	}
-	return (await db.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles ORDER BY id ASC LIMIT ?`).bind(limit).all<ProfileRow>())
-		.results;
+	return (
+		await db
+			.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles WHERE deleted_at IS NULL ORDER BY id ASC LIMIT ?`)
+			.bind(limit)
+			.all<ProfileRow>()
+	).results;
 }
 
 export function findProfileStatement(db: D1Database, profileId: string): D1PreparedStatement {
-	return db.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles WHERE id = ? LIMIT 1`).bind(profileId);
+	return db.prepare(`SELECT ${PROFILE_COLUMNS} FROM subscription_profiles WHERE id = ? AND deleted_at IS NULL LIMIT 1`).bind(profileId);
 }
 
 export async function findProfileById(db: D1Database, profileId: string): Promise<ProfileRow | null> {
@@ -142,6 +147,22 @@ export function replaceProfileNodesStatements(db: D1Database, profileId: string,
 		statements.push(db.prepare('INSERT INTO profile_nodes (profile_id, node_id) VALUES (?, ?)').bind(profileId, nodeId));
 	}
 	return statements;
+}
+
+export async function hasActiveSubscriptionsForProfile(db: D1Database, profileId: string): Promise<boolean> {
+	const row = await db
+		.prepare('SELECT 1 AS found FROM subscriptions WHERE profile_id = ? AND revoked_at IS NULL LIMIT 1')
+		.bind(profileId)
+		.first<{ found: number }>();
+	return row !== null;
+}
+
+export async function softDeleteProfileRow(db: D1Database, profileId: string, now: number): Promise<boolean> {
+	const result = await db
+		.prepare('UPDATE subscription_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+		.bind(now, now, profileId)
+		.run();
+	return result.meta.changes > 0;
 }
 
 export async function deleteProfileRow(db: D1Database, profileId: string): Promise<boolean> {

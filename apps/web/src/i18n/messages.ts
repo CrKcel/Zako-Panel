@@ -340,6 +340,18 @@ export const zhCN = {
 		},
 		actions: {
 			nodeGrant: '节点授权',
+			disable: '停用',
+			restore: '恢复',
+		},
+		disable: {
+			confirm: '停用订阅用户「{name}」？停用后将移入回收站，并在 {days} 天后自动永久删除。',
+			success: '订阅用户已停用并移入回收站',
+			failed: '停用订阅用户失败',
+		},
+		restore: {
+			confirm: '从回收站恢复订阅用户「{name}」？',
+			success: '订阅用户已恢复',
+			failed: '恢复订阅用户失败',
 		},
 		form: {
 			email: '邮箱',
@@ -369,6 +381,7 @@ export const zhCN = {
 		grantedNodes: '授权节点',
 		noGrantedNodes: '暂无授权节点',
 		trafficLast24h: '近 24 小时流量',
+		disabledBanner: '该订阅用户已停用，当前位于回收站中。',
 		tabs: {
 			endpoints: '接入端点',
 			clients: '用户凭据',
@@ -421,8 +434,8 @@ export const zhCN = {
 			saveFailed: '订阅档案保存失败',
 		},
 		delete: {
-			confirm: '删除订阅档案「{name}」？',
-			success: '订阅档案已删除',
+			confirm: '删除订阅档案「{name}」？删除后将移入回收站，并在 {days} 天后自动永久删除。',
+			success: '订阅档案已移入回收站',
 			failed: '订阅档案删除失败',
 		},
 		preview: {
@@ -468,14 +481,52 @@ export const zhCN = {
 			failed: '订阅轮换失败',
 		},
 		revoke: {
-			confirm: '撤销订阅「{name}」？',
-			success: '订阅已撤销',
+			confirm: '撤销订阅「{name}」？撤销后将移入回收站，可在回收站中恢复或永久删除。',
+			success: '订阅已撤销并移入回收站',
 			failed: '订阅撤销失败',
 		},
 		links: {
 			title: '订阅链接',
 			token: 'Token',
 			oneTimeHint: 'Token 与专属订阅链接仅在创建或轮换时展示一次，请妥善复制保存。',
+		},
+	},
+	recycleBin: {
+		tab: '回收站',
+		loadError: '回收站加载失败',
+		retentionHints: {
+			subscriber: '停用的订阅用户会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
+			subscription: '撤销的订阅会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
+			profile: '删除的订阅档案会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
+		},
+		searchPlaceholder: '搜索名称或详情…',
+		empty: '回收站为空',
+		emptyButton: '清空回收站',
+		columns: {
+			item: '项目',
+			deletedAt: '移入时间',
+			purgeAt: '自动清理',
+		},
+		actions: {
+			restore: '恢复',
+			purge: '永久删除',
+		},
+		remainingDays: '{days} 天后',
+		dueSoon: '即将清理',
+		restore: {
+			confirm: '确认从回收站恢复「{name}」？',
+			success: '已恢复「{name}」',
+			failed: '恢复失败',
+		},
+		purge: {
+			confirm: '确认永久删除「{name}」？此操作不可撤销。',
+			success: '已永久删除「{name}」',
+			failed: '永久删除失败',
+		},
+		emptyAction: {
+			confirm: '确认清空当前回收站中的全部 {count} 个项目？此操作不可撤销。',
+			success: '已清空回收站（共删除 {count} 项）',
+			failed: '清空回收站失败',
 		},
 	},
 	traffic: {
@@ -854,6 +905,18 @@ export const enUS: Messages = {
 		},
 		actions: {
 			nodeGrant: 'Node Access',
+			disable: 'Disable',
+			restore: 'Restore',
+		},
+		disable: {
+			confirm: 'Disable subscriber "{name}"? They will be moved to the recycle bin and permanently deleted after {days} days.',
+			success: 'Subscriber disabled and moved to recycle bin',
+			failed: 'Failed to disable subscriber',
+		},
+		restore: {
+			confirm: 'Restore subscriber "{name}" from the recycle bin?',
+			success: 'Subscriber restored',
+			failed: 'Failed to restore subscriber',
 		},
 		form: {
 			email: 'Email',
@@ -883,6 +946,7 @@ export const enUS: Messages = {
 		grantedNodes: 'Granted Nodes',
 		noGrantedNodes: 'No granted nodes',
 		trafficLast24h: 'Traffic (Last 24h)',
+		disabledBanner: 'This subscriber is disabled and currently in the recycle bin.',
 		tabs: {
 			endpoints: 'Endpoints',
 			clients: 'Credentials',
@@ -935,8 +999,8 @@ export const enUS: Messages = {
 			saveFailed: 'Failed to save profile',
 		},
 		delete: {
-			confirm: 'Delete profile "{name}"?',
-			success: 'Profile deleted',
+			confirm: 'Delete profile "{name}"? It will be moved to the recycle bin and permanently deleted after {days} days.',
+			success: 'Profile moved to recycle bin',
 			failed: 'Failed to delete profile',
 		},
 		preview: {
@@ -982,14 +1046,52 @@ export const enUS: Messages = {
 			failed: 'Failed to rotate subscription',
 		},
 		revoke: {
-			confirm: 'Revoke subscription "{name}"?',
-			success: 'Subscription revoked',
+			confirm: 'Revoke subscription "{name}"? It will be moved to the recycle bin where it can be restored or permanently deleted.',
+			success: 'Subscription revoked and moved to recycle bin',
 			failed: 'Failed to revoke subscription',
 		},
 		links: {
 			title: 'Subscription Links',
 			token: 'Token',
 			oneTimeHint: 'The token and subscription URLs are displayed only once upon creation or rotation. Save them securely.',
+		},
+	},
+	recycleBin: {
+		tab: 'Recycle Bin',
+		loadError: 'Failed to load recycle bin',
+		retentionHints: {
+			subscriber: 'Disabled subscribers are held in the recycle bin for {days} days before automatic permanent deletion.',
+			subscription: 'Revoked subscriptions are held in the recycle bin for {days} days before automatic permanent deletion.',
+			profile: 'Deleted profiles are held in the recycle bin for {days} days before automatic permanent deletion.',
+		},
+		searchPlaceholder: 'Search name or details…',
+		empty: 'Recycle bin is empty',
+		emptyButton: 'Empty Recycle Bin',
+		columns: {
+			item: 'Item',
+			deletedAt: 'Moved At',
+			purgeAt: 'Auto Purge',
+		},
+		actions: {
+			restore: 'Restore',
+			purge: 'Delete Permanently',
+		},
+		remainingDays: 'In {days}d',
+		dueSoon: 'Due soon',
+		restore: {
+			confirm: 'Restore "{name}" from the recycle bin?',
+			success: 'Restored "{name}"',
+			failed: 'Failed to restore item',
+		},
+		purge: {
+			confirm: 'Permanently delete "{name}"? This cannot be undone.',
+			success: 'Permanently deleted "{name}"',
+			failed: 'Failed to permanently delete item',
+		},
+		emptyAction: {
+			confirm: 'Permanently delete all {count} items in this recycle bin? This cannot be undone.',
+			success: 'Emptied recycle bin ({count} items deleted)',
+			failed: 'Failed to empty recycle bin',
 		},
 	},
 	traffic: {

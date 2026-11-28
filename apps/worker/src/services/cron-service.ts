@@ -3,6 +3,7 @@ import { log } from '../lib/log';
 import { nowSeconds } from '../lib/node-status';
 import { deleteOldAuditEvents } from '../repositories/audit-events';
 import { deleteOldNodeBuckets, deleteOldReports, deleteOldSiteBuckets, deleteOldUserBuckets } from '../repositories/traffic';
+import { purgeExpiredRecycleBinItems } from './recycle-bin-service';
 import { reconcileSubscriberCycles } from './subscriber-cycle-service';
 
 const DAY_SECONDS = 86_400;
@@ -36,6 +37,7 @@ async function runDailyCleanup(env: Env): Promise<void> {
 	const userHours = await drain((cutoff, size) => deleteOldUserBuckets(env.DB, cutoff, size), hourlyCutoff);
 	const reports = await drain((cutoff, size) => deleteOldReports(env.DB, cutoff, size), reportCutoff);
 	const audits = await drain((cutoff, size) => deleteOldAuditEvents(env.DB, cutoff, size), auditCutoff);
+	const recycleBin = await purgeExpiredRecycleBinItems(env.DB, now, drain);
 
 	log('info', {
 		job: 'daily-cleanup',
@@ -44,6 +46,9 @@ async function runDailyCleanup(env: Env): Promise<void> {
 		user_hour_buckets: userHours,
 		traffic_reports: reports,
 		audit_events: audits,
+		recycle_bin_subscriptions: recycleBin.subscriptions,
+		recycle_bin_profiles: recycleBin.profiles,
+		recycle_bin_subscribers: recycleBin.subscribers,
 	});
 }
 

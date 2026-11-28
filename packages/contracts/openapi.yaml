@@ -521,7 +521,7 @@ paths:
     delete:
       operationId: deleteProfile
       tags: [admin]
-      summary: Delete a profile with no subscriptions
+      summary: Move a profile with no active subscriptions to the recycle bin
       security:
         - AccessJwt: []
       parameters:
@@ -1107,6 +1107,129 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/recycle-bin:
+    get:
+      operationId: listRecycleBinItems
+      tags: [admin]
+      summary: List items in the recycle bin
+      security:
+        - AccessJwt: []
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RecycleBinItemType'
+      responses:
+        '200':
+          description: Recycle bin items and retention metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RecycleBinList'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      operationId: emptyRecycleBin
+      tags: [admin]
+      summary: Permanently delete all items in the recycle bin
+      security:
+        - AccessJwt: []
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RecycleBinItemType'
+      responses:
+        '200':
+          description: Counts of permanently deleted items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [deleted]
+                    properties:
+                      deleted:
+                        $ref: '#/components/schemas/RecycleBinCounts'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/recycle-bin/{itemType}/{itemId}/restore:
+    post:
+      operationId: restoreRecycleBinItem
+      tags: [admin]
+      summary: Restore an item from the recycle bin
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/RecycleBinItemType'
+        - $ref: '#/components/parameters/RecycleBinItemId'
+      responses:
+        '200':
+          description: Restored item identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RecycleBinRestoreResult'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/recycle-bin/{itemType}/{itemId}:
+    delete:
+      operationId: purgeRecycleBinItem
+      tags: [admin]
+      summary: Permanently delete one item from the recycle bin
+      security:
+        - AccessJwt: []
+      parameters:
+        - $ref: '#/components/parameters/RecycleBinItemType'
+        - $ref: '#/components/parameters/RecycleBinItemId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/agent/enroll:
     post:
       operationId: enrollAgent
@@ -1464,6 +1587,18 @@ components:
         minimum: 1
     SubscriptionToken:
       name: token
+      in: path
+      required: true
+      schema:
+        type: string
+    RecycleBinItemType:
+      name: itemType
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/RecycleBinItemType'
+    RecycleBinItemId:
+      name: itemId
       in: path
       required: true
       schema:
@@ -1918,8 +2053,12 @@ components:
           type: string
         subscriber_id:
           type: string
+        subscriber_name:
+          type: [string, 'null']
         profile_id:
           type: string
+        profile_name:
+          type: [string, 'null']
         name:
           type: string
         revoked_at:
@@ -1928,6 +2067,57 @@ components:
           type: [integer, 'null']
         created_at:
           type: integer
+    RecycleBinItemType:
+      type: string
+      enum: [subscriber, subscription, profile]
+    RecycleBinCounts:
+      type: object
+      required: [subscriber, subscription, profile, total]
+      properties:
+        subscriber:
+          type: integer
+        subscription:
+          type: integer
+        profile:
+          type: integer
+        total:
+          type: integer
+    RecycleBinItem:
+      type: object
+      required: [type, id, name, detail, deleted_at, purge_at]
+      properties:
+        type:
+          $ref: '#/components/schemas/RecycleBinItemType'
+        id:
+          type: string
+        name:
+          type: string
+        detail:
+          type: [string, 'null']
+        deleted_at:
+          type: integer
+        purge_at:
+          type: integer
+    RecycleBinList:
+      type: object
+      required: [items, retention_days, counts]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecycleBinItem'
+        retention_days:
+          type: integer
+        counts:
+          $ref: '#/components/schemas/RecycleBinCounts'
+    RecycleBinRestoreResult:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          $ref: '#/components/schemas/RecycleBinItemType'
+        id:
+          type: string
     SubscriberStatus:
       type: string
       enum: [active, limited, expired, disabled]

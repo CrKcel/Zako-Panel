@@ -34,7 +34,9 @@ function toSubscription(row: SubscriptionRow): Subscription {
 	return {
 		id: row.id,
 		subscriber_id: row.subscriber_id,
+		subscriber_name: row.subscriber_name,
 		profile_id: row.profile_id,
+		profile_name: row.profile_name,
 		name: row.name,
 		revoked_at: row.revoked_at,
 		expires_at: row.expires_at,
@@ -86,6 +88,7 @@ export async function createSubscription(
 export async function rotateSubscription(db: D1Database, subscriptionId: string): Promise<{ token: string }> {
 	const existing = await findSubscriptionById(db, subscriptionId);
 	if (!existing) throw new AppError('NOT_FOUND', 'Subscription not found', 404);
+	if (existing.revoked_at !== null) throw new AppError('CONFLICT', 'Subscription is revoked', 409);
 	const token = generateToken();
 	const tokenHash = await sha256Hex(token);
 	await updateSubscriptionTokenHash(db, subscriptionId, tokenHash);

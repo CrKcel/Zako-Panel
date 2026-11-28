@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import type { CreateSubscriptionRequest, Profile, Subscriber, Subscription } from '@zako/contracts';
+import type { CreateSubscriptionRequest, Profile, RecycleBinList, Subscriber, Subscription } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { profilesApi } from '../api/profiles';
+import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
 import { subscriptionsApi } from '../api/subscriptions';
 import AppIcon from '../components/AppIcon.vue';
 import PageToolbar from '../components/PageToolbar.vue';
+import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import { invalidateCachedResource } from '../composables/resourceCache';
+import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
@@ -36,6 +38,7 @@ function emptySubscriptionForm(): SubscriptionForm {
 	return { name: '', subscriber_id: '', profile_id: '', expires_at: null };
 }
 
+const activeTab = ref<'list' | 'recycle-bin'>('list');
 const search = ref('');
 const statusFilter = ref<'all' | SubscriptionStatusKey>('all');
 const form = ref<SubscriptionForm>(emptySubscriptionForm());
@@ -64,6 +67,23 @@ const { data: subscribers } = useAsyncResource<Subscriber[]>(() => subscribersAp
 	initialValue: [],
 	cacheKey: 'subscribers:list',
 	onError: (error) => showError(error, t('subscriptions.loadSubscribersError')),
+});
+
+const EMPTY_BIN: RecycleBinList = {
+	items: [],
+	retention_days: 30,
+	counts: { subscriber: 0, subscription: 0, profile: 0, total: 0 },
+};
+
+const {
+	data: recycleBin,
+	loading: binLoading,
+	refreshing: binRefreshing,
+	reload: reloadBin,
+} = useAsyncResource<RecycleBinList>(() => recycleBinApi.list('subscription'), {
+	initialValue: EMPTY_BIN,
+	cacheKey: 'recycle-bin:subscription',
+	onError: (error) => showError(error, t('recycleBin.loadError')),
 });
 
 const rules = computed<FormRules>(() => ({
@@ -108,7 +128,6 @@ const statusOptions = computed<Array<{ value: 'all' | SubscriptionStatusKey; lab
 		{ value: 'all', label: t('common.all'), count: list.length },
 		{ value: 'active', label: t('status.subscription.active'), count: countOf('active') },
 		{ value: 'expired', label: t('status.subscription.expired'), count: countOf('expired') },
-		{ value: 'revoked', label: t('status.subscription.revoked'), count: countOf('revoked') },
 	];
 });
 
@@ -167,10 +186,15 @@ const revokeAction = useAsyncAction(
 		await subscriptionsApi.revoke(row.id);
 		showSuccess(t('subscriptions.revoke.success'));
 		invalidateCachedResource('subscriptions:list');
-		await reload();
+		invalidateCachedPrefix('recycle-bin:');
+		await Promise.all([reload(), reloadBin()]);
 	},
 	{ onError: (error) => showError(error, t('subscriptions.revoke.failed')) },
 );
+
+async function onBinChanged(): Promise<void> {
+	await Promise.all([reload(), reloadBin()]);
+}
 
 async function rotate(row: Subscription): Promise<void> {
 	if (!(await confirmAction(t('subscriptions.rotate.confirm', { name: row.name })))) return;
@@ -184,80 +208,96 @@ async function revoke(row: Subscription): Promise<void> {
 </script>
 
 <template>
-	<PageToolbar spread>
-		<template #left>
-			<div class="filters">
-				<div class="filter-pills" role="group">
-					<button
-						v-for="opt in statusOptions"
-						:key="opt.value"
-						type="button"
-						class="filter-pill"
-						:class="{ 'is-active': statusFilter === opt.value }"
-						:aria-pressed="statusFilter === opt.value"
-						@click="statusFilter = opt.value"
-					>
-						<span>{{ opt.label }}</span>
-						<span class="filter-pill-count">{{ opt.count }}</span>
-					</button>
-				</div>
-				<el-input v-model="search" :placeholder="t('subscriptions.searchPlaceholder')" clearable class="search-input" />
-			</div>
-		</template>
-		<el-button :loading="refreshing" @click="reload">
-			<AppIcon name="refresh" :size="14" class="btn-icon" />
-			<span>{{ t('common.refresh') }}</span>
-		</el-button>
-		<el-button type="primary" @click="openCreate">
-			<AppIcon name="plus" :size="14" class="btn-icon" />
-			<span>{{ t('subscriptions.create') }}</span>
-		</el-button>
-	</PageToolbar>
+	<el-tabs v-model="activeTab">
+		<el-tab-pane :label="`${t('nav.subscriptions')} (${subscriptions.length})`" name="list">
+			<PageToolbar spread>
+				<template #left>
+					<div class="filters">
+						<div class="filter-pills" role="group">
+							<button
+								v-for="opt in statusOptions"
+								:key="opt.value"
+								type="button"
+								class="filter-pill"
+								:class="{ 'is-active': statusFilter === opt.value }"
+								:aria-pressed="statusFilter === opt.value"
+								@click="statusFilter = opt.value"
+							>
+								<span>{{ opt.label }}</span>
+								<span class="filter-pill-count">{{ opt.count }}</span>
+							</button>
+						</div>
+						<el-input v-model="search" :placeholder="t('subscriptions.searchPlaceholder')" clearable class="search-input" />
+					</div>
+				</template>
+				<el-button :loading="refreshing" @click="reload">
+					<AppIcon name="refresh" :size="14" class="btn-icon" />
+					<span>{{ t('common.refresh') }}</span>
+				</el-button>
+				<el-button type="primary" @click="openCreate">
+					<AppIcon name="plus" :size="14" class="btn-icon" />
+					<span>{{ t('subscriptions.create') }}</span>
+				</el-button>
+			</PageToolbar>
 
-	<el-card shadow="never">
-		<el-table v-loading="loading" :data="filteredSubscriptions" :empty-text="t('common.noData')">
-			<el-table-column prop="name" :label="t('common.name')" min-width="160" />
-			<el-table-column :label="t('subscriptions.columns.subscriber')" min-width="160">
-				<template #default="{ row }">
-					<RouterLink :to="`/subscribers/${row.subscriber_id}`" class="ui-link">
-						{{ subscriberName(row.subscriber_id) }}
-					</RouterLink>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('subscriptions.columns.profile')" min-width="160">
-				<template #default="{ row }">{{ profileName(row.profile_id) }}</template>
-			</el-table-column>
-			<el-table-column :label="t('common.status')" width="110">
-				<template #default="{ row }">
-					<StatusBadge
-						:label="subscriptionStatusDescriptor(row as Subscription).label"
-						:type="subscriptionStatusDescriptor(row as Subscription).tag"
-						:pulse="resolveStatus(row as Subscription) === 'active'"
-					/>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('subscriptions.columns.expiresAt')" width="180">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('subscriptions.columns.createdAt')" width="180">
-				<template #default="{ row }">
-					<span class="tnum">{{ formatTimestamp(row.created_at) }}</span>
-				</template>
-			</el-table-column>
-			<el-table-column :label="t('common.actions')" width="160" fixed="right">
-				<template #default="{ row }">
-					<el-button link type="primary" :loading="rotateAction.isRunning(row.id)" @click="rotate(row as Subscription)">{{
-						t('subscriptions.actions.rotate')
-					}}</el-button>
-					<el-button link type="danger" :disabled="row.revoked_at !== null" @click="revoke(row as Subscription)">{{
-						t('subscriptions.actions.revoke')
-					}}</el-button>
-				</template>
-			</el-table-column>
-		</el-table>
-	</el-card>
+			<el-card shadow="never">
+				<el-table v-loading="loading" :data="filteredSubscriptions" :empty-text="t('common.noData')">
+					<el-table-column prop="name" :label="t('common.name')" min-width="160" />
+					<el-table-column :label="t('subscriptions.columns.subscriber')" min-width="160">
+						<template #default="{ row }">
+							<RouterLink :to="`/subscribers/${row.subscriber_id}`" class="ui-link">
+								{{ row.subscriber_name ?? subscriberName(row.subscriber_id) }}
+							</RouterLink>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('subscriptions.columns.profile')" min-width="160">
+						<template #default="{ row }">{{ row.profile_name ?? profileName(row.profile_id) }}</template>
+					</el-table-column>
+					<el-table-column :label="t('common.status')" width="110">
+						<template #default="{ row }">
+							<StatusBadge
+								:label="subscriptionStatusDescriptor(row as Subscription).label"
+								:type="subscriptionStatusDescriptor(row as Subscription).tag"
+								:pulse="resolveStatus(row as Subscription) === 'active'"
+							/>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('subscriptions.columns.expiresAt')" width="180">
+						<template #default="{ row }">
+							<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('subscriptions.columns.createdAt')" width="180">
+						<template #default="{ row }">
+							<span class="tnum">{{ formatTimestamp(row.created_at) }}</span>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('common.actions')" width="160" fixed="right">
+						<template #default="{ row }">
+							<el-button link type="primary" :loading="rotateAction.isRunning(row.id)" @click="rotate(row as Subscription)">{{
+								t('subscriptions.actions.rotate')
+							}}</el-button>
+							<el-button link type="danger" :disabled="row.revoked_at !== null" @click="revoke(row as Subscription)">{{
+								t('subscriptions.actions.revoke')
+							}}</el-button>
+						</template>
+					</el-table-column>
+				</el-table>
+			</el-card>
+		</el-tab-pane>
+
+		<el-tab-pane :label="`${t('recycleBin.tab')} (${recycleBin.items.length})`" name="recycle-bin">
+			<RecycleBinTab
+				item-type="subscription"
+				:items="recycleBin.items"
+				:retention-days="recycleBin.retention_days"
+				:loading="binLoading"
+				:refreshing="binRefreshing"
+				@refresh="reloadBin"
+				@changed="onBinChanged"
+			/>
+		</el-tab-pane>
+	</el-tabs>
 
 	<el-dialog v-model="dialogVisible" :title="t('subscriptions.create')" width="560px" :close-on-click-modal="false" destroy-on-close>
 		<el-form ref="formRef" :model="form" :rules="rules" label-width="130px">

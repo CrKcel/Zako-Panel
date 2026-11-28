@@ -9,6 +9,7 @@ export interface SubscriberRow {
 	expires_at: number | null;
 	usage_cycle_start: number;
 	usage_cycle_end: number;
+	disabled_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -59,16 +60,17 @@ export interface SubscriberUpdateInput {
 	status?: SubscriberRow['status'];
 	traffic_limit_bytes?: number | null;
 	expires_at?: number | null;
+	disabled_at?: number | null;
 }
 
 const SUBSCRIBER_COLUMNS = `id, name, email, status, traffic_limit_bytes, expires_at,
-	usage_cycle_start, usage_cycle_end, created_at, updated_at`;
+	usage_cycle_start, usage_cycle_end, disabled_at, created_at, updated_at`;
 
 /** D1 caps one statement at 100 bound parameters. */
 const MAX_IN_LIST = 90;
 
 const SUBSCRIBER_COLUMNS_QUALIFIED = `s.id, s.name, s.email, s.status, s.traffic_limit_bytes, s.expires_at,
-	s.usage_cycle_start, s.usage_cycle_end, s.created_at, s.updated_at`;
+	s.usage_cycle_start, s.usage_cycle_end, s.disabled_at, s.created_at, s.updated_at`;
 
 export async function findSubscriberById(db: D1Database, subscriberId: string): Promise<SubscriberRow | null> {
 	const row = await db
@@ -82,13 +84,17 @@ export async function listSubscriberRows(db: D1Database, limit: number, cursor?:
 	if (cursor) {
 		return (
 			await db
-				.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE id > ? ORDER BY id ASC LIMIT ?`)
+				.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE status != 'disabled' AND id > ? ORDER BY id ASC LIMIT ?`)
 				.bind(cursor, limit)
 				.all<SubscriberRow>()
 		).results;
 	}
-	return (await db.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers ORDER BY id ASC LIMIT ?`).bind(limit).all<SubscriberRow>())
-		.results;
+	return (
+		await db
+			.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE status != 'disabled' ORDER BY id ASC LIMIT ?`)
+			.bind(limit)
+			.all<SubscriberRow>()
+	).results;
 }
 
 export function insertSubscriberStatement(db: D1Database, row: NewSubscriberRow): D1PreparedStatement {
@@ -139,6 +145,10 @@ export function updateSubscriberStatement(
 	if (input.expires_at !== undefined) {
 		assignments.push('expires_at = ?');
 		values.push(input.expires_at);
+	}
+	if (input.disabled_at !== undefined) {
+		assignments.push('disabled_at = ?');
+		values.push(input.disabled_at);
 	}
 	values.push(subscriberId);
 	return db.prepare(`UPDATE subscribers SET ${assignments.join(', ')} WHERE id = ?`).bind(...values);

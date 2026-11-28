@@ -7,9 +7,9 @@ import {
 	DEFAULT_HYSTERIA2_PARAMS,
 	DEFAULT_PARAMS,
 	DEFAULT_VMESS_PARAMS,
+	getSubscriberCredential,
 	seedEndpoint,
 	seedNode,
-	seedNodeClient,
 	seedProfile,
 	seedSubscriber,
 	seedSubscription,
@@ -55,7 +55,7 @@ describe('multi-protocol subscriptions', () => {
 		await seedEndpoint(nodeId, { name: 'ss', protocol: 'shadowsocks' });
 		await seedEndpoint(nodeId, { name: 'hy2', protocol: 'hysteria2' });
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('mixed');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -144,7 +144,7 @@ describe('multi-protocol subscriptions', () => {
 			params: { ...DEFAULT_HYSTERIA2_PARAMS, obfs: 'salamander', obfs_password: 'obfs-secret' },
 		});
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('tuned');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -199,7 +199,6 @@ describe('multi-protocol subscriptions', () => {
 			params: { ...DEFAULT_VMESS_PARAMS, sni: '' },
 		});
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('stale');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -214,7 +213,7 @@ describe('multi-protocol subscriptions', () => {
 		await seedEndpoint(nodeId, { name: 'vmess', protocol: 'vmess' });
 		await seedEndpoint(nodeId, { name: 'ss', protocol: 'shadowsocks' });
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		await seedSubscription({ token: testToken('preview'), subscriberId, profileId });
 
@@ -231,7 +230,6 @@ describe('multi-protocol subscriptions', () => {
 		await seedEndpoint(nodeId, { name: 'unknown', protocol: 'vmess' });
 		await env.DB.prepare("UPDATE endpoints SET protocol = 'vless-tls' WHERE node_id = ?").bind(nodeId).run();
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('unknown');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -246,7 +244,7 @@ describe('multi-protocol subscriptions', () => {
 		const nodeId = await seedNode({ name: 'Legacy' });
 		await seedEndpoint(nodeId, { name: 'primary', params: { ...DEFAULT_PARAMS, short_id: '' } });
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('legacy');
 		await seedSubscription({ token, subscriberId, profileId });

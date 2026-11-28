@@ -1,4 +1,4 @@
-import type { CreateSubscriberRequest, Subscriber, SubscriberDetail, UpdateSubscriberRequest } from '@zako/contracts';
+import type { CreateSubscriberRequest, Subscriber, UpdateSubscriberRequest } from '@zako/contracts';
 import { initialUsageCycle } from '../lib/cycle';
 import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
@@ -6,17 +6,11 @@ import { newId, newXrayEmail } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { deriveSubscriberStatus } from '../lib/subscriber-status';
 
-import { findNodesByIds } from '../repositories/nodes';
 import {
-	countNodeClientsBySubscribers,
-	enabledNodeClientsStatement,
-	findNodeClientsBySubscriber,
 	findSubscriberById,
 	findUsageBySubscribers,
-	insertNodeClientStatement,
 	insertSubscriberStatement,
 	listSubscriberRows,
-	setNodeClientEnabledStatement,
 	updateSubscriberStatement,
 	usageStatement,
 	type SubscriberRow,
@@ -28,10 +22,6 @@ import { bumpUsersVersionStatement } from './users-version';
 
 function subscriberNotFound(): AppError {
 	return new AppError('NOT_FOUND', 'Subscriber not found', 404);
-}
-
-function nodeNotFound(): AppError {
-	return new AppError('NOT_FOUND', 'Node not found', 404);
 }
 
 function emailConflict(): AppError {
@@ -50,7 +40,7 @@ function toUsage(row: SubscriberUsageRow | null, cycleStart: number): Subscriber
 	return { cycle_start: row.cycle_start, uplink_bytes: row.uplink_bytes, downlink_bytes: row.downlink_bytes };
 }
 
-function toSubscriber(row: SubscriberRow, usage: SubscriberUsageRow | null, nodeCount: number): Subscriber {
+function toSubscriber(row: SubscriberRow, usage: SubscriberUsageRow | null): Subscriber {
 	return {
 		id: row.id,
 		name: row.name,
@@ -60,23 +50,10 @@ function toSubscriber(row: SubscriberRow, usage: SubscriberUsageRow | null, node
 		expires_at: row.expires_at,
 		usage_cycle_start: row.usage_cycle_start,
 		usage_cycle_end: row.usage_cycle_end,
-		node_count: nodeCount,
 		usage: toUsage(usage, row.usage_cycle_start),
 		created_at: row.created_at,
 		updated_at: row.updated_at,
 	};
-}
-
-function toSubscriberDetail(row: SubscriberRow, usage: SubscriberUsageRow | null, nodeIds: string[]): SubscriberDetail {
-	return { ...toSubscriber(row, usage, nodeIds.length), node_ids: nodeIds };
-}
-
-async function loadEnabledNodeIds(db: D1Database, subscriberId: string): Promise<string[]> {
-	const rows = await db
-		.prepare('SELECT node_id FROM node_clients WHERE subscriber_id = ? AND enabled = 1 ORDER BY node_id ASC')
-		.bind(subscriberId)
-		.all<{ node_id: string }>();
-	return rows.results.map((row) => row.node_id);
 }
 
 export async function listSubscribers(db: D1Database, query: ListQuery): Promise<Paginated<Subscriber>> {
@@ -87,13 +64,8 @@ export async function listSubscribers(db: D1Database, query: ListQuery): Promise
 		db,
 		pageRows.map((row) => row.id),
 	);
-	const countRows = await countNodeClientsBySubscribers(
-		db,
-		pageRows.map((row) => row.id),
-	);
 	const usageById = new Map(usageRows.map((row) => [row.subscriber_id, row]));
-	const countById = new Map(countRows.map((row) => [row.subscriber_id, row.node_count]));
-	const items = pageRows.map((row) => toSubscriber(row, usageById.get(row.id) ?? null, countById.get(row.id) ?? 0));
+	const items = pageRows.map((row) => toSubscriber(row, usageById.get(row.id) ?? null));
 	const last = items[items.length - 1];
 	return { items, next_cursor: hasMore && last ? last.id : null };
 }
@@ -111,18 +83,25 @@ export async function createSubscriber(db: D1Database, input: CreateSubscriberRe
 		now,
 	);
 
-	try {
-		await insertSubscriberStatement(db, {
+	const statements = [
+		insertSubscriberStatement(db, {
 			id: subscriberId,
 			name: input.name,
 			email: normalizeEmail(input.email),
 			status,
+			xray_email: newXrayEmail(),
+			vless_uuid: crypto.randomUUID(),
 			traffic_limit_bytes: trafficLimit,
 			expires_at: expiresAt,
 			usage_cycle_start: cycle.start,
 			usage_cycle_end: cycle.end,
 			now,
-		}).run();
+		}),
+	];
+	if (status === 'active') statements.push(bumpUsersVersionStatement(db));
+
+	try {
+		await db.batch(statements);
 	} catch (error) {
 		if (isUniqueConstraintError(error)) throw emailConflict();
 		throw error;
@@ -130,17 +109,16 @@ export async function createSubscriber(db: D1Database, input: CreateSubscriberRe
 
 	const row = await findSubscriberById(db, subscriberId);
 	if (!row) throw new AppError('INTERNAL_ERROR', 'Subscriber was not persisted', 500);
-	return toSubscriber(row, null, 0);
+	return toSubscriber(row, null);
 }
 
-export async function getSubscriber(db: D1Database, subscriberId: string): Promise<SubscriberDetail> {
+export async function getSubscriber(db: D1Database, subscriberId: string): Promise<Subscriber> {
 	const row = await findSubscriberById(db, subscriberId);
 	if (!row) throw subscriberNotFound();
 
-	const [clientsResult, usageResult] = await db.batch([enabledNodeClientsStatement(db, subscriberId), usageStatement(db, subscriberId)]);
-	const nodeIds = ((clientsResult?.results as { node_id: string }[] | undefined) ?? []).map((client) => client.node_id);
-	const usage = (usageResult?.results as SubscriberUsageRow[] | undefined)?.[0] ?? null;
-	return toSubscriberDetail(row, usage, nodeIds);
+	const usageResult = await usageStatement(db, subscriberId).all<SubscriberUsageRow>();
+	const usage = usageResult.results[0] ?? null;
+	return toSubscriber(row, usage);
 }
 
 /**
@@ -188,64 +166,5 @@ export async function updateSubscriber(db: D1Database, subscriberId: string, inp
 
 	const updated = await findSubscriberById(db, subscriberId);
 	if (!updated) throw subscriberNotFound();
-	const nodeIds = await loadEnabledNodeIds(db, subscriberId);
-	return toSubscriber(updated, usage ?? null, nodeIds.length);
-}
-
-/**
- * Replaces the node grants of one subscriber. Existing credentials are kept for
- * nodes that stay granted, re-enabled for nodes that were revoked earlier, and
- * disabled (not deleted) for nodes that leave the set so historical traffic
- * attribution survives.
- */
-export async function replaceSubscriberNodes(db: D1Database, subscriberId: string, nodeIds: string[]): Promise<SubscriberDetail> {
-	const subscriber = await findSubscriberById(db, subscriberId);
-	if (!subscriber) throw subscriberNotFound();
-
-	const desired = [...new Set(nodeIds)];
-	if (desired.length > 0) {
-		const nodes = await findNodesByIds(db, desired);
-		const found = new Set(nodes.map((node) => node.id));
-		const missing = desired.find((nodeId) => !found.has(nodeId));
-		if (missing) throw nodeNotFound();
-	}
-
-	const now = nowSeconds();
-	const existing = await findNodeClientsBySubscriber(db, subscriberId);
-	const existingByNode = new Map(existing.map((client) => [client.node_id, client]));
-	const statements: D1PreparedStatement[] = [];
-
-	for (const nodeId of desired) {
-		const client = existingByNode.get(nodeId);
-		if (!client) {
-			statements.push(
-				insertNodeClientStatement(db, {
-					id: newId(),
-					node_id: nodeId,
-					subscriber_id: subscriberId,
-					xray_email: newXrayEmail(),
-					vless_uuid: crypto.randomUUID(),
-					now,
-				}),
-			);
-		} else if (client.enabled !== 1) {
-			statements.push(setNodeClientEnabledStatement(db, client.id, true, now));
-		}
-	}
-
-	const desiredSet = new Set(desired);
-	for (const client of existing) {
-		if (client.enabled === 1 && !desiredSet.has(client.node_id)) {
-			statements.push(setNodeClientEnabledStatement(db, client.id, false, now));
-		}
-	}
-
-	if (statements.length > 0) {
-		statements.push(bumpUsersVersionStatement(db));
-		await db.batch(statements);
-	}
-
-	const [usage] = await findUsageBySubscribers(db, [subscriberId]);
-	const nodeIdsAfter = await loadEnabledNodeIds(db, subscriberId);
-	return toSubscriberDetail(subscriber, usage ?? null, nodeIdsAfter);
+	return toSubscriber(updated, usage ?? null);
 }

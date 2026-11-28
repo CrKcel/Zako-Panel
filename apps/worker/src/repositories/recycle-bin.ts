@@ -98,7 +98,7 @@ export async function countRecycleBinItems(db: D1Database): Promise<RecycleBinCo
 export async function findTrashedSubscriberById(db: D1Database, subscriberId: string): Promise<SubscriberRow | null> {
 	const row = await db
 		.prepare(
-			`SELECT id, name, email, status, traffic_limit_bytes, expires_at,
+			`SELECT id, name, email, status, xray_email, vless_uuid, traffic_limit_bytes, expires_at,
 			        usage_cycle_start, usage_cycle_end, disabled_at, created_at, updated_at
 			 FROM subscribers
 			 WHERE id = ? AND status = 'disabled'
@@ -171,7 +171,6 @@ function purgeSubscriberGroupStatements(db: D1Database, ids: string[]): D1Prepar
 	const placeholders = sqlPlaceholders(ids.length);
 	return [
 		db.prepare(`DELETE FROM subscriptions WHERE subscriber_id IN (${placeholders})`).bind(...ids),
-		db.prepare(`DELETE FROM node_clients WHERE subscriber_id IN (${placeholders})`).bind(...ids),
 		db.prepare(`DELETE FROM subscriber_usage WHERE subscriber_id IN (${placeholders})`).bind(...ids),
 		db.prepare(`DELETE FROM user_traffic_hourly WHERE subscriber_id IN (${placeholders})`).bind(...ids),
 		db.prepare(`DELETE FROM meta WHERE k = ? AND v IN (${placeholders})`).bind(META_KEYS.defaultSubscriberId, ...ids),

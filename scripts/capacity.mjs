@@ -197,6 +197,8 @@ function buildSeedSql(adminEmail) {
 				'name',
 				'email',
 				'status',
+				'xray_email',
+				'vless_uuid',
 				'traffic_limit_bytes',
 				'expires_at',
 				'usage_cycle_start',
@@ -204,7 +206,20 @@ function buildSeedSql(adminEmail) {
 				'created_at',
 				'updated_at',
 			],
-			subscribers.map((subscriber) => [subscriber.id, subscriber.name, null, 'active', null, null, cycle.start, cycle.end, now, now]),
+			subscribers.map((subscriber) => [
+				subscriber.id,
+				subscriber.name,
+				null,
+				'active',
+				`u_${ulid()}`,
+				randomUUID(),
+				null,
+				null,
+				cycle.start,
+				cycle.end,
+				now,
+				now,
+			]),
 		),
 		...insertMany(
 			'subscriber_usage',
@@ -274,11 +289,6 @@ function buildSeedSql(adminEmail) {
 				now,
 				now,
 			]),
-		),
-		...insertMany(
-			'node_clients',
-			['id', 'node_id', 'subscriber_id', 'xray_email', 'vless_uuid', 'enabled', 'created_at', 'updated_at'],
-			pairs.map(({ node, subscriber }) => [ulid(), node.id, subscriber.id, `u_${ulid()}`, randomUUID(), 1, now, now]),
 		),
 	];
 
@@ -596,7 +606,7 @@ async function main() {
 		if (seeded.code !== 0) throw new Error(`seed failed\n${seeded.stderr || seeded.stdout}`);
 
 		const countQuery =
-			'SELECT (SELECT COUNT(*) FROM nodes) AS nodes, (SELECT COUNT(*) FROM node_clients) AS clients, ' +
+			'SELECT (SELECT COUNT(*) FROM nodes) AS nodes, ' +
 			'(SELECT COUNT(*) FROM subscribers) AS subscribers, (SELECT COUNT(*) FROM subscription_profiles) AS profiles, ' +
 			'(SELECT json_array_length(rules_json) FROM subscription_profiles LIMIT 1) AS rules';
 		const counted = await runCommand([
@@ -677,8 +687,8 @@ async function main() {
 		);
 		console.log(
 			formatTable([
-				['rows', 'nodes', 'grants', 'subscribers', 'profiles', 'rules'],
-				['seeded', counts.nodes, counts.clients, counts.subscribers, counts.profiles, counts.rules],
+				['rows', 'nodes', 'subscribers', 'profiles', 'rules'],
+				['seeded', counts.nodes, counts.subscribers, counts.profiles, counts.rules],
 			]),
 		);
 

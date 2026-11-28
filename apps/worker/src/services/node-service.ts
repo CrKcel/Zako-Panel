@@ -11,7 +11,7 @@ import type {
 import { isUniqueConstraintError } from '../lib/db-errors';
 import { AppError } from '../lib/errors';
 import { sha256Hex } from '../lib/hash';
-import { newId, newXrayEmail } from '../lib/ids';
+import { newId } from '../lib/ids';
 import { deriveNodeStatus, nowSeconds } from '../lib/node-status';
 import { generateToken } from '../lib/token';
 import { getProtocolAdapter, isEndpointProtocol, requireProtocolAdapter } from '../protocols';
@@ -23,7 +23,6 @@ import {
 	listEndpointRowsByNode,
 	updateEndpoint as updateEndpointRow,
 } from '../repositories/endpoints';
-import { getMetaValue, META_KEYS } from '../repositories/meta';
 import {
 	deleteNodeById,
 	findNodeById,
@@ -36,9 +35,8 @@ import {
 	type NodeRow,
 } from '../repositories/nodes';
 import { insertAuditEvent } from '../repositories/audit-events';
-import { findSubscriberById, insertNodeClientStatement, listNodeClientRowsByNode } from '../repositories/subscribers';
+import { listSubscriberCredentialsByNode } from '../repositories/subscribers';
 import type { ListQuery, Paginated } from '../types';
-import { bumpUsersVersionStatement } from './users-version';
 
 export interface ProvisionEndpoint {
 	id: string;
@@ -79,8 +77,8 @@ export interface NodeProvisionParams {
 
 /**
  * Prepares the D1 batch statements and permanent agent token for creating a new
- * node, the endpoints reported by the node, and a default-subscriber grant when
- * present.
+ * node and the endpoints reported by the node. Active subscribers are synced to
+ * every node through GET /api/v1/agent/users.
  */
 export async function prepareNodeProvision(
 	db: D1Database,
@@ -91,8 +89,6 @@ export async function prepareNodeProvision(
 }> {
 	const secret = generateToken();
 	const tokenHash = await sha256Hex(secret);
-	const defaultSubscriberId = await getMetaValue(db, META_KEYS.defaultSubscriberId);
-	const defaultSubscriber = defaultSubscriberId ? await findSubscriberById(db, defaultSubscriberId) : null;
 
 	const statements = [
 		insertNodeStatement(db, {
@@ -114,20 +110,7 @@ export async function prepareNodeProvision(
 				now: params.now,
 			}),
 		),
-		bumpUsersVersionStatement(db),
 	];
-	if (defaultSubscriber) {
-		statements.push(
-			insertNodeClientStatement(db, {
-				id: newId(),
-				node_id: params.nodeId,
-				subscriber_id: defaultSubscriber.id,
-				xray_email: newXrayEmail(),
-				vless_uuid: crypto.randomUUID(),
-				now: params.now,
-			}),
-		);
-	}
 
 	return {
 		statements,
@@ -308,14 +291,13 @@ export async function listEndpoints(db: D1Database, nodeId: string): Promise<End
 }
 
 /**
- * Exposes the credentials a node-local inbound must contain. P0 has no user
- * sync, so without this the operator cannot make statistics keys and inbound
- * client emails agree and every user bucket is attributed as unknown.
+ * Exposes the subscriber credentials synced onto a node so an operator can
+ * match statistics keys and inbound client entries.
  */
 export async function listNodeClients(db: D1Database, nodeId: string): Promise<NodeClient[]> {
 	const node = await findNodeById(db, nodeId);
 	if (!node) throw nodeNotFound();
-	const rows = await listNodeClientRowsByNode(db, nodeId);
+	const rows = await listSubscriberCredentialsByNode(db, nodeId);
 	return rows.map((row) => ({
 		id: row.id,
 		node_id: row.node_id,

@@ -6,7 +6,7 @@
 
 ## 1. 通用约定
 
-- **主键**：业务主键统一用 ULID 字符串；`node_clients.xray_email` 固定写成 `u_<ULID>`，不把真实邮箱写进 Xray 配置。
+- **主键**：业务主键统一用 ULID 字符串；`subscribers.xray_email` 固定写成 `u_<ULID>`，不把真实邮箱写进 Xray 配置。
 - **时间与数字**：所有时间字段存 Unix 秒整数（列名以 `_at` 结尾）；流量字节数存非负整数；配额和过期时间用 `NULL` 表示“无限制”。
 - **软停用**：已有历史流量记录的节点和用户不做物理删除，避免历史账单和统计断层。
 - **邮箱规范**：入库前统一转小写并去首尾空格。
@@ -18,9 +18,7 @@
 ```mermaid
 erDiagram
     nodes ||--o{ endpoints : "1 对多接入端点"
-    nodes ||--o{ node_clients : "授权用户凭据"
     nodes ||--o{ node_configs : "配置版本历史"
-    subscribers ||--o{ node_clients : "节点权限"
     subscribers ||--|| subscriber_usage : "当月累计用量"
     subscribers ||--o{ subscriptions : "订阅链接"
     subscription_profiles ||--o{ subscriptions : "套用档案模板"
@@ -29,7 +27,7 @@ erDiagram
 ```
 
 - **节点与注册**：`nodes` 存节点名称、Token 哈希、心跳周期、最后活跃时间、健康状态、版本号；`endpoints` 存公网地址、端口和协议参数（`params_json`）；全局可复用的注册令牌哈希（`enrollment_token_hash`）和轮换时间（`enrollment_token_rotated_at`）存在 `meta` 表中。
-- **用户与凭据**：`subscribers` 存用户状态（`active` / `limited` / `expired` / `disabled`）、停用移入回收站时间（`disabled_at`）、月度限额和到期时间；`node_clients` 存用户在某节点上的 `xray_email` 和 `vless_uuid`（UUID 协议当 UUID、密码协议当密码；取消授权时把 `enabled` 设为 `0`，保留历史统计关联）。
+- **用户与凭据**：`subscribers` 存用户状态（`active` / `limited` / `expired` / `disabled`）、全局代理凭据（`xray_email`、`vless_uuid`，UUID 协议当 UUID、密码协议当密码）、停用移入回收站时间（`disabled_at`）、月度限额和到期时间；所有 `active` 用户统一下发到全部节点，取消或停用后保留行与历史统计关联。
 - **订阅与档案**：`subscription_profiles` 存节点筛选策略（全量或指定列表）、`online_only` 开关、Clash 模板 JSON 与软删除时间（`deleted_at`）；`subscriptions` 存订阅 Token（`token TEXT NOT NULL UNIQUE`）和过期/撤销时间（`revoked_at`）。
 - **配置与元数据**：`node_configs` 按 `(node_id, version)` 存不可变配置 JSON 与哈希，回滚时基于旧版本生成递增新版本；`meta` 存全局键值（如 `users_ver`、`default_subscriber_id`）；`audit_events` 记录关键管理操作。
 

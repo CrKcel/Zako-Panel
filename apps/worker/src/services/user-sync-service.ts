@@ -1,15 +1,15 @@
 import type { AgentUser, AgentUsers } from '@zako/contracts';
 import { getUsersVersion } from '../repositories/meta';
-import { nodeActiveUsersStatement } from '../repositories/subscribers';
+import { activeSubscriberUsersStatement } from '../repositories/subscribers';
 
 /**
- * The response version doubles as the entity tag. The list only contains
- * enabled credentials whose subscriber is active on this node.
+ * The response version doubles as the entity tag. The list contains every
+ * active subscriber's credentials, synced uniformly to all nodes.
  */
-export async function listNodeUsers(db: D1Database, nodeId: string): Promise<AgentUsers> {
+export async function listNodeUsers(db: D1Database): Promise<AgentUsers> {
 	const [version, users] = await Promise.all([
 		getUsersVersion(db),
-		nodeActiveUsersStatement(db, nodeId)
+		activeSubscriberUsersStatement(db)
 			.all<AgentUser>()
 			.then((result) => result.results),
 	]);

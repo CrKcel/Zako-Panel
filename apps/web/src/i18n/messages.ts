@@ -122,7 +122,7 @@ export const zhCN = {
 		topTraffic24h: '近 24 小时站点/节点流量分布',
 		quickActions: '快捷操作',
 		deployNodeDesc: '使用面板注册 Token 一键接入新 Xray 节点',
-		createSubscriberDesc: '配置流量配额、有效期与节点权限',
+		createSubscriberDesc: '配置流量配额与有效期',
 		viewTrafficDesc: '按节点、用户与全站维度下钻用量',
 		clusterHealth: '集群健康状态',
 		viewAllNodes: '查看全部节点',
@@ -329,7 +329,6 @@ export const zhCN = {
 	},
 	subscribers: {
 		loadError: '订阅用户加载失败',
-		loadNodesError: '节点加载失败',
 		searchPlaceholder: '搜索名称、邮箱或订阅链接…',
 		create: '创建订阅用户',
 		edit: '编辑订阅用户',
@@ -342,17 +341,14 @@ export const zhCN = {
 		sortName: '按名称',
 		sortUsage: '按已用流量',
 		sortExpires: '按到期时间',
-		sortNodes: '按授权节点',
 		columns: {
 			email: '邮箱',
 			usedQuota: '已用 / 额度',
 			cycle: '周期',
 			expiresAt: '到期',
-			grantedNodes: '授权节点',
 			subscriptions: '订阅链接',
 		},
 		actions: {
-			nodeGrant: '节点授权',
 			disable: '停用',
 			restore: '恢复',
 		},
@@ -377,12 +373,6 @@ export const zhCN = {
 			updated: '订阅用户已更新',
 			saveFailed: '订阅用户保存失败',
 		},
-		grant: {
-			title: '节点授权',
-			titleWithName: '节点授权 · {name}',
-			updated: '节点授权已更新',
-			saveFailed: '节点授权保存失败',
-		},
 	},
 	subscriberDetail: {
 		backToList: '返回列表',
@@ -391,8 +381,6 @@ export const zhCN = {
 		cycle: '周期',
 		expiresAt: '到期',
 		createdAt: '创建时间',
-		grantedNodes: '授权节点',
-		noGrantedNodes: '暂无授权节点',
 		trafficLast24h: '近 24 小时流量',
 		disabledBanner: '该订阅用户已停用，当前位于回收站中。',
 		tabs: {
@@ -711,7 +699,7 @@ export const enUS: Messages = {
 		topTraffic24h: '24h Traffic Distribution',
 		quickActions: 'Quick Actions',
 		deployNodeDesc: 'Use the panel enrollment token to onboard a new Xray node',
-		createSubscriberDesc: 'Configure traffic quota, expiry, and node permissions',
+		createSubscriberDesc: 'Configure traffic quota and expiry',
 		viewTrafficDesc: 'Drill down into node, subscriber, and site traffic',
 		clusterHealth: 'Cluster Health',
 		viewAllNodes: 'View all nodes',
@@ -921,7 +909,6 @@ export const enUS: Messages = {
 	},
 	subscribers: {
 		loadError: 'Failed to load subscribers',
-		loadNodesError: 'Failed to load nodes',
 		searchPlaceholder: 'Search name, email, or subscription link…',
 		create: 'Create Subscriber',
 		edit: 'Edit Subscriber',
@@ -934,17 +921,14 @@ export const enUS: Messages = {
 		sortName: 'Name',
 		sortUsage: 'Usage',
 		sortExpires: 'Expiry',
-		sortNodes: 'Nodes',
 		columns: {
 			email: 'Email',
 			usedQuota: 'Used / Quota',
 			cycle: 'Cycle',
 			expiresAt: 'Expires At',
-			grantedNodes: 'Granted Nodes',
 			subscriptions: 'Subscription Links',
 		},
 		actions: {
-			nodeGrant: 'Node Access',
 			disable: 'Disable',
 			restore: 'Restore',
 		},
@@ -969,12 +953,6 @@ export const enUS: Messages = {
 			updated: 'Subscriber updated',
 			saveFailed: 'Failed to save subscriber',
 		},
-		grant: {
-			title: 'Node Access',
-			titleWithName: 'Node Access · {name}',
-			updated: 'Node access updated',
-			saveFailed: 'Failed to save node access',
-		},
 	},
 	subscriberDetail: {
 		backToList: 'Back to List',
@@ -983,8 +961,6 @@ export const enUS: Messages = {
 		cycle: 'Cycle',
 		expiresAt: 'Expires At',
 		createdAt: 'Created At',
-		grantedNodes: 'Granted Nodes',
-		noGrantedNodes: 'No granted nodes',
 		trafficLast24h: 'Traffic (Last 24h)',
 		disabledBanner: 'This subscriber is disabled and currently in the recycle bin.',
 		tabs: {

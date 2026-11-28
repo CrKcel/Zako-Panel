@@ -354,12 +354,12 @@ paths:
     get:
       operationId: listNodeClients
       tags: [admin]
-      summary: List node credential grants
+      summary: List node user credentials
       description: |
-        Returns every node_client row, including disabled grants, so an operator
-        can match statistics keys and inbound clients. The agent's user sync is the
-        authority for the running inbound; this endpoint is for inspection and
-        troubleshooting.
+        Returns the active and non-disabled subscriber credentials synced to
+        nodes so an operator can match statistics keys and inbound clients.
+        The agent's user sync is the authority for the running inbound; this
+        endpoint is for inspection and troubleshooting.
       security:
         - AccessJwt: []
       parameters:
@@ -852,7 +852,7 @@ paths:
                 required: [data, meta]
                 properties:
                   data:
-                    $ref: '#/components/schemas/SubscriberDetail'
+                    $ref: '#/components/schemas/Subscriber'
                   meta:
                     $ref: '#/components/schemas/Meta'
         '401':
@@ -886,42 +886,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/Subscriber'
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/admin/subscribers/{subscriberId}/nodes:
-    put:
-      operationId: replaceSubscriberNodes
-      tags: [admin]
-      summary: Replace node grants and create or disable node clients
-      security:
-        - AccessJwt: []
-      parameters:
-        - $ref: '#/components/parameters/SubscriberId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReplaceSubscriberNodesRequest'
-      responses:
-        '200':
-          description: Updated subscriber detail
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    $ref: '#/components/schemas/SubscriberDetail'
                   meta:
                     $ref: '#/components/schemas/Meta'
         '400':
@@ -2147,7 +2111,6 @@ components:
         - status
         - usage_cycle_start
         - usage_cycle_end
-        - node_count
         - created_at
         - updated_at
       properties:
@@ -2167,9 +2130,6 @@ components:
           type: integer
         usage_cycle_end:
           type: integer
-        node_count:
-          description: Number of nodes this subscriber currently holds an enabled credential for.
-          type: integer
         usage:
           oneOf:
             - $ref: '#/components/schemas/SubscriberUsage'
@@ -2178,16 +2138,6 @@ components:
           type: integer
         updated_at:
           type: integer
-    SubscriberDetail:
-      allOf:
-        - $ref: '#/components/schemas/Subscriber'
-        - type: object
-          required: [node_ids]
-          properties:
-            node_ids:
-              type: array
-              items:
-                type: string
     TrafficGroupBy:
       type: string
       enum: [node, subscriber, site]
@@ -2587,15 +2537,6 @@ components:
           minimum: 0
         expires_at:
           type: [integer, 'null']
-    ReplaceSubscriberNodesRequest:
-      type: object
-      required: [node_ids]
-      properties:
-        node_ids:
-          type: array
-          items:
-            type: string
-          uniqueItems: true
     PublishConfigRequest:
       type: object
       required: [definition]

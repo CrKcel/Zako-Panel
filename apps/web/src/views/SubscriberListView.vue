@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type {
 	CreateSubscriberRequest,
-	Node,
 	Profile,
 	RecycleBinList,
 	Subscriber,
@@ -12,13 +11,11 @@ import type {
 import type { FormInstance, FormRules, TableInstance } from 'element-plus';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
-import { nodesApi } from '../api/nodes';
 import { profilesApi } from '../api/profiles';
 import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
 import { subscriptionsApi } from '../api/subscriptions';
 import AppIcon from '../components/AppIcon.vue';
-import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
@@ -64,7 +61,7 @@ function emptySubscriberForm(): SubscriberForm {
 	return { name: '', email: '', limit_value: undefined, limit_unit: 'GB', expires_at: null, suspended: false };
 }
 
-type SortKey = 'status' | 'name' | 'usage' | 'expires' | 'nodes';
+type SortKey = 'status' | 'name' | 'usage' | 'expires';
 
 const activeTab = ref<'list' | 'recycle-bin'>('list');
 const binCategory = ref<'subscriber' | 'subscription'>('subscriber');
@@ -76,8 +73,6 @@ const viewMode = ref<ListViewMode>('card');
 const tableRef = ref<TableInstance>();
 const form = ref<SubscriberForm>(emptySubscriberForm());
 const formRef = ref<FormInstance>();
-const grantVisible = ref(false);
-const grantTarget = ref<Subscriber | null>(null);
 
 const {
 	data: subscribers,
@@ -105,12 +100,6 @@ const { data: profiles } = useAsyncResource<Profile[]>(() => profilesApi.list().
 	initialValue: [],
 	cacheKey: 'profiles:list',
 	onError: (error) => showError(error, t('subscriptions.loadProfilesError')),
-});
-
-const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
-	initialValue: [],
-	cacheKey: 'nodes:list',
-	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
 const EMPTY_BIN: RecycleBinList = {
@@ -213,8 +202,6 @@ const filteredSubscribers = computed(() => {
 				return subscriberUsedBytes(b) - subscriberUsedBytes(a) || a.name.localeCompare(b.name);
 			case 'expires':
 				return (a.expires_at ?? Number.MAX_SAFE_INTEGER) - (b.expires_at ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name);
-			case 'nodes':
-				return b.node_count - a.node_count || a.name.localeCompare(b.name);
 		}
 	});
 });
@@ -228,8 +215,6 @@ const rules = computed<FormRules>(() => ({
 	name: [{ required: true, message: t('subscribers.form.nameRequired'), trigger: 'blur' }],
 	email: [{ type: 'email', message: t('subscribers.form.invalidEmail'), trigger: 'blur' }],
 }));
-
-const grantTitle = computed(() => t('subscribers.grant.titleWithName', { name: grantTarget.value?.name ?? '' }));
 
 const {
 	visible: dialogVisible,
@@ -317,20 +302,6 @@ async function disableSubscriber(row: Subscriber): Promise<void> {
 	if (!(await confirmAction(t('subscribers.disable.confirm', { name: row.name, days: 30 })))) return;
 	await disableAction.runFor(row.id, row);
 }
-
-function openGrant(row: Subscriber): void {
-	grantTarget.value = row;
-	grantVisible.value = true;
-}
-
-async function onGrantSaved(): Promise<void> {
-	invalidateCachedResource('subscribers:list');
-	if (grantTarget.value) {
-		invalidateCachedResource(`subscribers:detail:${grantTarget.value.id}`);
-	}
-	invalidateCachedPrefix('nodes:clients:');
-	await reload();
-}
 </script>
 
 <template>
@@ -359,7 +330,6 @@ async function onGrantSaved(): Promise<void> {
 							<el-option :label="t('subscribers.sortName')" value="name" />
 							<el-option :label="t('subscribers.sortUsage')" value="usage" />
 							<el-option :label="t('subscribers.sortExpires')" value="expires" />
-							<el-option :label="t('subscribers.sortNodes')" value="nodes" />
 						</el-select>
 					</div>
 				</template>
@@ -386,7 +356,6 @@ async function onGrantSaved(): Promise<void> {
 							:disabling="disableAction.isRunning(row.id)"
 							:is-revoking="subActions.isRevoking"
 							@edit="(item) => openEdit(item.id)"
-							@grant="openGrant"
 							@disable="disableSubscriber"
 							@create-subscription="(item) => subActions.openCreateFor({ id: item.id, name: item.name })"
 							@show-subscription-links="subActions.openLinks"
@@ -464,13 +433,6 @@ async function onGrantSaved(): Promise<void> {
 									<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
 								</template>
 							</el-table-column>
-							<el-table-column :label="t('subscribers.columns.grantedNodes')" width="95">
-								<template #default="{ row }">
-									<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
-										{{ row.node_count }}
-									</RouterLink>
-								</template>
-							</el-table-column>
 							<el-table-column :label="t('subscribers.columns.subscriptions')" width="105">
 								<template #default="{ row }">
 									<button type="button" class="sub-count-btn tnum" @click="toggleExpand(row as Subscriber)">
@@ -479,10 +441,9 @@ async function onGrantSaved(): Promise<void> {
 									</button>
 								</template>
 							</el-table-column>
-							<el-table-column :label="t('common.actions')" width="250" fixed="right">
+							<el-table-column :label="t('common.actions')" width="190" fixed="right">
 								<template #default="{ row }">
 									<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
-									<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
 									<RouterLink :to="`/subscribers/${row.id}`" custom v-slot="{ navigate }">
 										<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
 									</RouterLink>
@@ -581,8 +542,6 @@ async function onGrantSaved(): Promise<void> {
 			<el-button type="primary" :loading="submitting" @click="submit">{{ t('common.save') }}</el-button>
 		</template>
 	</el-dialog>
-
-	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="onGrantSaved" />
 
 	<SubscriptionFormDialog
 		v-model:visible="subActions.formVisible.value"

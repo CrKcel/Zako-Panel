@@ -39,7 +39,7 @@ Agent 是跑在节点（Debian 12/13）上的独立 Go 二进制，由 `systemd`
 
 ## 3. 用户名单怎么同步（热更新与回退）
 
-1. **发现变化**：控制面每次修改用户授权、配额超限或到期，都会把全局版本号 `users_ver` 加 1。Agent 心跳时看到服务端返回的 `users_ver` 和自己手里不一样，就触发一次同步。
+1. **发现变化**：控制面每次新增有效用户、修改用户状态、配额超限或到期，都会把全局版本号 `users_ver` 加 1。Agent 心跳时看到服务端返回的 `users_ver` 和自己手里不一样，就触发一次同步。
 2. **省流拉取**：Agent 带上本地版本号作为 `If-None-Match` 请求 `GET /api/v1/agent/users`。如果版本其实没变，服务端直接返回 `304 Not Modified`。
 3. **算差集并热更新**：对比新名单和本地 `users.json`，算出要新增、删除的用户（凭据变了就先删后加），调用 Xray gRPC `HandlerService.AlterInbound`（`RemoveUser` / `AddUser`）动态修改，然后原子更新 `users.json` 和版本号。每次同步前都会从当前配置文档重新读取受管入站列表，按每个入站的协议编码账号：VLESS/VMess 用 UUID，Trojan/Shadowsocks 用同一个凭据当密码，Shadowsocks 还要带上入站的加密方式。
 4. **万一热更新失败（安全回退）**：

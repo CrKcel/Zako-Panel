@@ -5,17 +5,11 @@ import { subscriberBlockReason, type EntitlementInput } from '../lib/subscriber-
 import { getProtocolAdapter } from '../protocols';
 import type { ProxyEndpoint } from '../protocols/types';
 import { renderClashDocument, type RenderProxy } from '../renderers/clash';
-import { enabledEndpointsByNodesStatement, listEnabledEndpointRowsByNodes, type EndpointRow } from '../repositories/endpoints';
+import { listAllEnabledEndpointsStatement, type EndpointRow } from '../repositories/endpoints';
 import { getMetaValue, META_KEYS } from '../repositories/meta';
-import { findNodesByIds, findNodesByIdsStatement, type NodeRow } from '../repositories/nodes';
+import { listAllNodesStatement, type NodeRow } from '../repositories/nodes';
 import { findProfileById, findProfileStatement, profileNodeIdsStatement, type ProfileRow } from '../repositories/profiles';
-import {
-	enabledNodeClientsStatement,
-	findSubscriberById,
-	usageStatement,
-	type NodeClientRow,
-	type SubscriberUsageRow,
-} from '../repositories/subscribers';
+import { findFirstSubscriber, findSubscriberById, usageStatement, type SubscriberUsageRow } from '../repositories/subscribers';
 import { findSubscriptionByToken, type SubscriptionLookupRow } from '../repositories/subscriptions';
 import { toProfile } from './profile-mapping';
 
@@ -48,7 +42,6 @@ export interface DistributionContext {
 	subscription: SubscriptionLookupRow;
 	profile: Profile;
 	profileNodeIds: string[];
-	clients: NodeClientRow[];
 	usage: SubscriberUsageRow | null;
 }
 
@@ -91,23 +84,21 @@ export async function loadDistributionContext(db: D1Database, token: string): Pr
 		throw forbidden('Subscription has expired');
 	}
 
-	const [profileResult, nodeIdsResult, clientsResult, usageResult] = await db.batch([
+	const [profileResult, nodeIdsResult, usageResult] = await db.batch([
 		findProfileStatement(db, subscription.profile_id),
 		profileNodeIdsStatement(db, subscription.profile_id),
-		enabledNodeClientsStatement(db, subscription.subscriber_id),
 		usageStatement(db, subscription.subscriber_id),
 	]);
 
 	const profileRow = (profileResult?.results as ProfileRow[] | undefined)?.[0];
 	if (!profileRow) throw forbidden('Subscription profile is no longer available');
 	const profileNodeIds = ((nodeIdsResult?.results as { node_id: string }[] | undefined) ?? []).map((row) => row.node_id);
-	const clients = (clientsResult?.results as NodeClientRow[] | undefined) ?? [];
 	const usage = (usageResult?.results as SubscriberUsageRow[] | undefined)?.[0] ?? null;
 
 	const blocked = subscriberBlockReason(entitlementOf(subscription, usage), now);
 	if (blocked) throw forbidden(BLOCK_MESSAGES[blocked]);
 
-	return { subscription, profile: toProfile(profileRow), profileNodeIds, clients, usage };
+	return { subscription, profile: toProfile(profileRow), profileNodeIds, usage };
 }
 
 function uniqueName(base: string, used: Set<string>): string {
@@ -123,23 +114,23 @@ function uniqueName(base: string, used: Set<string>): string {
 }
 
 /**
- * Applies the distribution rules to granted nodes. Both serving and preview use
- * this path so a preview cannot show a node that a real subscription drops.
- * The checks run in the documented order, and the first failing rule is the one
- * reported for a skipped node. An endpoint whose protocol has no adapter is not
- * renderable and is reported as `no_endpoint`, matching "no usable endpoint".
+ * Applies the profile distribution rules across all nodes. Both serving and
+ * preview use this path so a preview cannot show a node that a real subscription
+ * drops. The checks run in the documented order, and the first failing rule is
+ * the one reported for a skipped node. An endpoint whose protocol has no adapter
+ * is not renderable and is reported as `no_endpoint`, matching "no usable
+ * endpoint".
  */
 function buildProxies(
 	profile: Profile,
 	profileNodeIds: string[],
-	clients: NodeClientRow[],
+	secret: string,
 	nodes: NodeRow[],
 	endpoints: EndpointRow[],
 	now: number,
 ): Distribution {
 	const onlineOnly = profile.online_only;
 	const selected = profile.node_selection === 'selected' ? new Set(profileNodeIds) : null;
-	const nodesById = new Map(nodes.map((node) => [node.id, node]));
 	const endpointsByNode = new Map<string, EndpointRow[]>();
 	for (const endpoint of endpoints) {
 		const list = endpointsByNode.get(endpoint.node_id);
@@ -158,10 +149,7 @@ function buildProxies(
 		skipped.push({ node_id: node.id, node_name: node.name, reason });
 	};
 
-	for (const client of clients) {
-		if (client.enabled !== 1) continue;
-		const node = nodesById.get(client.node_id);
-		if (!node) continue;
+	for (const node of nodes) {
 		if (node.enabled !== 1) {
 			skip(node, 'disabled');
 			continue;
@@ -196,7 +184,7 @@ function buildProxies(
 				port: endpoint.port,
 				params: params.data as Record<string, unknown>,
 			};
-			const credential = { secret: client.vless_uuid };
+			const credential = { secret };
 			rendered.push({
 				node_id: node.id,
 				proxy: adapter.toClash(proxyEndpoint, credential) as RenderProxy,
@@ -212,23 +200,18 @@ function buildProxies(
 	return { proxies, skipped };
 }
 
-async function loadNodesAndEndpoints(db: D1Database, nodeIds: string[]): Promise<{ nodes: NodeRow[]; endpoints: EndpointRow[] }> {
-	if (nodeIds.length === 0) return { nodes: [], endpoints: [] };
-	const [nodeResult, endpointResult] = await db.batch([
-		findNodesByIdsStatement(db, nodeIds),
-		enabledEndpointsByNodesStatement(db, nodeIds),
-	]);
+async function loadNodesAndEndpoints(db: D1Database): Promise<{ nodes: NodeRow[]; endpoints: EndpointRow[] }> {
+	const [nodeResult, endpointResult] = await db.batch([listAllNodesStatement(db), listAllEnabledEndpointsStatement(db)]);
 	return {
 		nodes: (nodeResult?.results as NodeRow[] | undefined) ?? [],
 		endpoints: (endpointResult?.results as EndpointRow[] | undefined) ?? [],
 	};
 }
 
-/** Resolves the granted node set for one subscriber and applies the rules. */
+/** Resolves the nodes and applies the profile's distribution rules. */
 export async function distribute(db: D1Database, context: DistributionContext): Promise<Distribution> {
-	const nodeIds = [...new Set(context.clients.map((client) => client.node_id))];
-	const { nodes, endpoints } = await loadNodesAndEndpoints(db, nodeIds);
-	return buildProxies(context.profile, context.profileNodeIds, context.clients, nodes, endpoints, nowSeconds());
+	const { nodes, endpoints } = await loadNodesAndEndpoints(db);
+	return buildProxies(context.profile, context.profileNodeIds, context.subscription.subscriber_vless_uuid, nodes, endpoints, nowSeconds());
 }
 
 /** Renders the Clash document for a profile and its distributable proxies. */
@@ -246,31 +229,30 @@ interface PreviewTarget {
 	subscriber_name: string;
 	profile: Profile;
 	profileNodeIds: string[];
-	clients: NodeClientRow[];
 	entitlement: EntitlementInput;
 }
 
 /**
- * The preview renders for an explicit subscriber or the default one. It does not
- * require a subscription row: an operator checks profile output before issuing a
- * token, which is the point of the preview.
+ * The preview renders for an explicit subscriber, the configured default
+ * subscriber, or the first non-disabled subscriber. It does not require a
+ * subscription row: an operator checks profile output before issuing a token,
+ * which is the point of the preview.
  */
 async function loadPreviewTarget(db: D1Database, profileId: string, subscriberId?: string): Promise<PreviewTarget> {
 	const profileRow = await findProfileById(db, profileId);
 	if (!profileRow) throw new AppError('NOT_FOUND', 'Profile not found', 404);
 
-	const resolvedSubscriberId = subscriberId ?? (await getMetaValue(db, META_KEYS.defaultSubscriberId));
-	if (!resolvedSubscriberId) {
-		throw new AppError('NOT_FOUND', 'Subscriber not found', 404);
+	let subscriber = null;
+	if (subscriberId !== undefined) {
+		subscriber = await findSubscriberById(db, subscriberId);
+	} else {
+		const defaultId = await getMetaValue(db, META_KEYS.defaultSubscriberId);
+		if (defaultId) subscriber = await findSubscriberById(db, defaultId);
+		if (!subscriber) subscriber = await findFirstSubscriber(db);
 	}
-	const subscriber = await findSubscriberById(db, resolvedSubscriberId);
 	if (!subscriber) throw new AppError('NOT_FOUND', 'Subscriber not found', 404);
 
-	const [nodeIdsResult, clientsResult, usageResult] = await db.batch([
-		profileNodeIdsStatement(db, profileId),
-		enabledNodeClientsStatement(db, subscriber.id),
-		usageStatement(db, subscriber.id),
-	]);
+	const [nodeIdsResult, usageResult] = await db.batch([profileNodeIdsStatement(db, profileId), usageStatement(db, subscriber.id)]);
 	const usage = (usageResult?.results as SubscriberUsageRow[] | undefined)?.[0] ?? null;
 
 	return {
@@ -278,7 +260,6 @@ async function loadPreviewTarget(db: D1Database, profileId: string, subscriberId
 		subscriber_name: subscriber.name,
 		profile: toProfile(profileRow),
 		profileNodeIds: ((nodeIdsResult?.results as { node_id: string }[] | undefined) ?? []).map((row) => row.node_id),
-		clients: (clientsResult?.results as NodeClientRow[] | undefined) ?? [],
 		entitlement: {
 			status: subscriber.status,
 			expires_at: subscriber.expires_at,
@@ -297,13 +278,8 @@ async function loadPreviewTarget(db: D1Database, profileId: string, subscriberId
 export async function previewProfile(db: D1Database, profileId: string, subscriberId?: string): Promise<ClashPreview> {
 	const target = await loadPreviewTarget(db, profileId, subscriberId);
 	const now = nowSeconds();
-
-	const nodeIds = [...new Set(target.clients.map((client) => client.node_id))];
-	const nodes = nodeIds.length > 0 ? await findNodesByIds(db, nodeIds) : [];
-	const endpoints = nodeIds.length > 0 ? await listEnabledEndpointRowsByNodes(db, nodeIds) : [];
-
-	const previewClients = target.clients.map((client) => ({ ...client, vless_uuid: PREVIEW_SECRET }));
-	const { proxies, skipped } = buildProxies(target.profile, target.profileNodeIds, previewClients, nodes, endpoints, now);
+	const { nodes, endpoints } = await loadNodesAndEndpoints(db);
+	const { proxies, skipped } = buildProxies(target.profile, target.profileNodeIds, PREVIEW_SECRET, nodes, endpoints, now);
 
 	return {
 		document: renderClashDocumentFor(target.profile, proxies),

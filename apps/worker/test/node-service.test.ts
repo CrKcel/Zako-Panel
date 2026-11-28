@@ -16,10 +16,10 @@ import {
 	DEFAULT_PARAMS,
 	DEFAULT_TROJAN_PARAMS,
 	DEFAULT_VMESS_PARAMS,
+	getSubscriberCredential,
 	nowSeconds,
 	readMeta,
 	seedEndpoint,
-	seedMeta,
 	seedNode,
 	seedProfile,
 	seedSubscriber,
@@ -51,15 +51,15 @@ async function enrollTestNode(name: string) {
 }
 
 describe('node enrollment provisioning', () => {
-	it('distributes a newly enrolled node to the default subscription after its first heartbeat', async () => {
+	it('distributes a newly enrolled node to active subscriptions after its first heartbeat without per-node grants', async () => {
 		const subscriberId = await seedSubscriber({ name: 'default' });
-		await seedMeta('default_subscriber_id', subscriberId);
+		const credential = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('bootstrap');
 		await seedSubscription({ token, subscriberId, profileId });
 
 		const enrolled = await enrollTestNode('Tokyo-01');
-		expect(await readMeta('users_ver')).toBe('1');
+		expect(await readMeta('users_ver')).toBeNull();
 		// A node with no heartbeat yet is offline and not distributable.
 		await expect(getClashSubscription(env.DB, token)).rejects.toMatchObject({ status: 503 });
 
@@ -82,43 +82,33 @@ describe('node enrollment provisioning', () => {
 		const rendered = await getClashSubscription(env.DB, token);
 		expect(rendered.body).toContain('name: Tokyo-01');
 		expect(rendered.body).toContain('type: vless');
-
-		const client = await env.DB.prepare('SELECT vless_uuid FROM node_clients WHERE node_id = ?')
-			.bind(enrolled.node_id)
-			.first<{ vless_uuid: string }>();
-		expect(rendered.body).toContain(`uuid: ${client?.vless_uuid}`);
+		expect(rendered.body).toContain(`uuid: ${credential.uuid}`);
 	});
 
-	it('exposes the credentials a node-local inbound must contain', async () => {
-		const subscriberId = await seedSubscriber({ name: 'default' });
-		await seedMeta('default_subscriber_id', subscriberId);
+	it('exposes the subscriber credentials synced to a node', async () => {
+		const activeId = await seedSubscriber({ name: 'active-user' });
+		const limitedId = await seedSubscriber({ name: 'limited-user', status: 'limited' });
+		await seedSubscriber({ name: 'disabled-user', status: 'disabled' });
 		const enrolled = await enrollTestNode('Tokyo-01');
 
 		const clients = await listNodeClients(env.DB, enrolled.node_id);
-		expect(clients).toHaveLength(1);
-		expect(clients[0]).toMatchObject({
+		expect(clients).toHaveLength(2);
+		expect(clients.find((c) => c.subscriber_id === activeId)).toMatchObject({
 			node_id: enrolled.node_id,
-			subscriber_id: subscriberId,
-			subscriber_name: 'default',
+			subscriber_id: activeId,
+			subscriber_name: 'active-user',
 			enabled: true,
+		});
+		expect(clients.find((c) => c.subscriber_id === limitedId)).toMatchObject({
+			node_id: enrolled.node_id,
+			subscriber_id: limitedId,
+			subscriber_name: 'limited-user',
+			enabled: false,
 		});
 		expect(clients[0]?.xray_email).toMatch(/^u_[0-9A-HJKMNP-TV-Z]{26}$/);
 		expect(clients[0]?.vless_uuid).toMatch(/^[0-9a-f-]{36}$/);
 
 		await expect(listNodeClients(env.DB, '01J2Z6Q8Y3V9M4K7T1B5C0D2E9')).rejects.toMatchObject({ status: 404 });
-	});
-
-	it('skips the default client when no default subscriber exists', async () => {
-		const enrolled = await enrollTestNode('Osaka-01');
-		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(enrolled.node_id).all();
-		expect(clients.results).toHaveLength(0);
-	});
-
-	it('ignores a default subscriber id that no longer exists', async () => {
-		await seedMeta('default_subscriber_id', '01J2Z6Q8Y3V9M4K7T1B5C0D2E6');
-		const enrolled = await enrollTestNode('Nagoya-01');
-		const clients = await env.DB.prepare('SELECT id FROM node_clients WHERE node_id = ?').bind(enrolled.node_id).all();
-		expect(clients.results).toHaveLength(0);
 	});
 });
 

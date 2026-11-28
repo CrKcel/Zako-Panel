@@ -1,13 +1,13 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { replaceSubscriberNodes, updateSubscriber } from '../src/services/subscriber-service';
-import { seedMeta, seedNode, seedNodeClient, seedSubscriber } from './helpers';
+import { createSubscriber, updateSubscriber } from '../src/services/subscriber-service';
+import { getSubscriberCredential, seedMeta, seedNode, seedSubscriber } from './helpers';
 
 const SECRET = 's'.repeat(43);
 
-async function seedAgentNode(): Promise<{ nodeId: string; token: string }> {
-	const nodeId = await seedNode({ name: 'sync-node', secret: SECRET });
-	return { nodeId, token: `${nodeId}.${SECRET}` };
+async function seedAgentNode(name = 'sync-node', secret = SECRET): Promise<{ nodeId: string; token: string }> {
+	const nodeId = await seedNode({ name, secret });
+	return { nodeId, token: `${nodeId}.${secret}` };
 }
 
 function fetchUsers(token: string, ifNoneMatch?: string): Promise<Response> {
@@ -17,35 +17,36 @@ function fetchUsers(token: string, ifNoneMatch?: string): Promise<Response> {
 }
 
 describe('node user set', () => {
-	it('returns only enabled credentials of active subscribers on this node', async () => {
-		const { nodeId, token } = await seedAgentNode();
-		const otherNodeId = await seedNode({ name: 'other-node' });
+	it('returns all active subscribers uniformly across all nodes and excludes inactive ones', async () => {
+		const { token } = await seedAgentNode('node-a', 'a'.repeat(43));
+		const { token: otherToken } = await seedAgentNode('node-b', 'b'.repeat(43));
 		const active = await seedSubscriber({ name: 'Active' });
+		const activeCred = await getSubscriberCredential(active);
 		const suspended = await seedSubscriber({ name: 'Suspended', status: 'disabled' });
-		const kept = await seedNodeClient(nodeId, active);
-		const suspendedClient = await seedNodeClient(nodeId, suspended);
-		await seedNodeClient(otherNodeId, active);
-		const revoked = await seedSubscriber({ name: 'Revoked' });
-		const disabledClient = await seedNodeClient(nodeId, revoked, { enabled: false });
+		const suspendedCred = await getSubscriberCredential(suspended);
+		const expired = await seedSubscriber({ name: 'Expired', status: 'expired' });
+		const expiredCred = await getSubscriberCredential(expired);
+		const limited = await seedSubscriber({ name: 'Limited', status: 'limited' });
+		const limitedCred = await getSubscriberCredential(limited);
 		await seedMeta('users_ver', '7');
 
-		const response = await fetchUsers(token);
-		expect(response.status).toBe(200);
-		expect(response.headers.get('ETag')).toBe('"7"');
-		const body = (await response.json()) as { data: { version: number; users: { xray_email: string; vless_uuid: string }[] } };
-		expect(body.data.version).toBe(7);
-		expect(body.data.users).toEqual([{ xray_email: kept.xrayEmail, vless_uuid: kept.uuid }]);
+		for (const nodeToken of [token, otherToken]) {
+			const response = await fetchUsers(nodeToken);
+			expect(response.status).toBe(200);
+			expect(response.headers.get('ETag')).toBe('"7"');
+			const body = (await response.json()) as { data: { version: number; users: { xray_email: string; vless_uuid: string }[] } };
+			expect(body.data.version).toBe(7);
+			expect(body.data.users).toEqual([{ xray_email: activeCred.xrayEmail, vless_uuid: activeCred.uuid }]);
 
-		// A credential that is disabled on the node or belongs to a suspended
-		// subscriber must not reach the node runtime.
-		expect(body.data.users.some((user) => user.xray_email === suspendedClient.xrayEmail)).toBe(false);
-		expect(body.data.users.some((user) => user.xray_email === disabledClient.xrayEmail)).toBe(false);
+			expect(body.data.users.some((user) => user.xray_email === suspendedCred.xrayEmail)).toBe(false);
+			expect(body.data.users.some((user) => user.xray_email === expiredCred.xrayEmail)).toBe(false);
+			expect(body.data.users.some((user) => user.xray_email === limitedCred.xrayEmail)).toBe(false);
+		}
 	});
 
 	it('answers 304 to matching and wildcard validators and 200 to a stale one', async () => {
-		const { nodeId, token } = await seedAgentNode();
-		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
+		const { token } = await seedAgentNode();
+		await seedSubscriber();
 		await seedMeta('users_ver', '11');
 
 		const fresh = await fetchUsers(token);
@@ -64,9 +65,8 @@ describe('node user set', () => {
 	});
 
 	it('changes the entity tag when the users version advances', async () => {
-		const { nodeId, token } = await seedAgentNode();
-		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
+		const { token } = await seedAgentNode();
+		await seedSubscriber();
 		await seedMeta('users_ver', '1');
 
 		const first = await fetchUsers(token);
@@ -77,28 +77,30 @@ describe('node user set', () => {
 		expect(second.headers.get('ETag')).toBe('"2"');
 	});
 
-	it('reflects grant and status changes on the next fetch', async () => {
-		const { nodeId, token } = await seedAgentNode();
-		const subscriberId = await seedSubscriber();
+	it('reflects subscriber creation and status changes on every node', async () => {
+		const { token } = await seedAgentNode('node-1', '1'.repeat(43));
+		const { token: token2 } = await seedAgentNode('node-2', '2'.repeat(43));
 		await seedMeta('users_ver', '1');
 
 		const before = (await (await fetchUsers(token)).json()) as { data: { version: number; users: unknown[] } };
 		expect(before.data.users).toEqual([]);
 
-		await replaceSubscriberNodes(env.DB, subscriberId, [nodeId]);
-		const credential = await env.DB.prepare('SELECT xray_email, vless_uuid FROM node_clients WHERE node_id = ? AND subscriber_id = ?')
-			.bind(nodeId, subscriberId)
-			.first<{ xray_email: string; vless_uuid: string }>();
-		const granted = (await (await fetchUsers(token, '"1"')).json()) as {
-			data: { version: number; users: { xray_email: string; vless_uuid: string }[] };
-		};
-		expect(granted.data.version).toBe(2);
-		expect(granted.data.users).toEqual([{ xray_email: credential?.xray_email, vless_uuid: credential?.vless_uuid }]);
+		const created = await createSubscriber(env.DB, { name: 'Alice' });
+		const credential = await getSubscriberCredential(created.id);
+		for (const nodeToken of [token, token2]) {
+			const granted = (await (await fetchUsers(nodeToken, '"1"')).json()) as {
+				data: { version: number; users: { xray_email: string; vless_uuid: string }[] };
+			};
+			expect(granted.data.version).toBe(2);
+			expect(granted.data.users).toEqual([{ xray_email: credential.xrayEmail, vless_uuid: credential.uuid }]);
+		}
 
-		await updateSubscriber(env.DB, subscriberId, { status: 'disabled' });
-		const suspended = (await (await fetchUsers(token, '"2"')).json()) as { data: { version: number; users: unknown[] } };
-		expect(suspended.data.version).toBe(3);
-		expect(suspended.data.users).toEqual([]);
+		await updateSubscriber(env.DB, created.id, { status: 'disabled' });
+		for (const nodeToken of [token, token2]) {
+			const suspended = (await (await fetchUsers(nodeToken, '"2"')).json()) as { data: { version: number; users: unknown[] } };
+			expect(suspended.data.version).toBe(3);
+			expect(suspended.data.users).toEqual([]);
+		}
 	});
 
 	it('requires a valid agent token', async () => {

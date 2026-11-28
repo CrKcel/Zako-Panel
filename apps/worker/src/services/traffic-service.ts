@@ -5,8 +5,8 @@ import { hourBucket, nowSeconds } from '../lib/node-status';
 import { assertReportWindow, assertUniqueXrayEmails, trafficPayloadHash } from '../lib/traffic';
 import { getUsersVersion } from '../repositories/meta';
 import { findNodeRuntimeById, updateNodeHeartbeatStatement, type NodeRuntimeRow } from '../repositories/nodes';
-import type { NodeClientUsageRow } from '../repositories/subscribers';
-import { nodeClientUsageMapStatement } from '../repositories/subscribers';
+import type { SubscriberReportUsageRow } from '../repositories/subscribers';
+import { subscriberUsageMapStatement } from '../repositories/subscribers';
 import {
 	findReportHash,
 	insertTrafficReportStatement,
@@ -106,10 +106,10 @@ export async function ingestReport(db: D1Database, nodeId: string, report: Agent
 			applied_config_version: appliedConfigVersion,
 			updated_at: now,
 		}),
-		nodeClientUsageMapStatement(db, nodeId, emails),
+		subscriberUsageMapStatement(db, emails),
 	]);
 
-	const mapping = (mappingResult?.results as NodeClientUsageRow[] | undefined) ?? [];
+	const mapping = (mappingResult?.results as SubscriberReportUsageRow[] | undefined) ?? [];
 	const mapped = new Map(mapping.map((row) => [row.xray_email, row]));
 
 	if (!traffic || payloadHash === null) {

@@ -2,9 +2,8 @@ import { env, SELF } from 'cloudflare:test';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import worker from '../src/index';
-import { replaceSubscriberNodes } from '../src/services/subscriber-service';
 import { previewProfile } from '../src/services/distribution';
-import { deleteProfile } from '../src/services/profile-service';
+import { deleteProfile, updateProfile } from '../src/services/profile-service';
 import {
 	createSubscription,
 	getClashSubscription,
@@ -14,12 +13,12 @@ import {
 } from '../src/services/subscription-service';
 import {
 	DEFAULT_PARAMS,
+	getSubscriberCredential,
 	hourStart,
 	nowSeconds,
 	seedDistribution,
 	seedEndpoint,
 	seedNode,
-	seedNodeClient,
 	seedMeta,
 	seedProfile,
 	seedSubscriber,
@@ -92,7 +91,6 @@ describe('Clash subscription rendering', () => {
 		const nodeId = await seedNode({ name: 'Custom-01' });
 		await seedEndpoint(nodeId);
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile({
 			clashBase: { 'mixed-port': 7890, mode: 'rule' },
 			proxyGroups: [{ name: 'PROXY', type: 'select', proxies: ['Custom-01'] }],
@@ -113,7 +111,6 @@ describe('Clash subscription rendering', () => {
 		await seedEndpoint(nodeId, { name: 'alpha', host: '198.51.100.1' });
 		await seedEndpoint(nodeId, { name: 'beta', host: '198.51.100.2' });
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('multi');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -132,7 +129,7 @@ describe('URI subscription rendering', () => {
 			params: { ...DEFAULT_PARAMS, short_id: '' },
 		});
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('uri');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -164,7 +161,6 @@ describe('URI subscription rendering', () => {
 		await seedEndpoint(nodeId, { name: 'alpha', host: '198.51.100.1' });
 		await seedEndpoint(nodeId, { name: 'beta', host: '198.51.100.2' });
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile();
 		const token = testToken('plain');
 		await seedSubscription({ token, subscriberId, profileId });
@@ -241,23 +237,27 @@ describe('subscription access control', () => {
 		expect((await fetchClash(dist.token)).status).toBe(200);
 	});
 
-	it('intersects profile selection with subscriber node grants', async () => {
-		const granted = await seedNode({ name: 'Granted' });
-		await seedEndpoint(granted);
-		const selectedOnly = await seedNode({ name: 'SelectedOnly' });
-		await seedEndpoint(selectedOnly);
+	it('authorizes nodes through profile node selection rules', async () => {
+		const nodeA = await seedNode({ name: 'NodeA' });
+		await seedEndpoint(nodeA);
+		const nodeB = await seedNode({ name: 'NodeB' });
+		await seedEndpoint(nodeB);
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(granted, subscriberId);
-		const profileId = await seedProfile({ nodeSelection: 'selected', nodeIds: [selectedOnly] });
+		const emptySelected = await seedProfile({ nodeSelection: 'selected', nodeIds: [] });
 		const token = testToken('intersect');
-		await seedSubscription({ token, subscriberId, profileId });
+		await seedSubscription({ token, subscriberId, profileId: emptySelected });
 
 		expect((await fetchClash(token)).status).toBe(503);
 
-		const both = await seedProfile({ nodeSelection: 'selected', nodeIds: [granted, selectedOnly] });
-		await env.DB.prepare('UPDATE subscriptions SET profile_id = ? WHERE subscriber_id = ?').bind(both, subscriberId).run();
-		const document = parse(await (await fetchClash(token)).text()) as ClashDocument;
-		expect(document.proxies.map((proxy) => proxy.name)).toEqual(['Granted']);
+		const onlyA = await seedProfile({ nodeSelection: 'selected', nodeIds: [nodeA] });
+		await env.DB.prepare('UPDATE subscriptions SET profile_id = ? WHERE subscriber_id = ?').bind(onlyA, subscriberId).run();
+		const documentA = parse(await (await fetchClash(token)).text()) as ClashDocument;
+		expect(documentA.proxies.map((proxy) => proxy.name)).toEqual(['NodeA']);
+
+		const allNodes = await seedProfile({ nodeSelection: 'all' });
+		await env.DB.prepare('UPDATE subscriptions SET profile_id = ? WHERE subscriber_id = ?').bind(allNodes, subscriberId).run();
+		const documentAll = parse(await (await fetchClash(token)).text()) as ClashDocument;
+		expect(documentAll.proxies.map((proxy) => proxy.name).sort()).toEqual(['NodeA', 'NodeB']);
 	});
 });
 
@@ -280,7 +280,6 @@ describe('subscription administration', () => {
 		const nodeId = await seedNode({ name: 'Admin' });
 		await seedEndpoint(nodeId);
 		const subscriberId = await seedSubscriber();
-		await seedNodeClient(nodeId, subscriberId);
 		const profileId = await seedProfile({ name: 'Rule A', rules: ['DOMAIN-SUFFIX,a.example,PROXY', 'MATCH,PROXY'] });
 		const secondProfileId = await seedProfile({ name: 'Rule B', rules: ['DOMAIN-SUFFIX,b.example,PROXY', 'MATCH,PROXY'] });
 
@@ -403,9 +402,6 @@ describe('profile preview', () => {
 		await seedEndpoint(notSelected);
 
 		const subscriberId = await seedSubscriber();
-		for (const nodeId of [online, offline, noEndpoint, disabled, unhealthy, notSelected]) {
-			await seedNodeClient(nodeId, subscriberId);
-		}
 		const profileId = await seedProfile({ nodeSelection: 'selected', nodeIds: [online, offline, noEndpoint, disabled, unhealthy] });
 
 		const preview = await previewProfile(env.DB, profileId, subscriberId);
@@ -479,24 +475,24 @@ describe('profile preview endpoint', () => {
 	});
 });
 
-describe('subscriber node grants', () => {
-	it('serves a node only after the grant creates its node client', async () => {
-		const nodeId = await seedNode({ name: 'Granted node' });
+describe('profile rule authorization', () => {
+	it('controls node distribution directly when the profile rule changes', async () => {
+		const nodeId = await seedNode({ name: 'Rule node' });
 		await seedEndpoint(nodeId);
 		const subscriberId = await seedSubscriber();
-		const profileId = await seedProfile();
+		const profileId = await seedProfile({ nodeSelection: 'selected', nodeIds: [] });
 		const token = testToken('grant');
 		await seedSubscription({ token, subscriberId, profileId });
 
 		expect((await fetchClash(token)).status).toBe(503);
 
-		await replaceSubscriberNodes(env.DB, subscriberId, [nodeId]);
+		await updateProfile(env.DB, profileId, { node_ids: [nodeId] });
 		const response = await fetchClash(token);
 		expect(response.status).toBe(200);
 		const document = parse(await response.text()) as ClashDocument;
-		expect(document.proxies.map((proxy) => proxy.name)).toEqual(['Granted node']);
+		expect(document.proxies.map((proxy) => proxy.name)).toEqual(['Rule node']);
 
-		await replaceSubscriberNodes(env.DB, subscriberId, []);
+		await updateProfile(env.DB, profileId, { node_ids: [] });
 		expect((await fetchClash(token)).status).toBe(503);
 	});
 });

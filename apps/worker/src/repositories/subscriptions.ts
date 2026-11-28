@@ -22,6 +22,7 @@ export interface SubscriptionLookupRow {
 	created_at: number;
 	subscriber_name: string;
 	subscriber_status: 'active' | 'limited' | 'expired' | 'disabled';
+	subscriber_vless_uuid: string;
 	subscriber_traffic_limit_bytes: number | null;
 	subscriber_expires_at: number | null;
 	subscriber_usage_cycle_start: number;
@@ -73,6 +74,7 @@ export async function findSubscriptionByToken(db: D1Database, token: string): Pr
 		.prepare(
 			`SELECT s.id, s.subscriber_id, s.profile_id, s.name, s.token, s.revoked_at, s.expires_at, s.created_at,
 			        sub.name AS subscriber_name, sub.status AS subscriber_status,
+			        sub.vless_uuid AS subscriber_vless_uuid,
 			        sub.traffic_limit_bytes AS subscriber_traffic_limit_bytes,
 			        sub.expires_at AS subscriber_expires_at,
 			        sub.usage_cycle_start AS subscriber_usage_cycle_start

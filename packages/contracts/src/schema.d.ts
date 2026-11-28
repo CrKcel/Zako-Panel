@@ -118,11 +118,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List node credential grants
-         * @description Returns every node_client row, including disabled grants, so an operator
-         *     can match statistics keys and inbound clients. The agent's user sync is the
-         *     authority for the running inbound; this endpoint is for inspection and
-         *     troubleshooting.
+         * List node user credentials
+         * @description Returns the active and non-disabled subscriber credentials synced to
+         *     nodes so an operator can match statistics keys and inbound clients.
+         *     The agent's user sync is the authority for the running inbound; this
+         *     endpoint is for inspection and troubleshooting.
          */
         get: operations["listNodeClients"];
         put?: never;
@@ -290,23 +290,6 @@ export interface paths {
         head?: never;
         /** Update a subscriber */
         patch: operations["updateSubscriber"];
-        trace?: never;
-    };
-    "/api/v1/admin/subscribers/{subscriberId}/nodes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Replace node grants and create or disable node clients */
-        put: operations["replaceSubscriberNodes"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/admin/nodes/{nodeId}/configs": {
@@ -844,14 +827,9 @@ export interface components {
             expires_at?: number | null;
             usage_cycle_start: number;
             usage_cycle_end: number;
-            /** @description Number of nodes this subscriber currently holds an enabled credential for. */
-            node_count: number;
             usage?: components["schemas"]["SubscriberUsage"] | null;
             created_at: number;
             updated_at: number;
-        };
-        SubscriberDetail: components["schemas"]["Subscriber"] & {
-            node_ids: string[];
         };
         /** @enum {string} */
         TrafficGroupBy: "node" | "subscriber" | "site";
@@ -1042,9 +1020,6 @@ export interface components {
             status?: "active" | "disabled";
             traffic_limit_bytes?: number | null;
             expires_at?: number | null;
-        };
-        ReplaceSubscriberNodesRequest: {
-            node_ids: string[];
         };
         PublishConfigRequest: {
             definition: {
@@ -1946,7 +1921,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        data: components["schemas"]["SubscriberDetail"];
+                        data: components["schemas"]["Subscriber"];
                         meta: components["schemas"]["Meta"];
                     };
                 };
@@ -1979,39 +1954,6 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["Subscriber"];
-                        meta: components["schemas"]["Meta"];
-                    };
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    replaceSubscriberNodes: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                subscriberId: components["parameters"]["SubscriberId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReplaceSubscriberNodesRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated subscriber detail */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["SubscriberDetail"];
                         meta: components["schemas"]["Meta"];
                     };
                 };

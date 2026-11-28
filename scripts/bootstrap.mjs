@@ -2,7 +2,7 @@
 // Generates the one-time D1 initialization SQL for a fresh deployment:
 // default profile, default subscriber and subscription.
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
@@ -68,6 +68,8 @@ const cycle = monthCycle(new Date());
 const profileId = ulid();
 const subscriberId = ulid();
 const subscriptionId = ulid();
+const xrayEmail = `u_${ulid()}`;
+const vlessUuid = randomUUID();
 const token = randomBytes(32).toString('base64url');
 
 const statements = [
@@ -80,8 +82,8 @@ VALUES (${sqlText(profileId)}, ${sqlText(values.profile)}, NULL, 'all', 1, ${sql
 		'log-level': 'info',
 	})}, '[]', '[]', 1, ${now}, ${now});`,
 	`INSERT INTO subscribers
-  (id, name, email, status, traffic_limit_bytes, expires_at, usage_cycle_start, usage_cycle_end, created_at, updated_at)
-VALUES (${sqlText(subscriberId)}, ${sqlText(values.subscriber)}, NULL, 'active', NULL, NULL, ${cycle.start}, ${cycle.end}, ${now}, ${now});`,
+  (id, name, email, status, xray_email, vless_uuid, traffic_limit_bytes, expires_at, usage_cycle_start, usage_cycle_end, created_at, updated_at)
+VALUES (${sqlText(subscriberId)}, ${sqlText(values.subscriber)}, NULL, 'active', ${sqlText(xrayEmail)}, ${sqlText(vlessUuid)}, NULL, NULL, ${cycle.start}, ${cycle.end}, ${now}, ${now});`,
 	`INSERT INTO subscriber_usage (subscriber_id, cycle_start, uplink_bytes, downlink_bytes, updated_at)
 VALUES (${sqlText(subscriberId)}, ${cycle.start}, 0, 0, ${now});`,
 	`INSERT INTO subscriptions (id, subscriber_id, profile_id, name, token, revoked_at, expires_at, created_at)

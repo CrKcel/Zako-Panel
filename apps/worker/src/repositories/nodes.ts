@@ -113,6 +113,10 @@ export function findNodesByIdsStatement(db: D1Database, nodeIds: string[]): D1Pr
 	return db.prepare(`SELECT ${NODE_COLUMNS} FROM nodes WHERE id IN (${sqlPlaceholders(nodeIds.length)})`).bind(...nodeIds);
 }
 
+export function listAllNodesStatement(db: D1Database): D1PreparedStatement {
+	return db.prepare(`SELECT ${NODE_COLUMNS} FROM nodes ORDER BY id ASC`);
+}
+
 export async function findNodesByIds(db: D1Database, nodeIds: string[]): Promise<NodeRow[]> {
 	if (nodeIds.length === 0) return [];
 	return (await findNodesByIdsStatement(db, nodeIds).all<NodeRow>()).results;

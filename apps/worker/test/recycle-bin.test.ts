@@ -11,7 +11,7 @@ import {
 	RECYCLE_BIN_RETENTION_DAYS,
 	restoreRecycleBinItem,
 } from '../src/services/recycle-bin-service';
-import { createSubscriber, listSubscribers, replaceSubscriberNodes, updateSubscriber } from '../src/services/subscriber-service';
+import { createSubscriber, listSubscribers, updateSubscriber } from '../src/services/subscriber-service';
 import {
 	createSubscription,
 	getClashSubscription,
@@ -25,7 +25,6 @@ import {
 	seedEndpoint,
 	seedMeta,
 	seedNode,
-	seedNodeClient,
 	seedProfile,
 	seedSubscriber,
 	seedSubscriberUsage,
@@ -107,7 +106,6 @@ describe('recycle bin', () => {
 		const nodeId = await seedNode({ name: 'Node-1' });
 		await seedEndpoint(nodeId);
 		const subscriber = await createSubscriber(env.DB, { name: 'Restorable' });
-		await replaceSubscriberNodes(env.DB, subscriber.id, [nodeId]);
 		const profileId = await seedProfile({ name: 'Restorable Profile' });
 		const { subscription, token } = await createSubscription(env.DB, {
 			subscriber_id: subscriber.id,
@@ -146,7 +144,6 @@ describe('recycle bin', () => {
 		const nodeId = await seedNode({ name: 'Node-Purge' });
 		const subscriberId = await seedSubscriber({ name: 'PurgeMe', status: 'disabled' });
 		await seedMeta('default_subscriber_id', subscriberId);
-		await seedNodeClient(nodeId, subscriberId);
 		await seedSubscriberUsage(subscriberId, nowSeconds() - 100, 10, 20);
 		await env.DB.prepare(
 			'INSERT INTO user_traffic_hourly (subscriber_id, node_id, bucket_start, uplink_bytes, downlink_bytes, updated_at) VALUES (?, ?, ?, 10, 20, ?)',
@@ -162,7 +159,6 @@ describe('recycle bin', () => {
 		await purgeRecycleBinItem(env.DB, 'subscriber', subscriberId, 'admin@example.com');
 
 		expect(await env.DB.prepare('SELECT id FROM subscribers WHERE id = ?').bind(subscriberId).first()).toBeNull();
-		expect(await env.DB.prepare('SELECT id FROM node_clients WHERE subscriber_id = ?').bind(subscriberId).first()).toBeNull();
 		expect(
 			await env.DB.prepare('SELECT subscriber_id FROM subscriber_usage WHERE subscriber_id = ?').bind(subscriberId).first(),
 		).toBeNull();

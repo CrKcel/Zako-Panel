@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { Node, Profile, Subscriber, SubscriberDetail, Subscription, TrafficSummary } from '@zako/contracts';
-import { computed, defineAsyncComponent, ref } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { nodesApi } from '../api/nodes';
+import type { Profile, Subscriber, Subscription, TrafficSummary } from '@zako/contracts';
+import { computed, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { profilesApi } from '../api/profiles';
 import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
@@ -10,18 +9,17 @@ import { subscriptionsApi } from '../api/subscriptions';
 import { trafficApi } from '../api/traffic';
 import AppIcon from '../components/AppIcon.vue';
 import EntityHeader from '../components/EntityHeader.vue';
-import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
 import SubscriptionFormDialog from '../components/SubscriptionFormDialog.vue';
 import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
-import { getCachedResource, invalidateCachedPrefix, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
+import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
 import { useSubscriptionActions } from '../composables/useSubscriptionActions';
-import { nodeStatusDescriptor, subscriberStatusDescriptor } from '../domain/status';
+import { subscriberStatusDescriptor } from '../domain/status';
 import { subscriberUsedBytes, trafficLimitLabel, usageCycleLabel, usageLabel } from '../domain/subscriber';
 import { DAY_SECONDS, trafficChartData, trafficWindow } from '../domain/traffic';
 import { useI18n } from '../i18n';
@@ -46,16 +44,10 @@ const {
 	loading,
 	refreshing: subscriberRefreshing,
 	reload: reloadSubscriber,
-} = useAsyncResource<SubscriberDetail | null>(() => subscribersApi.get(subscriberId.value), {
+} = useAsyncResource<Subscriber | null>(() => subscribersApi.get(subscriberId.value), {
 	initialValue: null,
 	cacheKey: () => (subscriberId.value ? `subscribers:detail:${subscriberId.value}` : null),
 	onError: (error) => showError(error, t('subscribers.loadError')),
-});
-
-const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
-	initialValue: [],
-	cacheKey: 'nodes:list',
-	onError: (error) => showError(error, t('subscribers.loadNodesError')),
 });
 
 const {
@@ -98,8 +90,6 @@ const {
 
 const refreshing = computed(() => subscriberRefreshing.value || subscriptionsRefreshing.value || trafficRefreshing.value);
 
-const grantVisible = ref(false);
-
 useEntityBreadcrumb(() => subscriber.value?.name);
 
 const subscriberSubscriptions = computed(() => subscriptions.value.filter((item) => item.subscriber_id === subscriberId.value));
@@ -109,19 +99,6 @@ const subActions = useSubscriptionActions({
 		await reloadSubscriptions();
 	},
 });
-
-const nodeMap = computed(() => new Map(nodes.value.map((node) => [node.id, node])));
-
-const grantedNodes = computed(() =>
-	(subscriber.value?.node_ids ?? []).map((nodeId) => {
-		const node = nodeMap.value.get(nodeId);
-		return {
-			id: nodeId,
-			name: node?.name ?? nodeId,
-			tag: node ? nodeStatusDescriptor(node.status).tag : 'info',
-		};
-	}),
-);
 
 const limitLabel = computed(() => trafficLimitLabel(subscriber.value?.traffic_limit_bytes));
 const cycleLabel = computed(() => (subscriber.value === null ? '—' : usageCycleLabel(subscriber.value)));
@@ -133,28 +110,9 @@ const quotaRatio = computed(() => {
 
 const chart = computed(() => trafficChartData(traffic.value?.byNode.items));
 
-function openGrant(): void {
-	if (subscriber.value === null) return;
-	grantVisible.value = true;
-}
-
 function openCreateSubscription(): void {
 	if (subscriber.value === null) return;
 	subActions.openCreateFor({ id: subscriber.value.id, name: subscriber.value.name });
-}
-
-function onGrantSaved(detail: SubscriberDetail): void {
-	subscriber.value = detail;
-	const cachedList = getCachedResource<Subscriber[]>('subscribers:list');
-	if (cachedList) {
-		setCachedResource(
-			'subscribers:list',
-			cachedList.data.map((item) => (item.id === detail.id ? { ...item, node_count: detail.node_ids.length } : item)),
-			cachedList.updatedAt,
-		);
-	}
-	invalidateCachedResource('subscribers:list');
-	invalidateCachedPrefix('nodes:clients:');
 }
 
 function backToList(): void {
@@ -166,7 +124,7 @@ async function refresh(): Promise<void> {
 }
 
 const disableAction = useAsyncAction(
-	async (sub: SubscriberDetail) => {
+	async (sub: Subscriber) => {
 		await subscribersApi.update(sub.id, { status: 'disabled' });
 		showSuccess(t('subscribers.disable.success'));
 		invalidateCachedResource('subscribers:list');
@@ -179,7 +137,7 @@ const disableAction = useAsyncAction(
 );
 
 const restoreAction = useAsyncAction(
-	async (sub: SubscriberDetail) => {
+	async (sub: Subscriber) => {
 		await recycleBinApi.restore('subscriber', sub.id);
 		showSuccess(t('subscribers.restore.success'));
 		invalidateCachedResource('subscribers:list');
@@ -229,7 +187,6 @@ async function restoreSubscriber(): Promise<void> {
 				/>
 			</template>
 			<template #actions>
-				<el-button type="primary" plain @click="openGrant">{{ t('subscribers.actions.nodeGrant') }}</el-button>
 				<el-button
 					v-if="subscriber?.status === 'disabled'"
 					type="primary"
@@ -294,22 +251,6 @@ async function restoreSubscriber(): Promise<void> {
 			/>
 		</el-card>
 
-		<el-card shadow="never" class="ui-section">
-			<template #header>
-				<div class="ui-card-header">
-					<span class="ui-card-title">{{ t('subscriberDetail.grantedNodes') }} ({{ grantedNodes.length }})</span>
-					<el-button type="primary" @click="openGrant">{{ t('common.edit') }}</el-button>
-				</div>
-			</template>
-			<div v-if="grantedNodes.length > 0" class="node-tags">
-				<RouterLink v-for="node in grantedNodes" :key="node.id" :to="`/nodes/${node.id}`" class="node-pill">
-					<span class="node-dot" :class="`is-${node.tag}`" aria-hidden="true" />
-					<span>{{ node.name }}</span>
-				</RouterLink>
-			</div>
-			<span v-else class="empty-muted">{{ t('subscriberDetail.noGrantedNodes') }}</span>
-		</el-card>
-
 		<TrafficTotalsCard :summary="traffic?.totals ?? null" :loading="trafficLoading" :title="t('subscriberDetail.trafficLast24h')">
 			<TrafficChart
 				v-if="chart.categories.length > 0"
@@ -321,14 +262,6 @@ async function restoreSubscriber(): Promise<void> {
 			/>
 		</TrafficTotalsCard>
 	</div>
-
-	<NodeGrantDialog
-		v-model:visible="grantVisible"
-		:subscriber="subscriber"
-		:nodes="nodes"
-		:node-ids="subscriber?.node_ids ?? []"
-		@saved="onGrantSaved"
-	/>
 
 	<SubscriptionFormDialog
 		v-model:visible="subActions.formVisible.value"
@@ -398,59 +331,5 @@ async function restoreSubscriber(): Promise<void> {
 
 .chart {
 	margin-top: 16px;
-}
-
-.node-tags {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
-
-.node-pill {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	padding: 5px 12px;
-	border-radius: var(--radius-pill);
-	border: 1px solid var(--border-color);
-	background: var(--bg-muted);
-	color: var(--text-primary);
-	font-size: 13px;
-	font-weight: 500;
-	text-decoration: none;
-	transition:
-		background-color var(--duration-fast) var(--ease-standard),
-		border-color var(--duration-fast) var(--ease-standard),
-		color var(--duration-fast) var(--ease-standard);
-}
-
-.node-pill:hover {
-	background: var(--accent-primary-soft);
-	border-color: var(--accent-primary-border);
-	color: var(--accent-primary);
-}
-
-.node-dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 9999px;
-	background: var(--tone-info);
-}
-
-.node-dot.is-success {
-	background: var(--tone-success);
-}
-
-.node-dot.is-warning {
-	background: var(--tone-warning);
-}
-
-.node-dot.is-danger {
-	background: var(--tone-danger);
-}
-
-.empty-muted {
-	font-size: 13px;
-	color: var(--text-muted);
 }
 </style>

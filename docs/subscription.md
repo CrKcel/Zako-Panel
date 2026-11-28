@@ -29,8 +29,7 @@
 2. **Xray 代理进程健康**（`xray_healthy = 1`）。注意：如果只是统计端口坏了（`stats_healthy = 0`，节点状态显示 `degraded`），代理本身还能通，所以依然会下发。
 3. **心跳达标**（当订阅档案开启了 `online_only` 时，必须没超时离线；如果关闭了 `online_only`，允许把离线节点也放进去）。
 4. **用户本身可用**（`subscribers.status = 'active'`，且订阅链接没被撤销或过期）。
-5. **用户有该节点的权限**（`node_clients.enabled = 1`）。
-6. **节点在档案的筛选范围内**（档案配置了“全部节点”或“指定节点列表”）。
+5. **节点在档案的筛选范围内**（档案配置了“全部节点”或“指定节点列表”）。
 
 > 如果过滤完一个可用节点都不剩，正式订阅接口会返回 `503 SUBSCRIPTION_UNAVAILABLE`，不会下发空配置把客户端覆盖掉。而管理后台的档案预览接口（`/preview`）则会正常返回空列表，并列出每个节点被跳过的原因（如 `offline`、`unhealthy`、`disabled`、`not_selected`）。
 
@@ -48,9 +47,9 @@
 | `shadowsocks` | `ss` | `ss://` | Agent 接管 Xray 入站 |
 | `hysteria2` | `hysteria2` | `hysteria2://` | 非 Xray 协议，端点由管理员手工创建 |
 
-**凭据模型**：一个“用户-节点”授权只生成一份凭据（`node_clients.vless_uuid`）。VLESS 和 VMess 把它当 UUID 下发，Trojan、Shadowsocks 和 Hysteria2 把它原样当密码下发，因此同一个用户在同一节点的所有协议共用这一个值，不需要额外的凭据表。
+**凭据模型**：每个订阅用户创建时生成一份全局凭据（`subscribers.vless_uuid`），下发到全部节点。VLESS 和 VMess 把它当 UUID 下发，Trojan、Shadowsocks 和 Hysteria2 把它原样当密码下发，因此同一个用户在所有节点和协议中共用这一个值，不需要额外的凭据表。
 
-Hysteria2 不走 Xray，Agent 也不会把它写进节点配置：面板只负责把它渲染进订阅，节点上的 Hysteria2 服务需要管理员用同一份凭据（`node_clients.vless_uuid`）自行配置。
+Hysteria2 不走 Xray，Agent 也不会把它写进节点配置：面板只负责把它渲染进订阅，节点上的 Hysteria2 服务需要管理员用同一份凭据（`subscribers.vless_uuid`）自行配置。
 
 传输参数在 Clash 与 URI 里的字段名不同：gRPC 在 URI 中用 `serviceName` 和 `authority`（Clash 对应 `grpc-opts.grpc-service-name`），WebSocket 用 `path` 和 `host`。
 
@@ -62,7 +61,7 @@ Hysteria2 不走 Xray，Agent 也不会把它写进节点配置：面板只负�
 
 1. **识别订阅**：从 URL 取出 `{token}`，按唯一索引查 `subscriptions` 表。找不到或已撤销/过期 → 返回 `401` 或 `403`。
 2. **检查用户**：确认对应 `subscriber` 没被停用、没过期、当月没超流量 → 不满足返回 `403`。
-3. **批量取数据**：一次查出订阅档案（Profile）的模板规则、关联节点、用户授权节点以及当月已用流量。
+3. **批量取数据**：一次查出订阅档案（Profile）的模板规则、关联节点以及当月已用流量。
 4. **筛选与重名处理**：按第 2 节的条件过滤出最终 Endpoint 列表。如果一个节点只有一个 Endpoint，节点显示名直接用节点名；有多个 Endpoint，则拼接成 `节点名-端点名`，保证不重名。协议参数无法通过校验（比如历史数据不再满足新 schema）的 Endpoint 直接跳过。
 5. **渲染输出**：
    - **Clash.Meta YAML**（`/clash.yaml`）：把筛选后的 Endpoint 按各自协议渲染成 `proxies`，再结合档案里存的 `clash_base_json`、`proxy_groups_json`、`rules_json` 拼成完整 YAML（所有敏感凭据会做唯一性校验）。

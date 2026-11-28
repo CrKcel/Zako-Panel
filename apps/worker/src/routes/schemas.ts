@@ -138,10 +138,6 @@ export const updateSubscriberSchema = z
 	})
 	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
 
-export const replaceSubscriberNodesSchema = z.object({
-	node_ids: z.array(idSchema),
-});
-
 export const createAdminSchema = z.object({
 	email: z.email().trim().toLowerCase().max(255),
 	role: z.enum(['owner', 'admin', 'viewer']),

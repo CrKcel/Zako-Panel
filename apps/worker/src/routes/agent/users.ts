@@ -17,7 +17,7 @@ function matchesEntityTag(header: string, etag: string): boolean {
 usersRoutes.get('/', async (c) => {
 	const nodeId = c.get('agent')?.nodeId;
 	if (!nodeId) throw new AppError('UNAUTHORIZED', 'Missing agent identity', 401);
-	const users = await listNodeUsers(c.env.DB, nodeId);
+	const users = await listNodeUsers(c.env.DB);
 	const etag = `"${users.version}"`;
 	c.header('ETag', etag);
 

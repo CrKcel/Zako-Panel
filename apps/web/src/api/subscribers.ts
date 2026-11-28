@@ -1,10 +1,4 @@
-import type {
-	CreateSubscriberRequest,
-	ReplaceSubscriberNodesRequest,
-	Subscriber,
-	SubscriberDetail,
-	UpdateSubscriberRequest,
-} from '@zako/contracts';
+import type { CreateSubscriberRequest, Subscriber, UpdateSubscriberRequest } from '@zako/contracts';
 import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface SubscriberListParams {
@@ -19,17 +13,10 @@ export const subscribersApi = {
 	create(input: CreateSubscriberRequest): Promise<Subscriber> {
 		return apiRequest<Subscriber>('/api/v1/admin/subscribers', { method: 'POST', body: input });
 	},
-	get(subscriberId: string): Promise<SubscriberDetail> {
-		return apiRequest<SubscriberDetail>(`/api/v1/admin/subscribers/${subscriberId}`);
+	get(subscriberId: string): Promise<Subscriber> {
+		return apiRequest<Subscriber>(`/api/v1/admin/subscribers/${subscriberId}`);
 	},
 	update(subscriberId: string, input: UpdateSubscriberRequest): Promise<Subscriber> {
 		return apiRequest<Subscriber>(`/api/v1/admin/subscribers/${subscriberId}`, { method: 'PATCH', body: input });
-	},
-	replaceNodes(subscriberId: string, nodeIds: string[]): Promise<SubscriberDetail> {
-		const input: ReplaceSubscriberNodesRequest = { node_ids: nodeIds };
-		return apiRequest<SubscriberDetail>(`/api/v1/admin/subscribers/${subscriberId}/nodes`, {
-			method: 'PUT',
-			body: input,
-		});
 	},
 };

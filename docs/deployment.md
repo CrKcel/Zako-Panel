@@ -103,7 +103,7 @@ npx wrangler rollback --config wrangler.downloads.jsonc
 **节点与同步**
 - [ ] 节点执行 `zako-agent --version` 与 `/dl/agent/version` 一致
 - [ ] 面板上节点状态为 `online`
-- [ ] 给默认用户授权节点后，节点上 `/var/lib/zako-agent/users.json` 已出现对应 `xray_email`
+- [ ] 节点上线后，节点上 `/var/lib/zako-agent/users.json` 已出现有效用户的 `xray_email`
 - [ ] `127.0.0.1:10085` 仅监听本地环回，不对外暴露
 
 **订阅与计费闭环**

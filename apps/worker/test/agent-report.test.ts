@@ -1,7 +1,7 @@
 import type { AgentReport } from '@zako/contracts';
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { hourStart, nowSeconds, seedMeta, seedNode, seedNodeClient, seedSubscriber } from './helpers';
+import { getSubscriberCredential, hourStart, nowSeconds, seedMeta, seedNode, seedSubscriber } from './helpers';
 
 const SECRET = 's'.repeat(43);
 
@@ -50,7 +50,7 @@ describe('agent report ingestion', () => {
 	it('commits heartbeat and traffic buckets for a new report', async () => {
 		const { nodeId, token } = await seedAgentNode();
 		const subscriberId = await seedSubscriber();
-		const client = await seedNodeClient(nodeId, subscriberId);
+		const client = await getSubscriberCredential(subscriberId);
 		await seedMeta('users_ver', '7');
 
 		const response = await postReport(token, makeReport({ emails: [client.xrayEmail] }));

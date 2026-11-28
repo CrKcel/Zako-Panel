@@ -141,7 +141,7 @@ function truncateName(name: string, limit: number): string {
 /**
  * Validates the panel-wide reusable enrollment token from
  * `Authorization: Bearer <token>` and provisions a new node plus the endpoints
- * the node reported, along with a default subscriber grant.
+ * the node reported.
  */
 export async function enrollNode(
 	db: D1Database,

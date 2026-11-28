@@ -19,7 +19,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	edit: [subscriber: Subscriber];
-	grant: [subscriber: Subscriber];
 	disable: [subscriber: Subscriber];
 	createSubscription: [subscriber: Subscriber];
 	showSubscriptionLinks: [subscription: Subscription];
@@ -86,14 +85,7 @@ function isSubActive(sub: Subscription): boolean {
 				</div>
 			</div>
 
-			<div class="metric-tile metric-inline">
-				<span class="metric-label">{{ t('subscribers.columns.grantedNodes') }}</span>
-				<RouterLink :to="`/subscribers/${subscriber.id}`" class="tile-link tnum">
-					{{ subscriber.node_count }}
-				</RouterLink>
-			</div>
-
-			<div class="metric-tile metric-inline">
+			<div class="metric-tile metric-tile-wide metric-inline">
 				<span class="metric-label">{{ t('subscribers.columns.subscriptions') }}</span>
 				<button type="button" class="sub-count-btn tnum" :aria-expanded="expanded" @click="expanded = !expanded">
 					<AppIcon name="subscriptions" :size="12" />
@@ -171,7 +163,6 @@ function isSubActive(sub: Subscription): boolean {
 					<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
 				</RouterLink>
 				<el-button link type="primary" @click="emit('edit', subscriber)">{{ t('common.edit') }}</el-button>
-				<el-button link type="primary" @click="emit('grant', subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
 			</div>
 			<el-button link type="danger" :loading="disabling" @click="emit('disable', subscriber)">
 				{{ t('subscribers.actions.disable') }}
@@ -346,17 +337,6 @@ function isSubActive(sub: Subscription): boolean {
 	gap: 6px;
 	font-size: 11.5px;
 	color: var(--text-muted);
-}
-
-.tile-link {
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--accent-primary);
-	text-decoration: none;
-}
-
-.tile-link:hover {
-	text-decoration: underline;
 }
 
 .sub-count-btn {

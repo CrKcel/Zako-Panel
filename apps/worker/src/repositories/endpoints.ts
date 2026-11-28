@@ -53,6 +53,10 @@ export function enabledEndpointsByNodesStatement(db: D1Database, nodeIds: string
 		.bind(...nodeIds);
 }
 
+export function listAllEnabledEndpointsStatement(db: D1Database): D1PreparedStatement {
+	return db.prepare(`SELECT ${ENDPOINT_COLUMNS} FROM endpoints WHERE enabled = 1 ORDER BY node_id ASC, created_at ASC, id ASC`);
+}
+
 export async function listEnabledEndpointRowsByNodes(db: D1Database, nodeIds: string[]): Promise<EndpointRow[]> {
 	if (nodeIds.length === 0) return [];
 	return (await enabledEndpointsByNodesStatement(db, nodeIds).all<EndpointRow>()).results;

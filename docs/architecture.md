@@ -11,24 +11,23 @@ Zako Panel 由三部分组成：**控制面**（Cloudflare Worker + D1）、**�
 
 ```text
 节点 (Node) ──< 接入端点 (Endpoint)
+   ▲
+   │  按规则筛选节点 (全部 / 指定节点)
    │
-   │  授权关联 (Node Client: xray_email + vless_uuid)
-   ▼
-订阅用户 (Subscriber) ──< 订阅链接 (Subscription) ──> 订阅档案 (Profile)
+订阅用户 (Subscriber: xray_email + vless_uuid) ──< 订阅链接 (Subscription) ──> 订阅档案 (Profile)
 ```
 
 - **Node（节点）**：一台装了 Xray 和 Agent 的服务器。它有一把专属的 `agent_token` 用来和面板通信。
 - **Endpoint（接入端点）**：节点对外提供代理服务的公网入口（域名/IP、端口、协议参数），协议支持 VLESS + REALITY、VMess、Trojan、Shadowsocks 与 Hysteria2。一台机器可以挂多个端口或域名，所以拆成了 `1 个 Node 对多个 Endpoint`；安装时从节点已有的 Xray 配置识别并自动创建，Hysteria2 端点由管理员手工创建。
-- **Subscriber（订阅用户）**：真正在用代理的人。流量限额、月度用量、到期时间、是否启用，全部挂在人身上。
-- **Node Client（节点凭据）**：管理员把某个用户授权给某个节点时，系统会为这对“用户-节点”生成一对固定的 `xray_email`（形如 `u_<ULID>`）和 `vless_uuid`。同一节点下的多个 Endpoint 共用这一对凭据：`vless_uuid` 在 VLESS、VMess 里当 UUID，在 Trojan、Shadowsocks、Hysteria2 里直接当密码。
-- **Profile（订阅档案）**：决定订阅长什么样——选哪些节点（全部还是指定几个）、是不是只下发在线节点、Clash 的基础配置、代理组和分流规则怎么写。
+- **Subscriber（订阅用户）**：真正在用代理的人。流量限额、月度用量、到期时间、是否启用以及全局代理凭据（`xray_email`、`vless_uuid`），全部挂在人身上。所有有效用户会自动下发到全部节点，同一用户在所有节点和协议中共用这一对凭据：`vless_uuid` 在 VLESS、VMess 里当 UUID，在 Trojan、Shadowsocks、Hysteria2 里直接当密码。
+- **Profile（订阅档案 / 订阅规则）**：决定订阅下发哪些节点和规则——选哪些节点（全部还是指定几个）、是不是只下发在线节点、Clash 的基础配置、代理组和分流规则怎么写。用户的节点访问授权直接通过为其订阅链接绑定的规则来控制。
 - **Subscription（订阅链接）**：把某个 `Subscriber` 和某个 `Profile` 绑在一起生成的访问 Token（对应 URL `/sub/{token}`）。一个人可以有多个不同 Profile 的订阅链接，编辑或撤销某条链接不会影响其他人。
 
 ### 四条主线怎么串起来
 
-1. **装节点**：管理员在面板生成或轮换全局注册 Token → 节点跑一键脚本安装 Xray 和 Agent，识别并接管已有的 Xray 配置（没有配置时写入默认模板），只把 REALITY 公钥、传输参数和接入端点报给面板完成注册并换取该节点专属的 `agent_token`。
-2. **授权用户**：管理员创建用户、授权节点 → 面板把全局版本号 `users_ver` 加 1 → Agent 下次心跳发现版本号变了，就来拉最新名单，通过 gRPC 热更新塞进本地 Xray。
-3. **用户拉订阅**：客户端请求 `/sub/{token}/clash.yaml` → 面板校验用户没过期、没超额 → 把档案里选的节点和用户有权限的节点取交集，去掉离线/停用的节点 → 现场拼出 YAML 返回。
+1. **装节点**：管理员在面板生成或轮换全局注册 Token → 节点跑一键脚本安装 Xray 和 Agent，识别并接管已有的 Xray 配置（没有配置时写入默认模板），只把 REALITY 公钥、传输参数和接入端点报给面板完成注册并换取该节点专属的 `agent_token`；节点首次同步即可拉取全部有效用户。
+2. **管用户**：管理员创建或启停用户、用户到期或超额 → 面板把全局版本号 `users_ver` 加 1 → 所有节点 Agent 下次心跳发现版本号变了，就来拉最新全量有效名单，通过 gRPC 热更新塞进本地 Xray。
+3. **用户拉订阅**：客户端请求 `/sub/{token}/clash.yaml` → 面板校验用户没过期、没超额 → 按订阅绑定的档案规则（全部节点或指定节点）筛选可用节点，去掉离线/停用的节点 → 现场拼出 YAML 返回。
 4. **收流量**：Agent 每 30 秒看一眼 Xray 计数器，每 15 分钟把增量按自然小时拆好，连同心跳一起发给面板 → 面板按 `report_id` 幂等记账并累加到用户当月用量。
 
 ---
@@ -117,7 +116,7 @@ flowchart LR
 - `domain/`：纯函数业务计算（流量单位换算、时间窗口切分、状态文案），不依赖 Vue。
 - `i18n/`：中英文双语字典与响应式语言切换（默认按浏览器语言自动匹配，支持手动切换并本地记忆）。
 - `composables/`：通用交互逻辑封装（请求加载、提交状态、弹窗、轮询）。
-- `components/`：业务复用组件（Endpoint 表单、节点授权矩阵、流量图表）。
+- `components/`：业务复用组件（Endpoint 表单、订阅链接弹窗、流量图表）。
 
 ### 5.3 怎么扩展新功能
 

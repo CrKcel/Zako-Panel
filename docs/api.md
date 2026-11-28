@@ -40,7 +40,7 @@
 - **节点配置版本**：`/nodes/{nodeId}/configs`（下发、查看 diff、基于历史版本生成新版本回滚）
 - **订阅档案与预览**：`/profiles`（`DELETE` 先软删移入回收站）、`/profiles/{profileId}/preview`
 - **订阅链接**：`/subscriptions`（创建、编辑名称/规则/有效期、查看链接、撤销；撤销后移入回收站）
-- **订阅用户与授权**：`/subscribers`（停用后移入回收站）、`/subscribers/{subscriberId}/nodes`
+- **订阅用户**：`/subscribers`（停用后移入回收站）
 - **回收站**：`/recycle-bin`（汇总停用用户、撤销订阅与删除档案，支持按类型过滤、手动恢复、单个永久删除与清空；保留期见 [database.md](database.md#4-数据保留与自动清理)）
 - **流量统计**：`/traffic/summary`
 

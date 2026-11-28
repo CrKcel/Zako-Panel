@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { sha256Hex } from '../src/lib/hash';
-import { newId } from '../src/lib/ids';
+import { newId, newXrayEmail } from '../src/lib/ids';
 import type { EndpointProtocol } from '@zako/contracts';
 import type { Hysteria2Params } from '../src/protocols/hysteria2';
 import type { ShadowsocksParams } from '../src/protocols/shadowsocks';
@@ -65,7 +65,6 @@ export async function resetDatabase(): Promise<void> {
 		'node_traffic_hourly',
 		'traffic_reports',
 		'subscriber_usage',
-		'node_clients',
 		'subscriptions',
 		'profile_nodes',
 		'subscription_profiles',
@@ -166,6 +165,8 @@ export interface SeedSubscriberOptions {
 	id?: string;
 	name?: string;
 	status?: 'active' | 'limited' | 'expired' | 'disabled';
+	xrayEmail?: string;
+	uuid?: string;
 	trafficLimitBytes?: number | null;
 	expiresAt?: number | null;
 	usageCycleStart?: number;
@@ -176,15 +177,20 @@ export async function seedSubscriber(options: SeedSubscriberOptions = {}): Promi
 	const id = options.id ?? newId();
 	const now = nowSeconds();
 	const cycleStart = options.usageCycleStart ?? now - 86_400;
+	const xrayEmail = options.xrayEmail ?? newXrayEmail();
+	const uuid = options.uuid ?? crypto.randomUUID();
 	await env.DB.prepare(
 		`INSERT INTO subscribers
-		 (id, name, email, status, traffic_limit_bytes, expires_at, usage_cycle_start, usage_cycle_end, created_at, updated_at)
-		 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, name, email, status, xray_email, vless_uuid, traffic_limit_bytes, expires_at,
+		  usage_cycle_start, usage_cycle_end, created_at, updated_at)
+		 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			id,
 			options.name ?? 'subscriber',
 			options.status ?? 'active',
+			xrayEmail,
+			uuid,
 			options.trafficLimitBytes ?? null,
 			options.expiresAt ?? null,
 			cycleStart,
@@ -196,30 +202,12 @@ export async function seedSubscriber(options: SeedSubscriberOptions = {}): Promi
 	return id;
 }
 
-export interface SeedNodeClientOptions {
-	id?: string;
-	xrayEmail?: string;
-	uuid?: string;
-	enabled?: boolean;
-}
-
-export async function seedNodeClient(
-	nodeId: string,
-	subscriberId: string,
-	options: SeedNodeClientOptions = {},
-): Promise<{ id: string; xrayEmail: string; uuid: string }> {
-	const id = options.id ?? newId();
-	const xrayEmail = options.xrayEmail ?? `u_${newId()}`;
-	const uuid = options.uuid ?? crypto.randomUUID();
-	const now = nowSeconds();
-	await env.DB.prepare(
-		`INSERT INTO node_clients
-		 (id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-	)
-		.bind(id, nodeId, subscriberId, xrayEmail, uuid, options.enabled === false ? 0 : 1, now, now)
-		.run();
-	return { id, xrayEmail, uuid };
+export async function getSubscriberCredential(subscriberId: string): Promise<{ xrayEmail: string; uuid: string }> {
+	const row = await env.DB.prepare('SELECT xray_email, vless_uuid FROM subscribers WHERE id = ?')
+		.bind(subscriberId)
+		.first<{ xray_email: string; vless_uuid: string }>();
+	if (!row) throw new Error(`subscriber ${subscriberId} missing`);
+	return { xrayEmail: row.xray_email, uuid: row.vless_uuid };
 }
 
 export interface SeedProfileOptions {
@@ -319,7 +307,7 @@ export interface SeedDistributionOptions {
 	scope?: string;
 }
 
-/** Seeds one online node with one endpoint and a granted subscriber. */
+/** Seeds one online node with one endpoint and a subscriber. */
 export async function seedDistribution(options: SeedDistributionOptions = {}): Promise<SeededSubscription> {
 	const nodeId = await seedNode({ name: `Tokyo-${options.scope ?? newId().slice(-4)}` });
 	const endpointId = await seedEndpoint(nodeId, { name: 'primary' });
@@ -328,7 +316,7 @@ export async function seedDistribution(options: SeedDistributionOptions = {}): P
 		expiresAt: options.subscriberExpiresAt,
 		trafficLimitBytes: options.trafficLimitBytes,
 	});
-	const nodeClient = await seedNodeClient(nodeId, subscriberId);
+	const nodeClient = await getSubscriberCredential(subscriberId);
 	const profileId = await seedProfile({
 		nodeSelection: options.nodeSelection,
 		onlineOnly: options.onlineOnly,

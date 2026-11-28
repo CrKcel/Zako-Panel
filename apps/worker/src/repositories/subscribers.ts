@@ -5,22 +5,13 @@ export interface SubscriberRow {
 	name: string;
 	email: string | null;
 	status: 'active' | 'limited' | 'expired' | 'disabled';
+	xray_email: string;
+	vless_uuid: string;
 	traffic_limit_bytes: number | null;
 	expires_at: number | null;
 	usage_cycle_start: number;
 	usage_cycle_end: number;
 	disabled_at: number | null;
-	created_at: number;
-	updated_at: number;
-}
-
-export interface NodeClientRow {
-	id: string;
-	node_id: string;
-	subscriber_id: string;
-	xray_email: string;
-	vless_uuid: string;
-	enabled: number;
 	created_at: number;
 	updated_at: number;
 }
@@ -33,20 +24,13 @@ export interface SubscriberUsageRow {
 	updated_at: number;
 }
 
-export interface NewNodeClientRow {
-	id: string;
-	node_id: string;
-	subscriber_id: string;
-	xray_email: string;
-	vless_uuid: string;
-	now: number;
-}
-
 export interface NewSubscriberRow {
 	id: string;
 	name: string;
 	email: string | null;
 	status: SubscriberRow['status'];
+	xray_email: string;
+	vless_uuid: string;
 	traffic_limit_bytes: number | null;
 	expires_at: number | null;
 	usage_cycle_start: number;
@@ -63,19 +47,32 @@ export interface SubscriberUpdateInput {
 	disabled_at?: number | null;
 }
 
-const SUBSCRIBER_COLUMNS = `id, name, email, status, traffic_limit_bytes, expires_at,
+const SUBSCRIBER_COLUMNS = `id, name, email, status, xray_email, vless_uuid, traffic_limit_bytes, expires_at,
 	usage_cycle_start, usage_cycle_end, disabled_at, created_at, updated_at`;
 
 /** D1 caps one statement at 100 bound parameters. */
 const MAX_IN_LIST = 90;
 
-const SUBSCRIBER_COLUMNS_QUALIFIED = `s.id, s.name, s.email, s.status, s.traffic_limit_bytes, s.expires_at,
+const SUBSCRIBER_COLUMNS_QUALIFIED = `s.id, s.name, s.email, s.status, s.xray_email, s.vless_uuid, s.traffic_limit_bytes, s.expires_at,
 	s.usage_cycle_start, s.usage_cycle_end, s.disabled_at, s.created_at, s.updated_at`;
 
 export async function findSubscriberById(db: D1Database, subscriberId: string): Promise<SubscriberRow | null> {
 	const row = await db
 		.prepare(`SELECT ${SUBSCRIBER_COLUMNS} FROM subscribers WHERE id = ? LIMIT 1`)
 		.bind(subscriberId)
+		.first<SubscriberRow>();
+	return row ?? null;
+}
+
+export async function findFirstSubscriber(db: D1Database): Promise<SubscriberRow | null> {
+	const row = await db
+		.prepare(
+			`SELECT ${SUBSCRIBER_COLUMNS}
+			 FROM subscribers
+			 WHERE status != 'disabled'
+			 ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, created_at ASC, id ASC
+			 LIMIT 1`,
+		)
 		.first<SubscriberRow>();
 	return row ?? null;
 }
@@ -101,14 +98,17 @@ export function insertSubscriberStatement(db: D1Database, row: NewSubscriberRow)
 	return db
 		.prepare(
 			`INSERT INTO subscribers
-			 (id, name, email, status, traffic_limit_bytes, expires_at, usage_cycle_start, usage_cycle_end, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (id, name, email, status, xray_email, vless_uuid, traffic_limit_bytes, expires_at,
+			  usage_cycle_start, usage_cycle_end, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			row.id,
 			row.name,
 			row.email,
 			row.status,
+			row.xray_email,
+			row.vless_uuid,
 			row.traffic_limit_bytes,
 			row.expires_at,
 			row.usage_cycle_start,
@@ -176,93 +176,57 @@ export function updateSubscriberStatusStatement(
 	return db.prepare('UPDATE subscribers SET status = ?, updated_at = ? WHERE id = ?').bind(status, now, subscriberId);
 }
 
-export async function findNodeClientsBySubscriber(db: D1Database, subscriberId: string): Promise<NodeClientRow[]> {
-	return (
-		await db
-			.prepare(
-				`SELECT id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at
-				 FROM node_clients
-				 WHERE subscriber_id = ?
-				 ORDER BY node_id ASC`,
-			)
-			.bind(subscriberId)
-			.all<NodeClientRow>()
-	).results;
-}
-
-export function setNodeClientEnabledStatement(db: D1Database, clientId: string, enabled: boolean, now: number): D1PreparedStatement {
-	return db.prepare('UPDATE node_clients SET enabled = ?, updated_at = ? WHERE id = ?').bind(enabled ? 1 : 0, now, clientId);
-}
-
-export function enabledNodeClientsStatement(db: D1Database, subscriberId: string): D1PreparedStatement {
-	return db
-		.prepare(
-			`SELECT id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at
-			 FROM node_clients
-			 WHERE subscriber_id = ? AND enabled = 1`,
-		)
-		.bind(subscriberId);
-}
-
-export interface NodeClientUsageRow {
+export interface SubscriberReportUsageRow {
 	subscriber_id: string;
 	xray_email: string;
 	usage_cycle_start: number;
 }
 
 /**
- * Joins credentials with their subscriber in one statement so a report needs no
- * second lookup to learn the current usage cycle.
+ * Resolves reported xray_email values to their subscriber and usage cycle in
+ * one statement.
  */
-export function nodeClientUsageMapStatement(db: D1Database, nodeId: string, emails: string[]): D1PreparedStatement {
+export function subscriberUsageMapStatement(db: D1Database, emails: string[]): D1PreparedStatement {
 	if (emails.length === 0) {
-		return db
-			.prepare(
-				`SELECT nc.subscriber_id, nc.xray_email, s.usage_cycle_start
-				 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
-				 WHERE nc.node_id = ? AND 0 = 1`,
-			)
-			.bind(nodeId);
+		return db.prepare('SELECT id AS subscriber_id, xray_email, usage_cycle_start FROM subscribers WHERE 0 = 1');
 	}
 	return db
 		.prepare(
-			`SELECT nc.subscriber_id, nc.xray_email, s.usage_cycle_start
-			 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
-			 WHERE nc.node_id = ? AND nc.xray_email IN (${sqlPlaceholders(emails.length)})`,
+			`SELECT id AS subscriber_id, xray_email, usage_cycle_start
+			 FROM subscribers
+			 WHERE xray_email IN (${sqlPlaceholders(emails.length)})`,
 		)
-		.bind(nodeId, ...emails);
+		.bind(...emails);
+}
+
+export interface NodeCredentialRow {
+	id: string;
+	node_id: string;
+	subscriber_id: string;
+	subscriber_name: string;
+	xray_email: string;
+	vless_uuid: string;
+	enabled: number;
 }
 
 /**
- * Credentials for one node, joined with the subscriber name so the node-side
- * setup does not need a second request per client.
+ * Subscriber credentials projected onto one node for operator inspection and
+ * troubleshooting. Active subscribers are enabled in the node inbound.
  */
-export async function listNodeClientRowsByNode(db: D1Database, nodeId: string): Promise<NodeClientWithSubscriberRow[]> {
+export async function listSubscriberCredentialsByNode(db: D1Database, nodeId: string): Promise<NodeCredentialRow[]> {
 	return (
 		await db
 			.prepare(
-				`SELECT nc.id, nc.node_id, nc.subscriber_id, s.name AS subscriber_name,
-				        nc.xray_email, nc.vless_uuid, nc.enabled, nc.created_at, nc.updated_at
-				 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
-				 WHERE nc.node_id = ?
-				 ORDER BY nc.created_at ASC, nc.id ASC`,
+				`SELECT id, ? AS node_id, id AS subscriber_id, name AS subscriber_name,
+				        xray_email, vless_uuid,
+				        CASE WHEN status = 'active' THEN 1 ELSE 0 END AS enabled
+				 FROM subscribers
+				 WHERE status != 'disabled'
+				 ORDER BY created_at ASC, id ASC`,
 			)
 			.bind(nodeId)
-			.all<NodeClientWithSubscriberRow>()
+			.all<NodeCredentialRow>()
 	).results;
-}
-
-export interface NodeClientWithSubscriberRow extends NodeClientRow {
-	subscriber_name: string;
-}
-
-export function insertNodeClientStatement(db: D1Database, client: NewNodeClientRow): D1PreparedStatement {
-	return db
-		.prepare(
-			`INSERT INTO node_clients (id, node_id, subscriber_id, xray_email, vless_uuid, enabled, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-		)
-		.bind(client.id, client.node_id, client.subscriber_id, client.xray_email, client.vless_uuid, client.now, client.now);
 }
 
 export function usageStatement(db: D1Database, subscriberId: string): D1PreparedStatement {
@@ -307,42 +271,17 @@ export async function findUsageBySubscribers(db: D1Database, subscriberIds: stri
 }
 
 /**
- * Active credentials for one node. The join on subscribers is what makes a
- * suspended, expired or over-quota subscriber disappear from the node user set
- * after the cron materialises its status.
+ * Active subscriber credentials synced to every node. Suspended, expired or
+ * over-quota subscribers disappear from the node user set after the cron or
+ * admin write materialises their status.
  */
-export function nodeActiveUsersStatement(db: D1Database, nodeId: string): D1PreparedStatement {
-	return db
-		.prepare(
-			`SELECT nc.xray_email, nc.vless_uuid
-			 FROM node_clients nc JOIN subscribers s ON s.id = nc.subscriber_id
-			 WHERE nc.node_id = ? AND nc.enabled = 1 AND s.status = 'active'
-			 ORDER BY nc.created_at ASC, nc.id ASC`,
-		)
-		.bind(nodeId);
-}
-
-export interface SubscriberNodeCountRow {
-	subscriber_id: string;
-	node_count: number;
-}
-
-/** Enabled grant counts for one page of subscribers, avoiding a per-row query. */
-export async function countNodeClientsBySubscribers(db: D1Database, subscriberIds: string[]): Promise<SubscriberNodeCountRow[]> {
-	const rows: SubscriberNodeCountRow[] = [];
-	for (const group of chunk(subscriberIds, MAX_IN_LIST)) {
-		const result = await db
-			.prepare(
-				`SELECT subscriber_id, COUNT(*) AS node_count
-				 FROM node_clients
-				 WHERE enabled = 1 AND subscriber_id IN (${sqlPlaceholders(group.length)})
-				 GROUP BY subscriber_id`,
-			)
-			.bind(...group)
-			.all<SubscriberNodeCountRow>();
-		rows.push(...result.results);
-	}
-	return rows;
+export function activeSubscriberUsersStatement(db: D1Database): D1PreparedStatement {
+	return db.prepare(
+		`SELECT xray_email, vless_uuid
+		 FROM subscribers
+		 WHERE status = 'active'
+		 ORDER BY created_at ASC, id ASC`,
+	);
 }
 
 /**

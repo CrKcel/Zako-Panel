@@ -11,7 +11,7 @@
 Agent 通过本机环回 gRPC（默认 `127.0.0.1:10085`）调用 Xray 的 `StatsService`：
 
 - **只采业务入站**：只统计代理入站（如 `vless-reality`）和 Level 0 用户的 `uplink` / `downlink`，排除本机 gRPC 管理端口自身的流量。
-- **用户怎么对应**：每个授权给节点的客户端都有一个全局唯一的 `email`（形如 `u_<ULID>`，对应数据库 `node_clients.xray_email`），Xray 按这个 `email` 记账。
+- **用户怎么对应**：每个订阅用户都有一个全局唯一的 `email`（形如 `u_<ULID>`，对应数据库 `subscribers.xray_email`），Xray 按这个 `email` 记账。
 - **只读不清空**：Agent 查询时传 `reset=false`，自己维护上一次的读数基线，防止多方读取或崩溃时把计数器弄丢。
 
 ---

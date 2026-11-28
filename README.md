@@ -5,7 +5,7 @@
 ## 核心能力
 
 - 节点、接入端点（Endpoint）与订阅档案管理，支持 VLESS + REALITY、VMess、Trojan、Shadowsocks 与 Hysteria2
-- 订阅用户、月度流量配额、有效期与按节点授权
+- 订阅用户、月度流量配额、有效期与全局节点凭据下发（按订阅规则筛选可分发节点）
 - 自动生成 Clash.Meta YAML 与通用 URI 订阅链接，支持自定义代理组和分流规则
 - 节点 Agent 定时心跳、Xray 流量采样与按小时幂等入账
 - 节点用户列表热更新（通过 Xray gRPC 增量增删，失败时自动回退到安全重启）

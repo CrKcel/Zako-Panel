@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import type { CreateSubscriptionRequest, Profile } from '@zako/contracts';
+import type { Profile, Subscription } from '@zako/contracts';
 import type { FormInstance, FormRules } from 'element-plus';
 import { computed, ref, watch } from 'vue';
 import { subscriptionsApi } from '../api/subscriptions';
 import type { SubscriptionOwner } from '../composables/useSubscriptionActions';
 import { useI18n } from '../i18n';
 import { showError, showSuccess } from '../utils/feedback';
-import { toUnixSeconds } from '../utils/time';
+import { fromUnixSeconds, toUnixSeconds } from '../utils/time';
 
 const props = defineProps<{
 	visible: boolean;
 	subscriber: SubscriptionOwner | null;
+	subscription: Subscription | null;
 	profiles: Profile[];
 }>();
 
 const emit = defineEmits<{
 	'update:visible': [value: boolean];
-	created: [token: string];
+	created: [token: string, name: string];
+	updated: [];
 }>();
 
 const { t } = useI18n();
@@ -35,6 +37,8 @@ const form = ref<SubscriptionForm>(emptyForm());
 const formRef = ref<FormInstance>();
 const submitting = ref(false);
 
+const isEditing = computed(() => props.subscription !== null);
+
 const rules = computed<FormRules>(() => ({
 	name: [{ required: true, message: t('subscriptions.form.nameRequired'), trigger: 'blur' }],
 	profile_id: [{ required: true, message: t('subscriptions.form.profileRequired'), trigger: 'change' }],
@@ -44,6 +48,14 @@ watch(
 	() => props.visible,
 	(open) => {
 		if (!open) return;
+		if (props.subscription) {
+			form.value = {
+				name: props.subscription.name,
+				profile_id: props.subscription.profile_id,
+				expires_at: fromUnixSeconds(props.subscription.expires_at),
+			};
+			return;
+		}
 		form.value = emptyForm();
 		if (props.profiles.length === 1 && props.profiles[0]) {
 			form.value.profile_id = props.profiles[0].id;
@@ -56,20 +68,41 @@ function close(): void {
 }
 
 async function submit(): Promise<void> {
-	if (!props.subscriber) return;
 	if (!(await formRef.value?.validate().catch(() => false))) return;
-	const payload: CreateSubscriptionRequest = {
-		name: form.value.name.trim(),
-		subscriber_id: props.subscriber.id,
-		profile_id: form.value.profile_id,
-		expires_at: toUnixSeconds(form.value.expires_at),
-	};
+	const name = form.value.name.trim();
+	const expiresAt = toUnixSeconds(form.value.expires_at);
+
+	if (props.subscription) {
+		submitting.value = true;
+		try {
+			await subscriptionsApi.update(props.subscription.id, {
+				name,
+				profile_id: form.value.profile_id,
+				expires_at: expiresAt,
+			});
+			close();
+			showSuccess(t('subscriptions.form.updated'));
+			emit('updated');
+		} catch (error) {
+			showError(error, t('subscriptions.form.saveFailed'));
+		} finally {
+			submitting.value = false;
+		}
+		return;
+	}
+
+	if (!props.subscriber) return;
 	submitting.value = true;
 	try {
-		const result = await subscriptionsApi.create(payload);
+		const result = await subscriptionsApi.create({
+			name,
+			subscriber_id: props.subscriber.id,
+			profile_id: form.value.profile_id,
+			expires_at: expiresAt,
+		});
 		close();
 		showSuccess(t('subscriptions.form.created'));
-		emit('created', result.token);
+		emit('created', result.token, result.subscription.name);
 	} catch (error) {
 		showError(error, t('subscriptions.form.createFailed'));
 	} finally {
@@ -81,7 +114,7 @@ async function submit(): Promise<void> {
 <template>
 	<el-dialog
 		:model-value="visible"
-		:title="t('subscriptions.create')"
+		:title="isEditing ? t('subscriptions.edit') : t('subscriptions.create')"
 		width="540px"
 		:close-on-click-modal="false"
 		destroy-on-close
@@ -105,7 +138,7 @@ async function submit(): Promise<void> {
 		</el-form>
 		<template #footer>
 			<el-button @click="close">{{ t('common.cancel') }}</el-button>
-			<el-button type="primary" :loading="submitting" @click="submit">{{ t('common.create') }}</el-button>
+			<el-button type="primary" :loading="submitting" @click="submit">{{ isEditing ? t('common.save') : t('common.create') }}</el-button>
 		</template>
 	</el-dialog>
 </template>

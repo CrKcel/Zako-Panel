@@ -13,7 +13,7 @@ import EntityHeader from '../components/EntityHeader.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
-import SubscriptionCreateDialog from '../components/SubscriptionCreateDialog.vue';
+import SubscriptionFormDialog from '../components/SubscriptionFormDialog.vue';
 import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { getCachedResource, invalidateCachedPrefix, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
@@ -287,9 +287,9 @@ async function restoreSubscriber(): Promise<void> {
 				:subscriptions="subscriberSubscriptions"
 				:profiles="profiles"
 				:loading="subscriptionsLoading"
-				:is-rotating="subActions.isRotating"
 				:is-revoking="subActions.isRevoking"
-				@rotate="subActions.rotate"
+				@links="subActions.openLinks"
+				@edit="subActions.openEdit"
 				@revoke="subActions.revoke"
 			/>
 		</el-card>
@@ -330,14 +330,20 @@ async function restoreSubscriber(): Promise<void> {
 		@saved="onGrantSaved"
 	/>
 
-	<SubscriptionCreateDialog
-		v-model:visible="subActions.createVisible.value"
-		:subscriber="subActions.createTarget.value"
+	<SubscriptionFormDialog
+		v-model:visible="subActions.formVisible.value"
+		:subscriber="subActions.formSubscriber.value"
+		:subscription="subActions.editingSubscription.value"
 		:profiles="profiles"
 		@created="subActions.onCreated"
+		@updated="subActions.onUpdated"
 	/>
 
-	<SubscriptionTokenDialog v-model:visible="subActions.tokenVisible.value" :token="subActions.token.value" />
+	<SubscriptionTokenDialog
+		v-model:visible="subActions.tokenVisible.value"
+		:token="subActions.token.value"
+		:subscription-name="subActions.tokenName.value"
+	/>
 </template>
 
 <style scoped>

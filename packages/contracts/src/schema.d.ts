@@ -197,7 +197,7 @@ export interface paths {
         /** List subscriptions */
         get: operations["listSubscriptions"];
         put?: never;
-        /** Create a subscription and return its plaintext token once */
+        /** Create a subscription */
         post: operations["createSubscription"];
         delete?: never;
         options?: never;
@@ -205,7 +205,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/subscriptions/{subscriptionId}/rotate": {
+    "/api/v1/admin/subscriptions/{subscriptionId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -214,12 +214,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Rotate a subscription token */
-        post: operations["rotateSubscription"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update a subscription */
+        patch: operations["updateSubscription"];
         trace?: never;
     };
     "/api/v1/admin/subscriptions/{subscriptionId}/revoke": {
@@ -798,6 +798,7 @@ export interface components {
             profile_id: string;
             profile_name?: string | null;
             name: string;
+            token: string;
             revoked_at: number | null;
             expires_at: number | null;
             created_at: number;
@@ -1018,6 +1019,11 @@ export interface components {
             subscriber_id: string;
             profile_id: string;
             name: string;
+            expires_at?: number | null;
+        };
+        UpdateSubscriptionRequest: {
+            profile_id?: string;
+            name?: string;
             expires_at?: number | null;
         };
         CreateSubscriberRequest: {
@@ -1765,7 +1771,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    rotateSubscription: {
+    updateSubscription: {
         parameters: {
             query?: never;
             header?: never;
@@ -1774,25 +1780,29 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSubscriptionRequest"];
+            };
+        };
         responses: {
-            /** @description Rotated token */
+            /** @description Updated subscription */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        data: {
-                            token: string;
-                        };
+                        data: components["schemas"]["Subscription"];
                         meta: components["schemas"]["Meta"];
                     };
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     revokeSubscription: {

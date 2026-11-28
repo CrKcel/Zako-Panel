@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { ok, okPage } from '../../lib/response';
 import { readJson, readQuery } from '../../lib/validation';
-import { createSubscription, listSubscriptions, revokeSubscription, rotateSubscription } from '../../services/subscription-service';
+import { createSubscription, listSubscriptions, revokeSubscription, updateSubscription } from '../../services/subscription-service';
 import type { AppEnv } from '../../types';
-import { createSubscriptionSchema, listQuerySchema, pathId } from '../schemas';
+import { createSubscriptionSchema, listQuerySchema, pathId, updateSubscriptionSchema } from '../schemas';
 
 export const subscriptionRoutes = new Hono<AppEnv>();
 
@@ -17,9 +17,10 @@ subscriptionRoutes.post('/', async (c) => {
 	return ok(c, await createSubscription(c.env.DB, input), 201);
 });
 
-subscriptionRoutes.post('/:subscriptionId/rotate', async (c) => {
+subscriptionRoutes.patch('/:subscriptionId', async (c) => {
 	const subscriptionId = pathId(c, 'subscriptionId');
-	return ok(c, await rotateSubscription(c.env.DB, subscriptionId));
+	const input = await readJson(c, updateSubscriptionSchema);
+	return ok(c, await updateSubscription(c.env.DB, subscriptionId, input));
 });
 
 subscriptionRoutes.post('/:subscriptionId/revoke', async (c) => {

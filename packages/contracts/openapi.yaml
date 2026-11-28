@@ -609,7 +609,7 @@ paths:
     post:
       operationId: createSubscription
       tags: [admin]
-      summary: Create a subscription and return its plaintext token once
+      summary: Create a subscription
       security:
         - AccessJwt: []
       requestBody:
@@ -645,18 +645,24 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/admin/subscriptions/{subscriptionId}/rotate:
-    post:
-      operationId: rotateSubscription
+  /api/v1/admin/subscriptions/{subscriptionId}:
+    patch:
+      operationId: updateSubscription
       tags: [admin]
-      summary: Rotate a subscription token
+      summary: Update a subscription
       security:
         - AccessJwt: []
       parameters:
         - $ref: '#/components/parameters/SubscriptionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriptionRequest'
       responses:
         '200':
-          description: Rotated token
+          description: Updated subscription
           content:
             application/json:
               schema:
@@ -664,19 +670,19 @@ paths:
                 required: [data, meta]
                 properties:
                   data:
-                    type: object
-                    required: [token]
-                    properties:
-                      token:
-                        type: string
+                    $ref: '#/components/schemas/Subscription'
                   meta:
                     $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/admin/subscriptions/{subscriptionId}/revoke:
     post:
       operationId: revokeSubscription
@@ -2047,7 +2053,7 @@ components:
       enum: [inactive, expired, over_quota]
     Subscription:
       type: object
-      required: [id, subscriber_id, profile_id, name, revoked_at, expires_at, created_at]
+      required: [id, subscriber_id, profile_id, name, token, revoked_at, expires_at, created_at]
       properties:
         id:
           type: string
@@ -2060,6 +2066,8 @@ components:
         profile_name:
           type: [string, 'null']
         name:
+          type: string
+        token:
           type: string
         revoked_at:
           type: [integer, 'null']
@@ -2533,6 +2541,16 @@ components:
       properties:
         subscriber_id:
           type: string
+        profile_id:
+          type: string
+        name:
+          type: string
+        expires_at:
+          type: [integer, 'null']
+    UpdateSubscriptionRequest:
+      type: object
+      minProperties: 1
+      properties:
         profile_id:
           type: string
         name:

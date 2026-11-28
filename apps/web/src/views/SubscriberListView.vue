@@ -24,7 +24,7 @@ import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import SubscriberCard from '../components/SubscriberCard.vue';
 import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
-import SubscriptionCreateDialog from '../components/SubscriptionCreateDialog.vue';
+import SubscriptionFormDialog from '../components/SubscriptionFormDialog.vue';
 import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
 import ViewSwitch, { type ListViewMode } from '../components/ViewSwitch.vue';
 import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
@@ -384,13 +384,13 @@ async function onGrantSaved(): Promise<void> {
 							:subscriptions="subscriptionsFor(row.id)"
 							:profiles="profiles"
 							:disabling="disableAction.isRunning(row.id)"
-							:is-rotating="subActions.isRotating"
 							:is-revoking="subActions.isRevoking"
 							@edit="(item) => openEdit(item.id)"
 							@grant="openGrant"
 							@disable="disableSubscriber"
 							@create-subscription="(item) => subActions.openCreateFor({ id: item.id, name: item.name })"
-							@rotate-subscription="subActions.rotate"
+							@show-subscription-links="subActions.openLinks"
+							@edit-subscription="subActions.openEdit"
 							@revoke-subscription="subActions.revoke"
 						/>
 					</div>
@@ -414,9 +414,9 @@ async function onGrantSaved(): Promise<void> {
 											:subscriptions="subscriptionsFor(row.id)"
 											:profiles="profiles"
 											:loading="subscriptionsLoading"
-											:is-rotating="subActions.isRotating"
 											:is-revoking="subActions.isRevoking"
-											@rotate="subActions.rotate"
+											@links="subActions.openLinks"
+											@edit="subActions.openEdit"
 											@revoke="subActions.revoke"
 										/>
 									</div>
@@ -584,14 +584,20 @@ async function onGrantSaved(): Promise<void> {
 
 	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="onGrantSaved" />
 
-	<SubscriptionCreateDialog
-		v-model:visible="subActions.createVisible.value"
-		:subscriber="subActions.createTarget.value"
+	<SubscriptionFormDialog
+		v-model:visible="subActions.formVisible.value"
+		:subscriber="subActions.formSubscriber.value"
+		:subscription="subActions.editingSubscription.value"
 		:profiles="profiles"
 		@created="subActions.onCreated"
+		@updated="subActions.onUpdated"
 	/>
 
-	<SubscriptionTokenDialog v-model:visible="subActions.tokenVisible.value" :token="subActions.token.value" />
+	<SubscriptionTokenDialog
+		v-model:visible="subActions.tokenVisible.value"
+		:token="subActions.token.value"
+		:subscription-name="subActions.tokenName.value"
+	/>
 </template>
 
 <style scoped>

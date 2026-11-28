@@ -273,9 +273,8 @@ export interface SeedSubscriptionOptions {
 export async function seedSubscription(options: SeedSubscriptionOptions): Promise<string> {
 	const id = options.id ?? newId();
 	const now = nowSeconds();
-	const tokenHash = await sha256Hex(options.token);
 	await env.DB.prepare(
-		`INSERT INTO subscriptions (id, subscriber_id, profile_id, name, token_hash, revoked_at, expires_at, created_at)
+		`INSERT INTO subscriptions (id, subscriber_id, profile_id, name, token, revoked_at, expires_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
@@ -283,7 +282,7 @@ export async function seedSubscription(options: SeedSubscriptionOptions): Promis
 			options.subscriberId,
 			options.profileId,
 			options.name ?? 'subscription',
-			tokenHash,
+			options.token,
 			options.revokedAt ?? null,
 			options.expiresAt ?? null,
 			now,

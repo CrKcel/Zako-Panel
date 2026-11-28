@@ -111,6 +111,14 @@ export const createSubscriptionSchema = z.object({
 	expires_at: nullableUnixSecondsSchema.optional(),
 });
 
+export const updateSubscriptionSchema = z
+	.object({
+		profile_id: idSchema.optional(),
+		name: z.string().trim().min(1).max(64).optional(),
+		expires_at: nullableUnixSecondsSchema.optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, 'At least one field is required');
+
 export const createSubscriberSchema = z.object({
 	name: z.string().trim().min(1).max(64),
 	email: z.string().trim().toLowerCase().max(255).nullable().optional(),

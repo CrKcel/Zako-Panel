@@ -3,7 +3,7 @@ export interface SubscriptionLink {
 	url: string;
 }
 
-/** Links handed out once after a subscription is created or rotated. */
+/** Links built from a subscription token. */
 export function subscriptionLinks(token: string, origin = window.location.origin): SubscriptionLink[] {
 	if (token === '') return [];
 	const base = `${origin}/sub/${token}`;

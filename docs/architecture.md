@@ -22,7 +22,7 @@ Zako Panel 由三部分组成：**控制面**（Cloudflare Worker + D1）、**�
 - **Subscriber（订阅用户）**：真正在用代理的人。流量限额、月度用量、到期时间、是否启用，全部挂在人身上。
 - **Node Client（节点凭据）**：管理员把某个用户授权给某个节点时，系统会为这对“用户-节点”生成一对固定的 `xray_email`（形如 `u_<ULID>`）和 `vless_uuid`。同一节点下的多个 Endpoint 共用这一对凭据：`vless_uuid` 在 VLESS、VMess 里当 UUID，在 Trojan、Shadowsocks、Hysteria2 里直接当密码。
 - **Profile（订阅档案）**：决定订阅长什么样——选哪些节点（全部还是指定几个）、是不是只下发在线节点、Clash 的基础配置、代理组和分流规则怎么写。
-- **Subscription（订阅链接）**：把某个 `Subscriber` 和某个 `Profile` 绑在一起生成的访问 Token（对应 URL `/sub/{token}`）。一个人可以有多个不同 Profile 的订阅链接，轮换或撤销某条链接不会影响其他人。
+- **Subscription（订阅链接）**：把某个 `Subscriber` 和某个 `Profile` 绑在一起生成的访问 Token（对应 URL `/sub/{token}`）。一个人可以有多个不同 Profile 的订阅链接，编辑或撤销某条链接不会影响其他人。
 
 ### 四条主线怎么串起来
 

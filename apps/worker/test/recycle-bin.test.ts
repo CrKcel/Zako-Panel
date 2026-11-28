@@ -17,7 +17,7 @@ import {
 	getClashSubscription,
 	listSubscriptions,
 	revokeSubscription,
-	rotateSubscription,
+	updateSubscription,
 } from '../src/services/subscription-service';
 import {
 	nowSeconds,
@@ -89,7 +89,7 @@ describe('recycle bin', () => {
 		expect(onlyProfiles.counts.total).toBe(3);
 	});
 
-	it('allows deleting a profile once its subscriptions are revoked, and rejects rotating revoked subscriptions', async () => {
+	it('allows deleting a profile once its subscriptions are revoked, and rejects updating revoked subscriptions', async () => {
 		const subscriberId = await seedSubscriber({ name: 'User' });
 		const profileId = await seedProfile({ name: 'Profile' });
 		const created = await createSubscription(env.DB, { subscriber_id: subscriberId, profile_id: profileId, name: 'Sub' });
@@ -97,7 +97,7 @@ describe('recycle bin', () => {
 		await expect(deleteProfile(env.DB, profileId)).rejects.toMatchObject({ status: 409 });
 
 		await revokeSubscription(env.DB, created.subscription.id);
-		await expect(rotateSubscription(env.DB, created.subscription.id)).rejects.toMatchObject({ status: 409 });
+		await expect(updateSubscription(env.DB, created.subscription.id, { name: 'Updated' })).rejects.toMatchObject({ status: 409 });
 
 		await deleteProfile(env.DB, profileId);
 		await expect(getProfile(env.DB, profileId)).rejects.toMatchObject({ status: 404 });

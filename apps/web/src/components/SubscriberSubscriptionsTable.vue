@@ -12,7 +12,6 @@ const props = withDefaults(
 		profiles: Profile[];
 		loading?: boolean;
 		size?: 'default' | 'small';
-		isRotating?: (id: string) => boolean;
 		isRevoking?: (id: string) => boolean;
 	}>(),
 	{
@@ -22,7 +21,8 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-	rotate: [row: Subscription];
+	links: [row: Subscription];
+	edit: [row: Subscription];
 	revoke: [row: Subscription];
 }>();
 
@@ -64,10 +64,13 @@ function isActive(row: Subscription): boolean {
 				<span class="tnum">{{ formatTimestamp(row.created_at) }}</span>
 			</template>
 		</el-table-column>
-		<el-table-column :label="t('common.actions')" width="140" fixed="right">
+		<el-table-column :label="t('common.actions')" width="200" fixed="right">
 			<template #default="{ row }">
-				<el-button link type="primary" :loading="isRotating?.(row.id) ?? false" @click="emit('rotate', row as Subscription)">
-					{{ t('subscriptions.actions.rotate') }}
+				<el-button link type="primary" @click="emit('links', row as Subscription)">
+					{{ t('subscriptions.actions.links') }}
+				</el-button>
+				<el-button link type="primary" :disabled="row.revoked_at !== null" @click="emit('edit', row as Subscription)">
+					{{ t('common.edit') }}
 				</el-button>
 				<el-button
 					link

@@ -1,6 +1,5 @@
-import type { CreateSubscriptionRequest, Subscription } from '@zako/contracts';
+import type { CreateSubscriptionRequest, Subscription, UpdateSubscriptionRequest } from '@zako/contracts';
 import { AppError } from '../lib/errors';
-import { sha256Hex } from '../lib/hash';
 import { newId } from '../lib/ids';
 import { nowSeconds } from '../lib/node-status';
 import { cycleUsage } from '../lib/subscriber-status';
@@ -13,7 +12,7 @@ import {
 	insertSubscriptionStatement,
 	listSubscriptionRows,
 	revokeSubscriptionRow,
-	updateSubscriptionTokenHash,
+	updateSubscriptionRow,
 	type SubscriptionRow,
 } from '../repositories/subscriptions';
 import type { ListQuery, Paginated } from '../types';
@@ -38,6 +37,7 @@ function toSubscription(row: SubscriptionRow): Subscription {
 		profile_id: row.profile_id,
 		profile_name: row.profile_name,
 		name: row.name,
+		token: row.token,
 		revoked_at: row.revoked_at,
 		expires_at: row.expires_at,
 		created_at: row.created_at,
@@ -68,14 +68,13 @@ export async function createSubscription(
 
 	const now = nowSeconds();
 	const token = generateToken();
-	const tokenHash = await sha256Hex(token);
 	const subscriptionId = newId();
 	await insertSubscriptionStatement(db, {
 		id: subscriptionId,
 		subscriber_id: input.subscriber_id,
 		profile_id: input.profile_id,
 		name: input.name,
-		token_hash: tokenHash,
+		token,
 		expires_at: input.expires_at ?? null,
 		now,
 	}).run();
@@ -85,14 +84,25 @@ export async function createSubscription(
 	return { subscription: toSubscription(row), token };
 }
 
-export async function rotateSubscription(db: D1Database, subscriptionId: string): Promise<{ token: string }> {
+export async function updateSubscription(db: D1Database, subscriptionId: string, input: UpdateSubscriptionRequest): Promise<Subscription> {
 	const existing = await findSubscriptionById(db, subscriptionId);
 	if (!existing) throw new AppError('NOT_FOUND', 'Subscription not found', 404);
 	if (existing.revoked_at !== null) throw new AppError('CONFLICT', 'Subscription is revoked', 409);
-	const token = generateToken();
-	const tokenHash = await sha256Hex(token);
-	await updateSubscriptionTokenHash(db, subscriptionId, tokenHash);
-	return { token };
+
+	if (input.profile_id !== undefined) {
+		const profile = await findProfileById(db, input.profile_id);
+		if (!profile) throw new AppError('NOT_FOUND', 'Profile not found', 404);
+	}
+
+	await updateSubscriptionRow(db, subscriptionId, {
+		profile_id: input.profile_id,
+		name: input.name,
+		expires_at: input.expires_at,
+	});
+
+	const updated = await findSubscriptionById(db, subscriptionId);
+	if (!updated) throw new AppError('NOT_FOUND', 'Subscription not found', 404);
+	return toSubscription(updated);
 }
 
 export async function revokeSubscription(db: D1Database, subscriptionId: string): Promise<Subscription> {

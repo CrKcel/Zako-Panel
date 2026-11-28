@@ -14,7 +14,6 @@ const props = defineProps<{
 	subscriptions: Subscription[];
 	profiles: Profile[];
 	disabling?: boolean;
-	isRotating?: (id: string) => boolean;
 	isRevoking?: (id: string) => boolean;
 }>();
 
@@ -23,7 +22,8 @@ const emit = defineEmits<{
 	grant: [subscriber: Subscriber];
 	disable: [subscriber: Subscriber];
 	createSubscription: [subscriber: Subscriber];
-	rotateSubscription: [subscription: Subscription];
+	showSubscriptionLinks: [subscription: Subscription];
+	editSubscription: [subscription: Subscription];
 	revokeSubscription: [subscription: Subscription];
 }>();
 
@@ -144,8 +144,11 @@ function isSubActive(sub: Subscription): boolean {
 						</div>
 					</div>
 					<div class="sub-item-actions">
-						<el-button link type="primary" size="small" :loading="isRotating?.(sub.id) ?? false" @click="emit('rotateSubscription', sub)">
-							{{ t('subscriptions.actions.rotate') }}
+						<el-button link type="primary" size="small" @click="emit('showSubscriptionLinks', sub)">
+							{{ t('subscriptions.actions.links') }}
+						</el-button>
+						<el-button link type="primary" size="small" :disabled="sub.revoked_at !== null" @click="emit('editSubscription', sub)">
+							{{ t('common.edit') }}
 						</el-button>
 						<el-button
 							link

@@ -344,8 +344,8 @@ function buildSeedSql(adminEmail) {
 	statements.push(
 		...insertMany(
 			'subscriptions',
-			['id', 'subscriber_id', 'profile_id', 'name', 'token_hash', 'revoked_at', 'expires_at', 'created_at'],
-			[[ulid(), subscribers[0].id, profileId, 'capacity-subscription', createHash('sha256').update(token).digest('hex'), null, null, now]],
+			['id', 'subscriber_id', 'profile_id', 'name', 'token', 'revoked_at', 'expires_at', 'created_at'],
+			[[ulid(), subscribers[0].id, profileId, 'capacity-subscription', token, null, null, now]],
 		),
 		...insertMany(
 			'meta',

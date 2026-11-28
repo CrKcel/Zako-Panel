@@ -16,39 +16,48 @@ export interface SubscriptionActionsOptions {
 }
 
 /**
- * Coordinates create, rotate, revoke and one-time token presentation for
- * subscription links scoped under a subscriber.
+ * Coordinates create, edit, link presentation, and revoke for subscription links
+ * scoped under a subscriber.
  */
 export function useSubscriptionActions(options: SubscriptionActionsOptions = {}) {
 	const { t } = useI18n();
 	const token = ref('');
+	const tokenName = ref('');
 	const tokenVisible = ref(false);
-	const createVisible = ref(false);
-	const createTarget = ref<SubscriptionOwner | null>(null);
+	const formVisible = ref(false);
+	const formSubscriber = ref<SubscriptionOwner | null>(null);
+	const editingSubscription = ref<Subscription | null>(null);
 
 	function openCreateFor(owner: SubscriptionOwner): void {
-		createTarget.value = owner;
-		createVisible.value = true;
+		editingSubscription.value = null;
+		formSubscriber.value = owner;
+		formVisible.value = true;
 	}
 
-	async function onCreated(createdToken: string): Promise<void> {
+	function openEdit(row: Subscription): void {
+		editingSubscription.value = row;
+		formSubscriber.value = { id: row.subscriber_id, name: row.subscriber_name ?? row.subscriber_id };
+		formVisible.value = true;
+	}
+
+	function openLinks(row: Subscription): void {
+		token.value = row.token;
+		tokenName.value = row.name;
+		tokenVisible.value = true;
+	}
+
+	async function onCreated(createdToken: string, name: string): Promise<void> {
 		token.value = createdToken;
+		tokenName.value = name;
 		tokenVisible.value = true;
 		invalidateCachedResource('subscriptions:list');
 		await options.onChanged?.();
 	}
 
-	const rotateAction = useAsyncAction(
-		async (row: Subscription) => {
-			const result = await subscriptionsApi.rotate(row.id);
-			token.value = result.token;
-			tokenVisible.value = true;
-			showSuccess(t('subscriptions.rotate.success'));
-			invalidateCachedResource('subscriptions:list');
-			await options.onChanged?.();
-		},
-		{ onError: (error) => showError(error, t('subscriptions.rotate.failed')) },
-	);
+	async function onUpdated(): Promise<void> {
+		invalidateCachedResource('subscriptions:list');
+		await options.onChanged?.();
+	}
 
 	const revokeAction = useAsyncAction(
 		async (row: Subscription) => {
@@ -61,11 +70,6 @@ export function useSubscriptionActions(options: SubscriptionActionsOptions = {})
 		{ onError: (error) => showError(error, t('subscriptions.revoke.failed')) },
 	);
 
-	async function rotate(row: Subscription): Promise<void> {
-		if (!(await confirmAction(t('subscriptions.rotate.confirm', { name: row.name })))) return;
-		await rotateAction.runFor(row.id, row);
-	}
-
 	async function revoke(row: Subscription): Promise<void> {
 		if (!(await confirmAction(t('subscriptions.revoke.confirm', { name: row.name })))) return;
 		await revokeAction.runFor(row.id, row);
@@ -73,14 +77,17 @@ export function useSubscriptionActions(options: SubscriptionActionsOptions = {})
 
 	return {
 		token,
+		tokenName,
 		tokenVisible,
-		createVisible,
-		createTarget,
+		formVisible,
+		formSubscriber,
+		editingSubscription,
 		openCreateFor,
+		openEdit,
+		openLinks,
 		onCreated,
-		isRotating: rotateAction.isRunning,
+		onUpdated,
 		isRevoking: revokeAction.isRunning,
-		rotate,
 		revoke,
 	};
 }

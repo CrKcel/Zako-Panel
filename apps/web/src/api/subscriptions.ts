@@ -1,4 +1,4 @@
-import type { CreateSubscriptionRequest, Subscription } from '@zako/contracts';
+import type { CreateSubscriptionRequest, Subscription, UpdateSubscriptionRequest } from '@zako/contracts';
 import { apiPage, apiRequest, LIST_LIMIT, type Page } from './client';
 
 export interface SubscriptionListParams {
@@ -16,9 +16,10 @@ export const subscriptionsApi = {
 			body: input,
 		});
 	},
-	rotate(subscriptionId: string): Promise<{ token: string }> {
-		return apiRequest<{ token: string }>(`/api/v1/admin/subscriptions/${subscriptionId}/rotate`, {
-			method: 'POST',
+	update(subscriptionId: string, input: UpdateSubscriptionRequest): Promise<Subscription> {
+		return apiRequest<Subscription>(`/api/v1/admin/subscriptions/${subscriptionId}`, {
+			method: 'PATCH',
+			body: input,
 		});
 	},
 	revoke(subscriptionId: string): Promise<Subscription> {

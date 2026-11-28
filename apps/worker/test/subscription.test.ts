@@ -1,9 +1,17 @@
 import { env, SELF } from 'cloudflare:test';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import worker from '../src/index';
 import { replaceSubscriberNodes } from '../src/services/subscriber-service';
 import { previewProfile } from '../src/services/distribution';
-import { createSubscription, getClashSubscription, revokeSubscription, rotateSubscription } from '../src/services/subscription-service';
+import { deleteProfile } from '../src/services/profile-service';
+import {
+	createSubscription,
+	getClashSubscription,
+	listSubscriptions,
+	revokeSubscription,
+	updateSubscription,
+} from '../src/services/subscription-service';
 import {
 	DEFAULT_PARAMS,
 	hourStart,
@@ -253,13 +261,28 @@ describe('subscription access control', () => {
 	});
 });
 
+function adminRequest(path: string, init?: RequestInit): Promise<Response> {
+	return Promise.resolve(
+		worker.fetch(
+			new Request(`https://panel.test${path}`, init),
+			{
+				...env,
+				ENVIRONMENT: 'development',
+				DEV_ADMIN_EMAIL: 'admin@example.com',
+			},
+			{} as ExecutionContext,
+		),
+	);
+}
+
 describe('subscription administration', () => {
-	it('creates, rotates and revokes tokens', async () => {
+	it('creates, displays stored tokens, updates rules/metadata, and revokes subscriptions', async () => {
 		const nodeId = await seedNode({ name: 'Admin' });
 		await seedEndpoint(nodeId);
 		const subscriberId = await seedSubscriber();
 		await seedNodeClient(nodeId, subscriberId);
-		const profileId = await seedProfile();
+		const profileId = await seedProfile({ name: 'Rule A', rules: ['DOMAIN-SUFFIX,a.example,PROXY', 'MATCH,PROXY'] });
+		const secondProfileId = await seedProfile({ name: 'Rule B', rules: ['DOMAIN-SUFFIX,b.example,PROXY', 'MATCH,PROXY'] });
 
 		const created = await createSubscription(env.DB, {
 			subscriber_id: subscriberId,
@@ -268,16 +291,64 @@ describe('subscription administration', () => {
 		});
 		expect(created.subscription.revoked_at).toBeNull();
 		expect(created.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(created.subscription.token).toBe(created.token);
 		expect(await getClashSubscription(env.DB, created.token)).toMatchObject({ contentType: 'application/yaml' });
 
-		const rotated = await rotateSubscription(env.DB, created.subscription.id);
-		expect(rotated.token).not.toBe(created.token);
-		await expect(getClashSubscription(env.DB, created.token)).rejects.toMatchObject({ status: 401 });
-		expect(await getClashSubscription(env.DB, rotated.token)).toMatchObject({ contentType: 'application/yaml' });
+		const listed = await listSubscriptions(env.DB, { limit: 50 });
+		expect(listed.items).toHaveLength(1);
+		expect(listed.items[0]?.token).toBe(created.token);
+
+		const futureExpiry = nowSeconds() + 86_400;
+		const patchRes = await adminRequest(`/api/v1/admin/subscriptions/${created.subscription.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				profile_id: secondProfileId,
+				name: 'renamed',
+				expires_at: futureExpiry,
+			}),
+		});
+		expect(patchRes.status).toBe(200);
+		const patchBody = (await patchRes.json()) as {
+			data: { name: string; profile_id: string; profile_name: string; expires_at: number; token: string };
+		};
+		expect(patchBody.data).toMatchObject({
+			name: 'renamed',
+			profile_id: secondProfileId,
+			profile_name: 'Rule B',
+			expires_at: futureExpiry,
+			token: created.token,
+		});
+
+		const updatedDoc = parse(await (await fetchClash(created.token)).text()) as ClashDocument;
+		expect(updatedDoc.rules).toEqual(['DOMAIN-SUFFIX,b.example,PROXY', 'MATCH,PROXY']);
+
+		const cleared = await updateSubscription(env.DB, created.subscription.id, { expires_at: null });
+		expect(cleared.expires_at).toBeNull();
+
+		// Rotation endpoint has been removed.
+		const rotateRes = await adminRequest(`/api/v1/admin/subscriptions/${created.subscription.id}/rotate`, { method: 'POST' });
+		expect(rotateRes.status).toBe(404);
+
+		// Rejects soft-deleted or unknown profiles and empty updates.
+		const trashedProfile = await seedProfile({ name: 'Trashed' });
+		await deleteProfile(env.DB, trashedProfile);
+		await expect(updateSubscription(env.DB, created.subscription.id, { profile_id: trashedProfile })).rejects.toMatchObject({
+			status: 404,
+		});
+		await expect(updateSubscription(env.DB, '01J2Z6Q8Y3V9M4K7T1B5C0D2E9', { name: 'missing' })).rejects.toMatchObject({
+			status: 404,
+		});
+		const emptyPatch = await adminRequest(`/api/v1/admin/subscriptions/${created.subscription.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({}),
+		});
+		expect(emptyPatch.status).toBe(400);
 
 		const revoked = await revokeSubscription(env.DB, created.subscription.id);
 		expect(revoked.revoked_at).toBeGreaterThan(0);
-		await expect(getClashSubscription(env.DB, rotated.token)).rejects.toMatchObject({ status: 401 });
+		await expect(getClashSubscription(env.DB, created.token)).rejects.toMatchObject({ status: 401 });
 	});
 
 	it('reports usage in the subscription-userinfo header', async () => {

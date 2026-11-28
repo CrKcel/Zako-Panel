@@ -7,6 +7,7 @@ import { subscriptionLinks } from '../utils/subscription';
 const props = defineProps<{
 	visible: boolean;
 	token: string;
+	subscriptionName?: string;
 }>();
 
 const emit = defineEmits<{
@@ -15,6 +16,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const links = computed(() => subscriptionLinks(props.token));
+const dialogTitle = computed(() =>
+	props.subscriptionName ? t('subscriptions.links.titleWithName', { name: props.subscriptionName }) : t('subscriptions.links.title'),
+);
 
 function close(): void {
 	emit('update:visible', false);
@@ -22,14 +26,8 @@ function close(): void {
 </script>
 
 <template>
-	<el-dialog
-		:model-value="visible"
-		:title="t('subscriptions.links.title')"
-		width="720px"
-		:close-on-click-modal="false"
-		@update:model-value="close"
-	>
-		<el-alert type="info" :closable="false" show-icon class="links-alert" :title="t('subscriptions.links.oneTimeHint')" />
+	<el-dialog :model-value="visible" :title="dialogTitle" width="720px" :close-on-click-modal="false" @update:model-value="close">
+		<el-alert type="info" :closable="false" show-icon class="links-alert" :title="t('subscriptions.links.keepSecretHint')" />
 		<div class="link-list">
 			<div class="link-row">
 				<span class="link-label">{{ t('subscriptions.links.token') }}</span>

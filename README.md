@@ -62,7 +62,7 @@ npm run bootstrap
 npx wrangler d1 execute zako-panel --local --file=bootstrap.sql
 ```
 
-> 订阅 Token 只在终端打印这一次，注意保存；导入后可删掉 `bootstrap.sql`。
+> 导入后可在管理后台「订阅用户」中查看订阅 Token 与链接，并可删掉 `bootstrap.sql`。
 
 ### 4. 启动开发服务器
 

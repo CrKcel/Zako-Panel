@@ -478,6 +478,7 @@ export const zhCN = {
 		loadSubscribersError: '订阅用户加载失败',
 		searchPlaceholder: '搜索订阅链接名称或订阅规则…',
 		create: '创建订阅链接',
+		edit: '编辑订阅链接',
 		empty: '暂无订阅链接',
 		columns: {
 			subscriber: '订阅用户',
@@ -486,7 +487,7 @@ export const zhCN = {
 			createdAt: '创建时间',
 		},
 		actions: {
-			rotate: '轮换',
+			links: '查看链接',
 			revoke: '撤销',
 		},
 		form: {
@@ -497,12 +498,9 @@ export const zhCN = {
 			subscriberRequired: '请选择订阅用户',
 			profileRequired: '请选择订阅规则',
 			created: '订阅链接已创建',
+			updated: '订阅链接已更新',
 			createFailed: '订阅链接创建失败',
-		},
-		rotate: {
-			confirm: '轮换订阅链接「{name}」的 Token？',
-			success: '订阅链接 Token 已轮换',
-			failed: '订阅链接轮换失败',
+			saveFailed: '订阅链接保存失败',
 		},
 		revoke: {
 			confirm: '撤销订阅链接「{name}」？撤销后将移入回收站，可在回收站中恢复或永久删除。',
@@ -511,8 +509,9 @@ export const zhCN = {
 		},
 		links: {
 			title: '订阅链接',
+			titleWithName: '订阅链接 · {name}',
 			token: 'Token',
-			oneTimeHint: 'Token 与专属订阅链接仅在创建或轮换时展示一次，请妥善复制保存。',
+			keepSecretHint: '请妥善保管 Token 与专属订阅链接，任何持有链接的人都可以拉取订阅。',
 		},
 	},
 	recycleBin: {
@@ -1071,6 +1070,7 @@ export const enUS: Messages = {
 		loadSubscribersError: 'Failed to load subscribers',
 		searchPlaceholder: 'Search subscription, subscriber, or profile…',
 		create: 'Create Subscription',
+		edit: 'Edit Subscription',
 		empty: 'No subscription links',
 		columns: {
 			subscriber: 'Subscriber',
@@ -1079,7 +1079,7 @@ export const enUS: Messages = {
 			createdAt: 'Created At',
 		},
 		actions: {
-			rotate: 'Rotate',
+			links: 'Links',
 			revoke: 'Revoke',
 		},
 		form: {
@@ -1090,12 +1090,9 @@ export const enUS: Messages = {
 			subscriberRequired: 'Please select a subscriber',
 			profileRequired: 'Please select a profile',
 			created: 'Subscription created',
+			updated: 'Subscription updated',
 			createFailed: 'Failed to create subscription',
-		},
-		rotate: {
-			confirm: 'Rotate token for subscription "{name}"?',
-			success: 'Subscription token rotated',
-			failed: 'Failed to rotate subscription',
+			saveFailed: 'Failed to save subscription',
 		},
 		revoke: {
 			confirm: 'Revoke subscription "{name}"? It will be moved to the recycle bin where it can be restored or permanently deleted.',
@@ -1104,8 +1101,9 @@ export const enUS: Messages = {
 		},
 		links: {
 			title: 'Subscription Links',
+			titleWithName: 'Subscription Links · {name}',
 			token: 'Token',
-			oneTimeHint: 'The token and subscription URLs are displayed only once upon creation or rotation. Save them securely.',
+			keepSecretHint: 'Keep this token and subscription URLs private; anyone with the link can fetch this subscription.',
 		},
 	},
 	recycleBin: {

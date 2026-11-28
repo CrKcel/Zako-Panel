@@ -1,6 +1,5 @@
 import type { ClashPreview, DistributionSkipReason, Profile, SubscriberBlockReason } from '@zako/contracts';
 import { AppError } from '../lib/errors';
-import { sha256Hex } from '../lib/hash';
 import { isHeartbeatFresh, nowSeconds } from '../lib/node-status';
 import { subscriberBlockReason, type EntitlementInput } from '../lib/subscriber-status';
 import { getProtocolAdapter } from '../protocols';
@@ -17,7 +16,7 @@ import {
 	type NodeClientRow,
 	type SubscriberUsageRow,
 } from '../repositories/subscribers';
-import { findSubscriptionByTokenHash, type SubscriptionLookupRow } from '../repositories/subscriptions';
+import { findSubscriptionByToken, type SubscriptionLookupRow } from '../repositories/subscriptions';
 import { toProfile } from './profile-mapping';
 
 /**
@@ -83,8 +82,7 @@ function entitlementOf(row: SubscriptionLookupRow, usage: SubscriberUsageRow | n
  * status, so a quota reset or a renewed expiry takes effect on the next request.
  */
 export async function loadDistributionContext(db: D1Database, token: string): Promise<DistributionContext> {
-	const hash = await sha256Hex(token);
-	const subscription = await findSubscriptionByTokenHash(db, hash);
+	const subscription = await findSubscriptionByToken(db, token);
 	if (!subscription) throw invalidToken();
 
 	const now = nowSeconds();

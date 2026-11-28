@@ -67,6 +67,7 @@ export type UpdateEndpointRequest = Schemas['UpdateEndpointRequest'];
 export type CreateProfileRequest = Schemas['CreateProfileRequest'];
 export type UpdateProfileRequest = Schemas['UpdateProfileRequest'];
 export type CreateSubscriptionRequest = Schemas['CreateSubscriptionRequest'];
+export type UpdateSubscriptionRequest = Schemas['UpdateSubscriptionRequest'];
 export type CreateSubscriberRequest = Schemas['CreateSubscriberRequest'];
 export type UpdateSubscriberRequest = Schemas['UpdateSubscriberRequest'];
 export type ReplaceSubscriberNodesRequest = Schemas['ReplaceSubscriberNodesRequest'];

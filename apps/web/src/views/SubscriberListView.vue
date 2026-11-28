@@ -22,9 +22,11 @@ import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SubscriberCard from '../components/SubscriberCard.vue';
 import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
 import SubscriptionCreateDialog from '../components/SubscriptionCreateDialog.vue';
 import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
+import ViewSwitch, { type ListViewMode } from '../components/ViewSwitch.vue';
 import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
@@ -35,9 +37,11 @@ import {
 	LIMIT_UNITS,
 	limitBytes,
 	limitParts,
+	subscriberUsageRatio,
 	subscriberUsedBytes,
 	usageCycleLabel,
 	usageLabel,
+	usageTone,
 	type LimitUnit,
 } from '../domain/subscriber';
 import { useI18n } from '../i18n';
@@ -60,10 +64,14 @@ function emptySubscriberForm(): SubscriberForm {
 	return { name: '', email: '', limit_value: undefined, limit_unit: 'GB', expires_at: null, suspended: false };
 }
 
+type SortKey = 'status' | 'name' | 'usage' | 'expires' | 'nodes';
+
 const activeTab = ref<'list' | 'recycle-bin'>('list');
 const binCategory = ref<'subscriber' | 'subscription'>('subscriber');
 const search = ref('');
 const statusFilter = ref<'all' | SubscriberStatus>('all');
+const sortBy = ref<SortKey>('status');
+const viewMode = ref<ListViewMode>('card');
 
 const tableRef = ref<TableInstance>();
 const form = ref<SubscriberForm>(emptySubscriberForm());
@@ -180,25 +188,40 @@ const statusOptions = computed<Array<{ value: 'all' | SubscriberStatus; label: s
 	];
 });
 
+const STATUS_ORDER: Record<SubscriberStatus, number> = {
+	limited: 0,
+	expired: 1,
+	active: 2,
+	disabled: 3,
+};
+
 const filteredSubscribers = computed(() => {
 	const q = search.value.trim().toLowerCase();
-	return subscribers.value.filter((row) => {
+	const list = subscribers.value.filter((row) => {
 		if (statusFilter.value !== 'all' && row.status !== statusFilter.value) return false;
 		if (!q) return true;
 		if (row.name.toLowerCase().includes(q) || (row.email ?? '').toLowerCase().includes(q)) return true;
 		return subscriptionsFor(row.id).some((sub) => sub.name.toLowerCase().includes(q) || (sub.profile_name ?? '').toLowerCase().includes(q));
 	});
+	return [...list].sort((a, b) => {
+		switch (sortBy.value) {
+			case 'name':
+				return a.name.localeCompare(b.name);
+			case 'status':
+				return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name);
+			case 'usage':
+				return subscriberUsedBytes(b) - subscriberUsedBytes(a) || a.name.localeCompare(b.name);
+			case 'expires':
+				return (a.expires_at ?? Number.MAX_SAFE_INTEGER) - (b.expires_at ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name);
+			case 'nodes':
+				return b.node_count - a.node_count || a.name.localeCompare(b.name);
+		}
+	});
 });
 
-function usageRatio(row: Subscriber): number | null {
-	if (!row.traffic_limit_bytes || row.traffic_limit_bytes <= 0) return null;
-	return Math.min(100, Math.round((subscriberUsedBytes(row) / row.traffic_limit_bytes) * 100));
-}
-
-function usageTone(ratio: number): string {
-	if (ratio >= 95) return 'is-danger';
-	if (ratio >= 80) return 'is-warning';
-	return 'is-primary';
+function clearFilters(): void {
+	search.value = '';
+	statusFilter.value = 'all';
 }
 
 const rules = computed<FormRules>(() => ({
@@ -331,8 +354,16 @@ async function onGrantSaved(): Promise<void> {
 							</button>
 						</div>
 						<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
+						<el-select v-model="sortBy" class="sort-select">
+							<el-option :label="t('subscribers.sortStatus')" value="status" />
+							<el-option :label="t('subscribers.sortName')" value="name" />
+							<el-option :label="t('subscribers.sortUsage')" value="usage" />
+							<el-option :label="t('subscribers.sortExpires')" value="expires" />
+							<el-option :label="t('subscribers.sortNodes')" value="nodes" />
+						</el-select>
 					</div>
 				</template>
+				<ViewSwitch v-model="viewMode" />
 				<el-button :loading="refreshing" @click="refreshList">
 					<AppIcon name="refresh" :size="14" class="btn-icon" />
 					<span>{{ t('common.refresh') }}</span>
@@ -343,103 +374,133 @@ async function onGrantSaved(): Promise<void> {
 				</el-button>
 			</PageToolbar>
 
-			<el-card shadow="never">
-				<el-table ref="tableRef" v-loading="loading" :data="filteredSubscribers" row-key="id" :empty-text="t('common.noData')">
-					<el-table-column type="expand">
-						<template #default="{ row }">
-							<div class="expand-panel">
-								<div class="expand-header">
-									<span class="expand-title">
-										<AppIcon name="subscriptions" :size="14" />
-										<span>{{ t('nav.subscriptions') }} ({{ subscriptionsFor(row.id).length }})</span>
-									</span>
-									<el-button type="primary" size="small" @click="subActions.openCreateFor({ id: row.id, name: row.name })">
-										<AppIcon name="plus" :size="13" class="btn-icon" />
-										<span>{{ t('subscriptions.create') }}</span>
-									</el-button>
-								</div>
-								<SubscriberSubscriptionsTable
-									size="small"
-									:subscriptions="subscriptionsFor(row.id)"
-									:profiles="profiles"
-									:loading="subscriptionsLoading"
-									:is-rotating="subActions.isRotating"
-									:is-revoking="subActions.isRevoking"
-									@rotate="subActions.rotate"
-									@revoke="subActions.revoke"
-								/>
-							</div>
-						</template>
-					</el-table-column>
-					<el-table-column prop="name" :label="t('common.name')" min-width="150">
-						<template #default="{ row }">
-							<div class="name-cell">
-								<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
-								<span v-if="row.email" class="email-sub">{{ row.email }}</span>
-							</div>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('common.status')" width="110">
-						<template #default="{ row }">
-							<StatusBadge
-								:label="subscriberStatusDescriptor(row.status).label"
-								:type="subscriberStatusDescriptor(row.status).tag"
-								:pulse="row.status === 'active'"
-							/>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="240">
-						<template #default="{ row }">
-							<div class="usage-cell">
-								<div class="usage-top">
-									<span class="tnum usage-text">{{ usageLabel(row as Subscriber) }}</span>
-									<span v-if="usageRatio(row as Subscriber) !== null" class="tnum usage-pct"> {{ usageRatio(row as Subscriber) }}% </span>
-								</div>
-								<div v-if="usageRatio(row as Subscriber) !== null" class="usage-bar">
-									<div
-										class="usage-bar-fill"
-										:class="usageTone(usageRatio(row as Subscriber)!)"
-										:style="{ width: `${usageRatio(row as Subscriber)}%` }"
+			<div v-loading="loading" class="list-stage">
+				<template v-if="filteredSubscribers.length > 0">
+					<div v-if="viewMode === 'card'" class="card-grid is-align-start">
+						<SubscriberCard
+							v-for="row in filteredSubscribers"
+							:key="row.id"
+							:subscriber="row"
+							:subscriptions="subscriptionsFor(row.id)"
+							:profiles="profiles"
+							:disabling="disableAction.isRunning(row.id)"
+							:is-rotating="subActions.isRotating"
+							:is-revoking="subActions.isRevoking"
+							@edit="(item) => openEdit(item.id)"
+							@grant="openGrant"
+							@disable="disableSubscriber"
+							@create-subscription="(item) => subActions.openCreateFor({ id: item.id, name: item.name })"
+							@rotate-subscription="subActions.rotate"
+							@revoke-subscription="subActions.revoke"
+						/>
+					</div>
+					<el-card v-else shadow="never">
+						<el-table ref="tableRef" :data="filteredSubscribers" row-key="id" :empty-text="t('common.noData')">
+							<el-table-column type="expand">
+								<template #default="{ row }">
+									<div class="expand-panel">
+										<div class="expand-header">
+											<span class="expand-title">
+												<AppIcon name="subscriptions" :size="14" />
+												<span>{{ t('nav.subscriptions') }} ({{ subscriptionsFor(row.id).length }})</span>
+											</span>
+											<el-button type="primary" size="small" @click="subActions.openCreateFor({ id: row.id, name: row.name })">
+												<AppIcon name="plus" :size="13" class="btn-icon" />
+												<span>{{ t('subscriptions.create') }}</span>
+											</el-button>
+										</div>
+										<SubscriberSubscriptionsTable
+											size="small"
+											:subscriptions="subscriptionsFor(row.id)"
+											:profiles="profiles"
+											:loading="subscriptionsLoading"
+											:is-rotating="subActions.isRotating"
+											:is-revoking="subActions.isRevoking"
+											@rotate="subActions.rotate"
+											@revoke="subActions.revoke"
+										/>
+									</div>
+								</template>
+							</el-table-column>
+							<el-table-column prop="name" :label="t('common.name')" min-width="150">
+								<template #default="{ row }">
+									<div class="name-cell">
+										<RouterLink :to="`/subscribers/${row.id}`" class="ui-link">{{ row.name }}</RouterLink>
+										<span v-if="row.email" class="email-sub">{{ row.email }}</span>
+									</div>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('common.status')" width="110">
+								<template #default="{ row }">
+									<StatusBadge
+										:label="subscriberStatusDescriptor(row.status).label"
+										:type="subscriberStatusDescriptor(row.status).tag"
+										:pulse="row.status === 'active'"
 									/>
-								</div>
-								<span class="cycle-sub tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
-							</div>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.expiresAt')" width="170">
-						<template #default="{ row }">
-							<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.grantedNodes')" width="95">
-						<template #default="{ row }">
-							<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
-								{{ row.node_count }}
-							</RouterLink>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.subscriptions')" width="105">
-						<template #default="{ row }">
-							<button type="button" class="sub-count-btn tnum" @click="toggleExpand(row as Subscriber)">
-								<AppIcon name="subscriptions" :size="13" />
-								<span>{{ subscriptionsFor(row.id).length }}</span>
-							</button>
-						</template>
-					</el-table-column>
-					<el-table-column :label="t('common.actions')" width="250" fixed="right">
-						<template #default="{ row }">
-							<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
-							<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
-							<RouterLink :to="`/subscribers/${row.id}`" custom v-slot="{ navigate }">
-								<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
-							</RouterLink>
-							<el-button link type="danger" :loading="disableAction.isRunning(row.id)" @click="disableSubscriber(row as Subscriber)">
-								{{ t('subscribers.actions.disable') }}
-							</el-button>
-						</template>
-					</el-table-column>
-				</el-table>
-			</el-card>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="240">
+								<template #default="{ row }">
+									<div class="usage-cell">
+										<div class="usage-top">
+											<span class="tnum usage-text">{{ usageLabel(row as Subscriber) }}</span>
+											<span v-if="subscriberUsageRatio(row as Subscriber) !== null" class="tnum usage-pct">
+												{{ subscriberUsageRatio(row as Subscriber) }}%
+											</span>
+										</div>
+										<div v-if="subscriberUsageRatio(row as Subscriber) !== null" class="usage-bar">
+											<div
+												class="usage-bar-fill"
+												:class="usageTone(subscriberUsageRatio(row as Subscriber)!)"
+												:style="{ width: `${subscriberUsageRatio(row as Subscriber)}%` }"
+											/>
+										</div>
+										<span class="cycle-sub tnum">{{ usageCycleLabel(row as Subscriber) }}</span>
+									</div>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('subscribers.columns.expiresAt')" width="170">
+								<template #default="{ row }">
+									<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('subscribers.columns.grantedNodes')" width="95">
+								<template #default="{ row }">
+									<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
+										{{ row.node_count }}
+									</RouterLink>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('subscribers.columns.subscriptions')" width="105">
+								<template #default="{ row }">
+									<button type="button" class="sub-count-btn tnum" @click="toggleExpand(row as Subscriber)">
+										<AppIcon name="subscriptions" :size="13" />
+										<span>{{ subscriptionsFor(row.id).length }}</span>
+									</button>
+								</template>
+							</el-table-column>
+							<el-table-column :label="t('common.actions')" width="250" fixed="right">
+								<template #default="{ row }">
+									<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
+									<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
+									<RouterLink :to="`/subscribers/${row.id}`" custom v-slot="{ navigate }">
+										<el-button link type="primary" @click="navigate">{{ t('common.details') }}</el-button>
+									</RouterLink>
+									<el-button link type="danger" :loading="disableAction.isRunning(row.id)" @click="disableSubscriber(row as Subscriber)">
+										{{ t('subscribers.actions.disable') }}
+									</el-button>
+								</template>
+							</el-table-column>
+						</el-table>
+					</el-card>
+				</template>
+				<el-card v-else-if="!loading" shadow="never" class="empty-stage-card">
+					<el-empty :description="subscribers.length === 0 ? t('subscribers.empty') : t('subscribers.emptyFiltered')">
+						<el-button v-if="subscribers.length === 0" type="primary" @click="openCreate">{{ t('subscribers.create') }}</el-button>
+						<el-button v-else @click="clearFilters">{{ t('subscribers.clearFilters') }}</el-button>
+					</el-empty>
+				</el-card>
+			</div>
 		</el-tab-pane>
 
 		<el-tab-pane :label="`${t('recycleBin.tab')} (${totalBinCount})`" name="recycle-bin">
@@ -547,6 +608,10 @@ async function onGrantSaved(): Promise<void> {
 
 .search-input {
 	width: 240px;
+}
+
+.sort-select {
+	width: 135px;
 }
 
 .name-cell {

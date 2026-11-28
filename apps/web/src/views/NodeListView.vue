@@ -9,6 +9,7 @@ import NodeCard from '../components/NodeCard.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import PollingPill from '../components/PollingPill.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import ViewSwitch, { type ListViewMode } from '../components/ViewSwitch.vue';
 import { evictCachedResource, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
@@ -25,7 +26,7 @@ const { t } = useI18n();
 const search = ref('');
 const statusFilter = ref<'all' | NodeStatus>('all');
 const sortBy = ref<SortKey>('status');
-const viewMode = ref<'card' | 'table'>('card');
+const viewMode = ref<ListViewMode>('card');
 
 const deployDialogVisible = ref(false);
 const tokenStatusLoading = ref(false);
@@ -212,28 +213,7 @@ async function submitDeleteNode(): Promise<void> {
 			</div>
 		</template>
 		<PollingPill :last-updated-at="lastUpdatedAt" :paused="paused" @toggle="togglePause" />
-		<div class="view-switch" role="group">
-			<button
-				type="button"
-				class="view-btn"
-				:class="{ 'is-active': viewMode === 'card' }"
-				:title="t('nodes.viewCard')"
-				:aria-label="t('nodes.viewCard')"
-				@click="viewMode = 'card'"
-			>
-				<AppIcon name="grid" :size="14" />
-			</button>
-			<button
-				type="button"
-				class="view-btn"
-				:class="{ 'is-active': viewMode === 'table' }"
-				:title="t('nodes.viewTable')"
-				:aria-label="t('nodes.viewTable')"
-				@click="viewMode = 'table'"
-			>
-				<AppIcon name="list" :size="14" />
-			</button>
-		</div>
+		<ViewSwitch v-model="viewMode" />
 		<el-button :loading="refreshing" @click="refresh">
 			<AppIcon name="refresh" :size="14" class="btn-icon" />
 			<span>{{ t('common.refresh') }}</span>
@@ -244,9 +224,9 @@ async function submitDeleteNode(): Promise<void> {
 		</el-button>
 	</PageToolbar>
 
-	<div v-loading="loading" class="nodes-stage">
+	<div v-loading="loading" class="list-stage">
 		<template v-if="filteredNodes.length > 0">
-			<div v-if="viewMode === 'card'" class="nodes-grid">
+			<div v-if="viewMode === 'card'" class="card-grid">
 				<NodeCard
 					v-for="node in filteredNodes"
 					:key="node.id"
@@ -309,7 +289,7 @@ async function submitDeleteNode(): Promise<void> {
 				</el-table>
 			</el-card>
 		</template>
-		<el-card v-else-if="!loading" shadow="never" class="empty-card">
+		<el-card v-else-if="!loading" shadow="never" class="empty-stage-card">
 			<el-empty :description="nodes.length === 0 ? t('nodes.empty') : t('nodes.emptyFiltered')">
 				<el-button v-if="nodes.length === 0" type="primary" @click="openDeployDialog">{{ t('nodes.deployNode') }}</el-button>
 				<el-button v-else @click="clearFilters">{{ t('nodes.clearFilters') }}</el-button>
@@ -423,55 +403,6 @@ async function submitDeleteNode(): Promise<void> {
 
 .sort-select {
 	width: 130px;
-}
-
-.view-switch {
-	display: inline-flex;
-	align-items: center;
-	padding: 2px;
-	border: 1px solid var(--border-color);
-	border-radius: var(--radius-sm);
-	background: var(--bg-muted);
-}
-
-.view-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 28px;
-	height: 26px;
-	border: none;
-	border-radius: var(--radius-xs);
-	background: transparent;
-	color: var(--text-muted);
-	cursor: pointer;
-	transition:
-		background-color var(--duration-fast) var(--ease-standard),
-		color var(--duration-fast) var(--ease-standard);
-}
-
-.view-btn:hover {
-	color: var(--text-primary);
-}
-
-.view-btn.is-active {
-	background: var(--bg-surface);
-	color: var(--text-primary);
-	box-shadow: var(--shadow-xs);
-}
-
-.nodes-stage {
-	min-height: 200px;
-}
-
-.nodes-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
-	gap: 16px;
-}
-
-.empty-card {
-	padding: 12px 0;
 }
 
 .dialog-alert {

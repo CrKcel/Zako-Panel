@@ -48,3 +48,14 @@ export function usageLabel(subscriber: Subscriber): string {
 export function usageCycleLabel(subscriber: Pick<Subscriber, 'usage_cycle_start' | 'usage_cycle_end'>): string {
 	return `${formatTimestamp(subscriber.usage_cycle_start)} ~ ${formatTimestamp(subscriber.usage_cycle_end)}`;
 }
+
+export function subscriberUsageRatio(subscriber: Pick<Subscriber, 'traffic_limit_bytes' | 'usage'>): number | null {
+	if (!subscriber.traffic_limit_bytes || subscriber.traffic_limit_bytes <= 0) return null;
+	return Math.min(100, Math.round((subscriberUsedBytes(subscriber) / subscriber.traffic_limit_bytes) * 100));
+}
+
+export function usageTone(ratio: number): string {
+	if (ratio >= 95) return 'is-danger';
+	if (ratio >= 80) return 'is-warning';
+	return 'is-primary';
+}

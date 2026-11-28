@@ -25,29 +25,22 @@
 	--duration-normal: 200ms;
 
 	/* Primitive Palette */
-	--p-slate-50: #f8fafc;
-	--p-slate-100: #f1f5f9;
-	--p-slate-200: #e2e8f0;
-	--p-slate-300: #cbd5e1;
-	--p-slate-400: #94a3b8;
-	--p-slate-500: #576475;
-	--p-slate-600: #475569;
-	--p-slate-700: #334155;
-	--p-slate-800: #1e293b;
-	--p-slate-900: #0f172a;
+	--p-white: #ffffff;
+	--p-black: #000000;
 
-	--p-obsidian-950: #090d16;
-	--p-obsidian-900: #0c121e;
-	--p-obsidian-850: #101726;
-	--p-obsidian-800: #162033;
-	--p-obsidian-700: #1d2940;
-
-	--p-blue-50: #eff6ff;
-	--p-blue-200: #bfdbfe;
-	--p-blue-400: #60a5fa;
-	--p-blue-500: #3b82f6;
-	--p-blue-600: #2563eb;
-	--p-blue-700: #1d4ed8;
+	--p-gray-50: #fafafa;
+	--p-gray-100: #f5f5f5;
+	--p-gray-150: #ededed;
+	--p-gray-200: #e5e5e5;
+	--p-gray-300: #d4d4d4;
+	--p-gray-400: #a3a3a3;
+	--p-gray-500: #737373;
+	--p-gray-600: #525252;
+	--p-gray-700: #404040;
+	--p-gray-800: #262626;
+	--p-gray-850: #1c1c1c;
+	--p-gray-900: #141414;
+	--p-gray-950: #0a0a0a;
 
 	--p-emerald-50: #ecfdf5;
 	--p-emerald-400: #34d399;

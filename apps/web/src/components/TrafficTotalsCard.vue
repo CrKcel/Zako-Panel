@@ -18,7 +18,7 @@ const metrics = computed<Array<{ label: string; value: string; icon: IconName; t
 	const totals = sumTrafficItems(props.summary?.items);
 	return [
 		{ label: t('traffic.uplink'), value: formatBytes(totals.uplink), icon: 'arrow-up', tone: 'primary' },
-		{ label: t('traffic.downlink'), value: formatBytes(totals.downlink), icon: 'arrow-down', tone: 'success' },
+		{ label: t('traffic.downlink'), value: formatBytes(totals.downlink), icon: 'arrow-down', tone: 'neutral' },
 		{ label: t('traffic.total'), value: formatBytes(totals.total), icon: 'activity', tone: 'neutral' },
 	];
 });
@@ -89,11 +89,6 @@ const metrics = computed<Array<{ label: string; value: string; icon: IconName; t
 .metric-icon.tone-primary {
 	background: var(--accent-primary-soft);
 	color: var(--accent-primary);
-}
-
-.metric-icon.tone-success {
-	background: var(--tone-success-soft);
-	color: var(--tone-success);
 }
 
 .metric-icon.tone-neutral {

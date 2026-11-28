@@ -182,7 +182,7 @@ const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(
 						<AppIcon name="chevron-right" :size="14" class="quick-arrow" />
 					</RouterLink>
 					<RouterLink to="/subscribers" class="quick-link">
-						<span class="quick-icon is-success"><AppIcon name="subscribers" :size="15" /></span>
+						<span class="quick-icon is-neutral"><AppIcon name="subscribers" :size="15" /></span>
 						<span class="quick-copy">
 							<span class="quick-title">{{ t('subscribers.create') }}</span>
 							<span class="quick-desc">{{ t('overview.createSubscriberDesc') }}</span>
@@ -338,11 +338,6 @@ const { refresh, lastUpdatedAt, paused, togglePause } = usePolling(
 .quick-icon.is-primary {
 	background: var(--accent-primary-soft);
 	color: var(--accent-primary);
-}
-
-.quick-icon.is-success {
-	background: var(--tone-success-soft);
-	color: var(--tone-success);
 }
 
 .quick-icon.is-neutral {

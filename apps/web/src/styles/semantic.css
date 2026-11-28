@@ -1,31 +1,31 @@
 :root {
 	/* Surface & Canvas */
-	--bg-canvas: #f5f7fa;
-	--bg-surface: #ffffff;
-	--bg-elevated: #ffffff;
-	--bg-subtle: var(--p-slate-100);
-	--bg-muted: #f6f8fb;
-	--bg-code: #f8fafc;
-	--bg-header-glass: rgba(255, 255, 255, 0.84);
+	--bg-canvas: #f7f7f7;
+	--bg-surface: var(--p-white);
+	--bg-elevated: var(--p-white);
+	--bg-subtle: var(--p-gray-100);
+	--bg-muted: var(--p-gray-50);
+	--bg-code: var(--p-gray-50);
+	--bg-header-glass: rgba(255, 255, 255, 0.86);
 
 	/* Borders */
-	--border-color: var(--p-slate-200);
-	--border-subtle: var(--p-slate-100);
-	--border-hover: var(--p-slate-300);
+	--border-color: var(--p-gray-200);
+	--border-subtle: var(--p-gray-150);
+	--border-hover: var(--p-gray-300);
 
 	/* Text */
-	--text-primary: var(--p-slate-900);
-	--text-table: var(--p-slate-800);
-	--text-secondary: var(--p-slate-600);
-	--text-muted: var(--p-slate-500);
-	--text-placeholder: var(--p-slate-400);
+	--text-primary: var(--p-gray-900);
+	--text-table: var(--p-gray-800);
+	--text-secondary: var(--p-gray-600);
+	--text-muted: var(--p-gray-500);
+	--text-placeholder: var(--p-gray-400);
 
 	/* Brand & Semantic */
-	--accent-primary: var(--p-blue-600);
-	--accent-primary-hover: var(--p-blue-700);
-	--accent-primary-soft: rgba(37, 99, 235, 0.08);
-	--accent-primary-border: rgba(37, 99, 235, 0.24);
-	--focus-ring: rgba(37, 99, 235, 0.35);
+	--accent-primary: var(--p-gray-900);
+	--accent-primary-hover: var(--p-gray-700);
+	--accent-primary-soft: rgba(0, 0, 0, 0.06);
+	--accent-primary-border: rgba(0, 0, 0, 0.16);
+	--focus-ring: rgba(0, 0, 0, 0.28);
 
 	--tone-success: var(--p-emerald-600);
 	--tone-success-text: var(--p-emerald-700);
@@ -42,31 +42,31 @@
 	--tone-danger-soft: var(--p-rose-50);
 	--tone-danger-border: rgba(225, 29, 72, 0.22);
 
-	--tone-info: var(--p-slate-500);
-	--tone-info-text: var(--p-slate-600);
-	--tone-info-soft: var(--p-slate-100);
-	--tone-info-border: var(--p-slate-200);
+	--tone-info: var(--p-gray-500);
+	--tone-info-text: var(--p-gray-600);
+	--tone-info-soft: var(--p-gray-100);
+	--tone-info-border: var(--p-gray-200);
 
 	/* Protocol Badges */
-	--proto-vless-bg: rgba(37, 99, 235, 0.08);
-	--proto-vless-fg: #1d4ed8;
-	--proto-vless-border: rgba(37, 99, 235, 0.22);
+	--proto-vless-bg: rgba(0, 0, 0, 0.07);
+	--proto-vless-fg: var(--p-gray-900);
+	--proto-vless-border: rgba(0, 0, 0, 0.18);
 
-	--proto-hy2-bg: rgba(124, 58, 237, 0.08);
-	--proto-hy2-fg: #6d28d9;
-	--proto-hy2-border: rgba(124, 58, 237, 0.22);
+	--proto-hy2-bg: rgba(0, 0, 0, 0.05);
+	--proto-hy2-fg: var(--p-gray-800);
+	--proto-hy2-border: rgba(0, 0, 0, 0.15);
 
-	--proto-trojan-bg: rgba(217, 119, 6, 0.09);
-	--proto-trojan-fg: #b45309;
-	--proto-trojan-border: rgba(217, 119, 6, 0.24);
+	--proto-trojan-bg: rgba(0, 0, 0, 0.035);
+	--proto-trojan-fg: var(--p-gray-700);
+	--proto-trojan-border: rgba(0, 0, 0, 0.14);
 
-	--proto-vmess-bg: rgba(13, 148, 136, 0.09);
-	--proto-vmess-fg: #0f766e;
-	--proto-vmess-border: rgba(13, 148, 136, 0.24);
+	--proto-vmess-bg: var(--p-white);
+	--proto-vmess-fg: var(--p-gray-800);
+	--proto-vmess-border: var(--p-gray-300);
 
-	--proto-ss-bg: rgba(71, 85, 105, 0.09);
-	--proto-ss-fg: #334155;
-	--proto-ss-border: rgba(71, 85, 105, 0.22);
+	--proto-ss-bg: var(--p-gray-100);
+	--proto-ss-fg: var(--p-gray-600);
+	--proto-ss-border: var(--p-gray-200);
 
 	/* Diff View */
 	--diff-add-bg: rgba(5, 150, 105, 0.1);
@@ -75,47 +75,47 @@
 	--diff-del-fg: #be123c;
 
 	/* Brand Mark & Overlays */
-	--brand-mark-bg: var(--p-slate-900);
-	--brand-mark-fg: #ffffff;
-	--backdrop-color: rgba(15, 23, 42, 0.4);
+	--brand-mark-bg: var(--p-gray-900);
+	--brand-mark-fg: var(--p-white);
+	--backdrop-color: rgba(0, 0, 0, 0.42);
 
 	/* Elevation */
-	--shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-	--shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.03);
-	--shadow-md: 0 4px 14px rgba(15, 23, 42, 0.07);
-	--shadow-dialog: 0 20px 44px rgba(15, 23, 42, 0.14);
+	--shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+	--shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+	--shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+	--shadow-dialog: 0 20px 44px rgba(0, 0, 0, 0.15);
 
 	color-scheme: light;
 }
 
 html.dark {
 	/* Surface & Canvas */
-	--bg-canvas: var(--p-obsidian-950);
-	--bg-surface: var(--p-obsidian-850);
-	--bg-elevated: var(--p-obsidian-800);
-	--bg-subtle: var(--p-obsidian-700);
-	--bg-muted: var(--p-obsidian-900);
-	--bg-code: #080c14;
-	--bg-header-glass: rgba(16, 23, 38, 0.8);
+	--bg-canvas: var(--p-gray-950);
+	--bg-surface: var(--p-gray-900);
+	--bg-elevated: var(--p-gray-850);
+	--bg-subtle: var(--p-gray-800);
+	--bg-muted: #181818;
+	--bg-code: #080808;
+	--bg-header-glass: rgba(20, 20, 20, 0.82);
 
 	/* Borders */
-	--border-color: rgba(148, 163, 184, 0.14);
-	--border-subtle: rgba(148, 163, 184, 0.09);
-	--border-hover: rgba(148, 163, 184, 0.28);
+	--border-color: rgba(255, 255, 255, 0.12);
+	--border-subtle: rgba(255, 255, 255, 0.07);
+	--border-hover: rgba(255, 255, 255, 0.24);
 
 	/* Text */
-	--text-primary: var(--p-slate-100);
-	--text-table: var(--p-slate-200);
-	--text-secondary: var(--p-slate-300);
-	--text-muted: var(--p-slate-400);
-	--text-placeholder: #64748b;
+	--text-primary: var(--p-gray-100);
+	--text-table: var(--p-gray-200);
+	--text-secondary: var(--p-gray-300);
+	--text-muted: var(--p-gray-400);
+	--text-placeholder: var(--p-gray-500);
 
 	/* Brand & Semantic */
-	--accent-primary: var(--p-blue-500);
-	--accent-primary-hover: var(--p-blue-400);
-	--accent-primary-soft: rgba(59, 130, 246, 0.16);
-	--accent-primary-border: rgba(96, 165, 250, 0.34);
-	--focus-ring: rgba(96, 165, 250, 0.45);
+	--accent-primary: var(--p-gray-100);
+	--accent-primary-hover: var(--p-gray-300);
+	--accent-primary-soft: rgba(255, 255, 255, 0.1);
+	--accent-primary-border: rgba(255, 255, 255, 0.22);
+	--focus-ring: rgba(255, 255, 255, 0.36);
 
 	--tone-success: var(--p-emerald-500);
 	--tone-success-text: var(--p-emerald-400);
@@ -132,31 +132,31 @@ html.dark {
 	--tone-danger-soft: rgba(244, 63, 94, 0.15);
 	--tone-danger-border: rgba(251, 113, 133, 0.28);
 
-	--tone-info: var(--p-slate-400);
-	--tone-info-text: var(--p-slate-300);
-	--tone-info-soft: rgba(148, 163, 184, 0.12);
-	--tone-info-border: rgba(148, 163, 184, 0.22);
+	--tone-info: var(--p-gray-400);
+	--tone-info-text: var(--p-gray-300);
+	--tone-info-soft: rgba(255, 255, 255, 0.08);
+	--tone-info-border: rgba(255, 255, 255, 0.16);
 
 	/* Protocol Badges */
-	--proto-vless-bg: rgba(59, 130, 246, 0.16);
-	--proto-vless-fg: #93c5fd;
-	--proto-vless-border: rgba(96, 165, 250, 0.3);
+	--proto-vless-bg: rgba(255, 255, 255, 0.12);
+	--proto-vless-fg: var(--p-gray-100);
+	--proto-vless-border: rgba(255, 255, 255, 0.24);
 
-	--proto-hy2-bg: rgba(139, 92, 246, 0.16);
-	--proto-hy2-fg: #c4b5fd;
-	--proto-hy2-border: rgba(167, 139, 250, 0.3);
+	--proto-hy2-bg: rgba(255, 255, 255, 0.09);
+	--proto-hy2-fg: var(--p-gray-200);
+	--proto-hy2-border: rgba(255, 255, 255, 0.18);
 
-	--proto-trojan-bg: rgba(245, 158, 11, 0.16);
-	--proto-trojan-fg: #fcd34d;
-	--proto-trojan-border: rgba(251, 191, 36, 0.3);
+	--proto-trojan-bg: rgba(255, 255, 255, 0.07);
+	--proto-trojan-fg: var(--p-gray-300);
+	--proto-trojan-border: rgba(255, 255, 255, 0.15);
 
-	--proto-vmess-bg: rgba(20, 184, 166, 0.16);
-	--proto-vmess-fg: #5eead4;
-	--proto-vmess-border: rgba(45, 212, 191, 0.3);
+	--proto-vmess-bg: transparent;
+	--proto-vmess-fg: var(--p-gray-200);
+	--proto-vmess-border: rgba(255, 255, 255, 0.22);
 
-	--proto-ss-bg: rgba(148, 163, 184, 0.15);
-	--proto-ss-fg: #cbd5e1;
-	--proto-ss-border: rgba(148, 163, 184, 0.26);
+	--proto-ss-bg: rgba(255, 255, 255, 0.06);
+	--proto-ss-fg: var(--p-gray-400);
+	--proto-ss-border: rgba(255, 255, 255, 0.14);
 
 	/* Diff View */
 	--diff-add-bg: rgba(16, 185, 129, 0.15);
@@ -165,15 +165,15 @@ html.dark {
 	--diff-del-fg: #fda4af;
 
 	/* Brand Mark & Overlays */
-	--brand-mark-bg: var(--accent-primary);
-	--brand-mark-fg: #ffffff;
-	--backdrop-color: rgba(2, 6, 23, 0.72);
+	--brand-mark-bg: var(--p-gray-100);
+	--brand-mark-fg: var(--p-gray-950);
+	--backdrop-color: rgba(0, 0, 0, 0.72);
 
 	/* Elevation */
-	--shadow-xs: 0 1px 2px rgba(2, 6, 23, 0.45);
-	--shadow-sm: 0 2px 6px rgba(2, 6, 23, 0.5);
-	--shadow-md: 0 6px 20px rgba(2, 6, 23, 0.55);
-	--shadow-dialog: 0 24px 48px rgba(2, 6, 23, 0.72);
+	--shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+	--shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.55);
+	--shadow-md: 0 6px 20px rgba(0, 0, 0, 0.6);
+	--shadow-dialog: 0 24px 48px rgba(0, 0, 0, 0.78);
 
 	color-scheme: dark;
 }

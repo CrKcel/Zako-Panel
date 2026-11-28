@@ -75,7 +75,7 @@ function sharePercent(item: TrafficItem): number {
 
 	<div v-loading="loading" class="stats-grid ui-section">
 		<StatCard :label="t('traffic.uplink')" :value="formatBytes(totals.uplink)" icon="arrow-up" tone="primary" />
-		<StatCard :label="t('traffic.downlink')" :value="formatBytes(totals.downlink)" icon="arrow-down" tone="success" />
+		<StatCard :label="t('traffic.downlink')" :value="formatBytes(totals.downlink)" icon="arrow-down" />
 		<StatCard :label="t('traffic.total')" :value="formatBytes(totals.total)" icon="activity" />
 	</div>
 

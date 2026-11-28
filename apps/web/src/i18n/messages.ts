@@ -38,8 +38,8 @@ export const zhCN = {
 		overview: '总览',
 		nodes: '节点',
 		subscribers: '订阅用户',
-		profiles: '订阅档案',
-		subscriptions: '订阅',
+		profiles: '订阅规则',
+		subscriptions: '订阅链接',
 		traffic: '流量',
 		nodeDetail: '节点详情',
 		subscriberDetail: '订阅用户详情',
@@ -84,7 +84,7 @@ export const zhCN = {
 			disabled: '节点停用',
 			offline: '心跳过期',
 			unhealthy: 'Xray 不健康',
-			not_selected: '未在档案选择中',
+			not_selected: '未在订阅规则选择中',
 			no_endpoint: '无可用端点',
 		},
 		subscriberBlock: {
@@ -328,7 +328,7 @@ export const zhCN = {
 	subscribers: {
 		loadError: '订阅用户加载失败',
 		loadNodesError: '节点加载失败',
-		searchPlaceholder: '搜索名称或邮箱…',
+		searchPlaceholder: '搜索名称、邮箱或订阅链接…',
 		create: '创建订阅用户',
 		edit: '编辑订阅用户',
 		columns: {
@@ -337,6 +337,7 @@ export const zhCN = {
 			cycle: '周期',
 			expiresAt: '到期',
 			grantedNodes: '授权节点',
+			subscriptions: '订阅链接',
 		},
 		actions: {
 			nodeGrant: '节点授权',
@@ -391,10 +392,10 @@ export const zhCN = {
 		clientsSearchPlaceholder: '搜索用户或 Email…',
 	},
 	profiles: {
-		loadError: '订阅档案加载失败',
+		loadError: '订阅规则加载失败',
 		loadNodesError: '节点加载失败',
-		create: '创建档案',
-		edit: '编辑档案',
+		create: '创建订阅规则',
+		edit: '编辑订阅规则',
 		columns: {
 			description: '描述',
 			nodeSelection: '节点选择',
@@ -421,7 +422,7 @@ export const zhCN = {
 			loadTemplate: '填充默认模板',
 			yamlHint:
 				'按 Mihomo (Clash.Meta) YAML 格式填写，支持 mixed-port、dns、proxy-groups、rules 等顶级字段；proxies 会根据可用节点自动生成并覆盖。留空时使用默认配置。',
-			nameRequired: '请输入档案名称',
+			nameRequired: '请输入订阅规则名称',
 			yamlSyntaxError: 'YAML 语法错误: {message}',
 			yamlRootError: 'YAML 根节点必须是映射对象（键值对）',
 			proxyGroupsArrayError: 'proxy-groups 必须是 YAML 列表',
@@ -429,14 +430,14 @@ export const zhCN = {
 			proxyGroupProxiesError: 'proxy-groups 第 {index} 项的 proxies 必须是字符串列表',
 			rulesArrayError: 'rules 必须是字符串列表',
 			ruleEmptyError: 'rules 第 {index} 项不能为空',
-			created: '订阅档案已创建',
-			updated: '订阅档案已更新',
-			saveFailed: '订阅档案保存失败',
+			created: '订阅规则已创建',
+			updated: '订阅规则已更新',
+			saveFailed: '订阅规则保存失败',
 		},
 		delete: {
-			confirm: '删除订阅档案「{name}」？删除后将移入回收站，并在 {days} 天后自动永久删除。',
-			success: '订阅档案已移入回收站',
-			failed: '订阅档案删除失败',
+			confirm: '删除订阅规则「{name}」？删除后将移入回收站，并在 {days} 天后自动永久删除。',
+			success: '订阅规则已移入回收站',
+			failed: '订阅规则删除失败',
 		},
 		preview: {
 			title: 'Clash 预览 · {name}',
@@ -450,14 +451,15 @@ export const zhCN = {
 		},
 	},
 	subscriptions: {
-		loadError: '订阅加载失败',
-		loadProfilesError: '订阅档案加载失败',
+		loadError: '订阅链接加载失败',
+		loadProfilesError: '订阅规则加载失败',
 		loadSubscribersError: '订阅用户加载失败',
-		searchPlaceholder: '搜索订阅名称、用户或档案…',
-		create: '创建订阅',
+		searchPlaceholder: '搜索订阅链接名称或订阅规则…',
+		create: '创建订阅链接',
+		empty: '暂无订阅链接',
 		columns: {
 			subscriber: '订阅用户',
-			profile: '档案',
+			profile: '订阅规则',
 			expiresAt: '到期',
 			createdAt: '创建时间',
 		},
@@ -467,23 +469,23 @@ export const zhCN = {
 		},
 		form: {
 			subscriber: '订阅用户',
-			profile: '档案',
+			profile: '订阅规则',
 			expiresAt: '到期时间',
-			nameRequired: '请输入订阅名称',
+			nameRequired: '请输入订阅链接名称',
 			subscriberRequired: '请选择订阅用户',
-			profileRequired: '请选择订阅档案',
-			created: '订阅已创建',
-			createFailed: '订阅创建失败',
+			profileRequired: '请选择订阅规则',
+			created: '订阅链接已创建',
+			createFailed: '订阅链接创建失败',
 		},
 		rotate: {
-			confirm: '轮换订阅「{name}」的 token？',
-			success: '订阅 token 已轮换',
-			failed: '订阅轮换失败',
+			confirm: '轮换订阅链接「{name}」的 Token？',
+			success: '订阅链接 Token 已轮换',
+			failed: '订阅链接轮换失败',
 		},
 		revoke: {
-			confirm: '撤销订阅「{name}」？撤销后将移入回收站，可在回收站中恢复或永久删除。',
-			success: '订阅已撤销并移入回收站',
-			failed: '订阅撤销失败',
+			confirm: '撤销订阅链接「{name}」？撤销后将移入回收站，可在回收站中恢复或永久删除。',
+			success: '订阅链接已撤销并移入回收站',
+			failed: '订阅链接撤销失败',
 		},
 		links: {
 			title: '订阅链接',
@@ -494,10 +496,14 @@ export const zhCN = {
 	recycleBin: {
 		tab: '回收站',
 		loadError: '回收站加载失败',
+		categories: {
+			subscriber: '订阅用户',
+			subscription: '订阅链接',
+		},
 		retentionHints: {
 			subscriber: '停用的订阅用户会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
-			subscription: '撤销的订阅会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
-			profile: '删除的订阅档案会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
+			subscription: '撤销的订阅链接会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
+			profile: '删除的订阅规则会先收入回收站，保留 {days} 天后由定时任务自动永久删除。',
 		},
 		searchPlaceholder: '搜索名称或详情…',
 		empty: '回收站为空',
@@ -893,7 +899,7 @@ export const enUS: Messages = {
 	subscribers: {
 		loadError: 'Failed to load subscribers',
 		loadNodesError: 'Failed to load nodes',
-		searchPlaceholder: 'Search name or email…',
+		searchPlaceholder: 'Search name, email, or subscription link…',
 		create: 'Create Subscriber',
 		edit: 'Edit Subscriber',
 		columns: {
@@ -902,6 +908,7 @@ export const enUS: Messages = {
 			cycle: 'Cycle',
 			expiresAt: 'Expires At',
 			grantedNodes: 'Granted Nodes',
+			subscriptions: 'Subscription Links',
 		},
 		actions: {
 			nodeGrant: 'Node Access',
@@ -1020,6 +1027,7 @@ export const enUS: Messages = {
 		loadSubscribersError: 'Failed to load subscribers',
 		searchPlaceholder: 'Search subscription, subscriber, or profile…',
 		create: 'Create Subscription',
+		empty: 'No subscription links',
 		columns: {
 			subscriber: 'Subscriber',
 			profile: 'Profile',
@@ -1059,6 +1067,10 @@ export const enUS: Messages = {
 	recycleBin: {
 		tab: 'Recycle Bin',
 		loadError: 'Failed to load recycle bin',
+		categories: {
+			subscriber: 'Subscribers',
+			subscription: 'Subscription Links',
+		},
 		retentionHints: {
 			subscriber: 'Disabled subscribers are held in the recycle bin for {days} days before automatic permanent deletion.',
 			subscription: 'Revoked subscriptions are held in the recycle bin for {days} days before automatic permanent deletion.',

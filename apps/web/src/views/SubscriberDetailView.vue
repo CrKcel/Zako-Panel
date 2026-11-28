@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import type { Node, Subscriber, SubscriberDetail, TrafficSummary } from '@zako/contracts';
+import type { Node, Profile, Subscriber, SubscriberDetail, Subscription, TrafficSummary } from '@zako/contracts';
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { nodesApi } from '../api/nodes';
+import { profilesApi } from '../api/profiles';
 import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
+import { subscriptionsApi } from '../api/subscriptions';
 import { trafficApi } from '../api/traffic';
 import AppIcon from '../components/AppIcon.vue';
 import EntityHeader from '../components/EntityHeader.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
+import SubscriptionCreateDialog from '../components/SubscriptionCreateDialog.vue';
+import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
 import TrafficTotalsCard from '../components/TrafficTotalsCard.vue';
 import { getCachedResource, invalidateCachedPrefix, invalidateCachedResource, setCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useEntityBreadcrumb } from '../composables/useBreadcrumb';
+import { useSubscriptionActions } from '../composables/useSubscriptionActions';
 import { nodeStatusDescriptor, subscriberStatusDescriptor } from '../domain/status';
 import { subscriberUsedBytes, trafficLimitLabel, usageCycleLabel, usageLabel } from '../domain/subscriber';
 import { DAY_SECONDS, trafficChartData, trafficWindow } from '../domain/traffic';
@@ -53,6 +59,23 @@ const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((pag
 });
 
 const {
+	data: subscriptions,
+	loading: subscriptionsLoading,
+	refreshing: subscriptionsRefreshing,
+	reload: reloadSubscriptions,
+} = useAsyncResource<Subscription[]>(() => subscriptionsApi.list().then((page) => page.items), {
+	initialValue: [],
+	cacheKey: 'subscriptions:list',
+	onError: (error) => showError(error, t('subscriptions.loadError')),
+});
+
+const { data: profiles } = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
+	initialValue: [],
+	cacheKey: 'profiles:list',
+	onError: (error) => showError(error, t('subscriptions.loadProfilesError')),
+});
+
+const {
 	data: traffic,
 	loading: trafficLoading,
 	refreshing: trafficRefreshing,
@@ -73,11 +96,19 @@ const {
 	},
 );
 
-const refreshing = computed(() => subscriberRefreshing.value || trafficRefreshing.value);
+const refreshing = computed(() => subscriberRefreshing.value || subscriptionsRefreshing.value || trafficRefreshing.value);
 
 const grantVisible = ref(false);
 
 useEntityBreadcrumb(() => subscriber.value?.name);
+
+const subscriberSubscriptions = computed(() => subscriptions.value.filter((item) => item.subscriber_id === subscriberId.value));
+
+const subActions = useSubscriptionActions({
+	onChanged: async () => {
+		await reloadSubscriptions();
+	},
+});
 
 const nodeMap = computed(() => new Map(nodes.value.map((node) => [node.id, node])));
 
@@ -107,6 +138,11 @@ function openGrant(): void {
 	grantVisible.value = true;
 }
 
+function openCreateSubscription(): void {
+	if (subscriber.value === null) return;
+	subActions.openCreateFor({ id: subscriber.value.id, name: subscriber.value.name });
+}
+
 function onGrantSaved(detail: SubscriberDetail): void {
 	subscriber.value = detail;
 	const cachedList = getCachedResource<Subscriber[]>('subscribers:list');
@@ -126,7 +162,7 @@ function backToList(): void {
 }
 
 async function refresh(): Promise<void> {
-	await Promise.all([reloadSubscriber(), reloadTraffic()]);
+	await Promise.all([reloadSubscriber(), reloadSubscriptions(), reloadTraffic()]);
 }
 
 const disableAction = useAsyncAction(
@@ -240,6 +276,27 @@ async function restoreSubscriber(): Promise<void> {
 		<el-card shadow="never" class="ui-section">
 			<template #header>
 				<div class="ui-card-header">
+					<span class="ui-card-title">{{ t('nav.subscriptions') }} ({{ subscriberSubscriptions.length }})</span>
+					<el-button type="primary" :disabled="!subscriber || subscriber.status === 'disabled'" @click="openCreateSubscription">
+						<AppIcon name="plus" :size="14" class="btn-icon" />
+						<span>{{ t('subscriptions.create') }}</span>
+					</el-button>
+				</div>
+			</template>
+			<SubscriberSubscriptionsTable
+				:subscriptions="subscriberSubscriptions"
+				:profiles="profiles"
+				:loading="subscriptionsLoading"
+				:is-rotating="subActions.isRotating"
+				:is-revoking="subActions.isRevoking"
+				@rotate="subActions.rotate"
+				@revoke="subActions.revoke"
+			/>
+		</el-card>
+
+		<el-card shadow="never" class="ui-section">
+			<template #header>
+				<div class="ui-card-header">
 					<span class="ui-card-title">{{ t('subscriberDetail.grantedNodes') }} ({{ grantedNodes.length }})</span>
 					<el-button type="primary" @click="openGrant">{{ t('common.edit') }}</el-button>
 				</div>
@@ -272,6 +329,15 @@ async function restoreSubscriber(): Promise<void> {
 		:node-ids="subscriber?.node_ids ?? []"
 		@saved="onGrantSaved"
 	/>
+
+	<SubscriptionCreateDialog
+		v-model:visible="subActions.createVisible.value"
+		:subscriber="subActions.createTarget.value"
+		:profiles="profiles"
+		@created="subActions.onCreated"
+	/>
+
+	<SubscriptionTokenDialog v-model:visible="subActions.tokenVisible.value" :token="subActions.token.value" />
 </template>
 
 <style scoped>

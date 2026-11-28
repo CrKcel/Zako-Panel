@@ -1,20 +1,35 @@
 <script setup lang="ts">
-import type { CreateSubscriberRequest, Node, RecycleBinList, Subscriber, SubscriberStatus, UpdateSubscriberRequest } from '@zako/contracts';
-import type { FormInstance, FormRules } from 'element-plus';
+import type {
+	CreateSubscriberRequest,
+	Node,
+	Profile,
+	RecycleBinList,
+	Subscriber,
+	SubscriberStatus,
+	Subscription,
+	UpdateSubscriberRequest,
+} from '@zako/contracts';
+import type { FormInstance, FormRules, TableInstance } from 'element-plus';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { nodesApi } from '../api/nodes';
+import { profilesApi } from '../api/profiles';
 import { recycleBinApi } from '../api/recycle-bin';
 import { subscribersApi } from '../api/subscribers';
+import { subscriptionsApi } from '../api/subscriptions';
 import AppIcon from '../components/AppIcon.vue';
 import NodeGrantDialog from '../components/NodeGrantDialog.vue';
 import PageToolbar from '../components/PageToolbar.vue';
 import RecycleBinTab from '../components/RecycleBinTab.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SubscriberSubscriptionsTable from '../components/SubscriberSubscriptionsTable.vue';
+import SubscriptionCreateDialog from '../components/SubscriptionCreateDialog.vue';
+import SubscriptionTokenDialog from '../components/SubscriptionTokenDialog.vue';
 import { invalidateCachedPrefix, invalidateCachedResource } from '../composables/resourceCache';
 import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAsyncResource } from '../composables/useAsyncResource';
 import { useCrudDialog } from '../composables/useCrudDialog';
+import { useSubscriptionActions } from '../composables/useSubscriptionActions';
 import { subscriberStatusDescriptor } from '../domain/status';
 import {
 	LIMIT_UNITS,
@@ -46,9 +61,11 @@ function emptySubscriberForm(): SubscriberForm {
 }
 
 const activeTab = ref<'list' | 'recycle-bin'>('list');
+const binCategory = ref<'subscriber' | 'subscription'>('subscriber');
 const search = ref('');
 const statusFilter = ref<'all' | SubscriberStatus>('all');
 
+const tableRef = ref<TableInstance>();
 const form = ref<SubscriberForm>(emptySubscriberForm());
 const formRef = ref<FormInstance>();
 const grantVisible = ref(false);
@@ -57,12 +74,29 @@ const grantTarget = ref<Subscriber | null>(null);
 const {
 	data: subscribers,
 	loading,
-	refreshing,
+	refreshing: subscribersRefreshing,
 	reload,
 } = useAsyncResource<Subscriber[]>(() => subscribersApi.list().then((page) => page.items), {
 	initialValue: [],
 	cacheKey: 'subscribers:list',
 	onError: (error) => showError(error, t('subscribers.loadError')),
+});
+
+const {
+	data: subscriptions,
+	loading: subscriptionsLoading,
+	refreshing: subscriptionsRefreshing,
+	reload: reloadSubscriptions,
+} = useAsyncResource<Subscription[]>(() => subscriptionsApi.list().then((page) => page.items), {
+	initialValue: [],
+	cacheKey: 'subscriptions:list',
+	onError: (error) => showError(error, t('subscriptions.loadError')),
+});
+
+const { data: profiles } = useAsyncResource<Profile[]>(() => profilesApi.list().then((page) => page.items), {
+	initialValue: [],
+	cacheKey: 'profiles:list',
+	onError: (error) => showError(error, t('subscriptions.loadProfilesError')),
 });
 
 const { data: nodes } = useAsyncResource<Node[]>(() => nodesApi.list().then((page) => page.items), {
@@ -78,15 +112,62 @@ const EMPTY_BIN: RecycleBinList = {
 };
 
 const {
-	data: recycleBin,
-	loading: binLoading,
-	refreshing: binRefreshing,
-	reload: reloadBin,
+	data: subscriberBin,
+	loading: subscriberBinLoading,
+	refreshing: subscriberBinRefreshing,
+	reload: reloadSubscriberBin,
 } = useAsyncResource<RecycleBinList>(() => recycleBinApi.list('subscriber'), {
 	initialValue: EMPTY_BIN,
 	cacheKey: 'recycle-bin:subscriber',
 	onError: (error) => showError(error, t('recycleBin.loadError')),
 });
+
+const {
+	data: subscriptionBin,
+	loading: subscriptionBinLoading,
+	refreshing: subscriptionBinRefreshing,
+	reload: reloadSubscriptionBin,
+} = useAsyncResource<RecycleBinList>(() => recycleBinApi.list('subscription'), {
+	initialValue: EMPTY_BIN,
+	cacheKey: 'recycle-bin:subscription',
+	onError: (error) => showError(error, t('recycleBin.loadError')),
+});
+
+const refreshing = computed(() => subscribersRefreshing.value || subscriptionsRefreshing.value);
+const totalBinCount = computed(() => subscriberBin.value.items.length + subscriptionBin.value.items.length);
+const activeBin = computed(() => (binCategory.value === 'subscriber' ? subscriberBin.value : subscriptionBin.value));
+const activeBinLoading = computed(() => (binCategory.value === 'subscriber' ? subscriberBinLoading.value : subscriptionBinLoading.value));
+const activeBinRefreshing = computed(() =>
+	binCategory.value === 'subscriber' ? subscriberBinRefreshing.value : subscriptionBinRefreshing.value,
+);
+
+const subscriptionsBySubscriber = computed(() => {
+	const map = new Map<string, Subscription[]>();
+	for (const sub of subscriptions.value) {
+		const list = map.get(sub.subscriber_id);
+		if (list) list.push(sub);
+		else map.set(sub.subscriber_id, [sub]);
+	}
+	return map;
+});
+
+function subscriptionsFor(subscriberId: string): Subscription[] {
+	return subscriptionsBySubscriber.value.get(subscriberId) ?? [];
+}
+
+function toggleExpand(row: Subscriber): void {
+	tableRef.value?.toggleRowExpansion(row);
+}
+
+const subActions = useSubscriptionActions({
+	onChanged: async () => {
+		await Promise.all([reloadSubscriptions(), reloadSubscriptionBin()]);
+	},
+});
+
+async function refreshList(): Promise<void> {
+	await Promise.all([reload(), reloadSubscriptions()]);
+}
 
 const statusOptions = computed<Array<{ value: 'all' | SubscriberStatus; label: string; count: number }>>(() => {
 	const list = subscribers.value;
@@ -103,8 +184,9 @@ const filteredSubscribers = computed(() => {
 	const q = search.value.trim().toLowerCase();
 	return subscribers.value.filter((row) => {
 		if (statusFilter.value !== 'all' && row.status !== statusFilter.value) return false;
-		if (q && !row.name.toLowerCase().includes(q) && !(row.email ?? '').toLowerCase().includes(q)) return false;
-		return true;
+		if (!q) return true;
+		if (row.name.toLowerCase().includes(q) || (row.email ?? '').toLowerCase().includes(q)) return true;
+		return subscriptionsFor(row.id).some((sub) => sub.name.toLowerCase().includes(q) || (sub.profile_name ?? '').toLowerCase().includes(q));
 	});
 });
 
@@ -183,7 +265,7 @@ async function submit(): Promise<void> {
 		if (subscriberId !== null) {
 			invalidateCachedResource(`subscribers:detail:${subscriberId}`);
 		}
-		await Promise.all([reload(), reloadBin()]);
+		await Promise.all([reload(), reloadSubscriberBin()]);
 	}
 }
 
@@ -195,13 +277,17 @@ const disableAction = useAsyncAction(
 		invalidateCachedResource(`subscribers:detail:${row.id}`);
 		invalidateCachedPrefix('recycle-bin:');
 		invalidateCachedPrefix('nodes:clients:');
-		await Promise.all([reload(), reloadBin()]);
+		await Promise.all([reload(), reloadSubscriberBin()]);
 	},
 	{ onError: (error) => showError(error, t('subscribers.disable.failed')) },
 );
 
+async function refreshBins(): Promise<void> {
+	await Promise.all([reloadSubscriberBin(), reloadSubscriptionBin()]);
+}
+
 async function onBinChanged(): Promise<void> {
-	await Promise.all([reload(), reloadBin()]);
+	await Promise.all([reload(), reloadSubscriptions(), refreshBins()]);
 }
 
 async function disableSubscriber(row: Subscriber): Promise<void> {
@@ -247,7 +333,7 @@ async function onGrantSaved(): Promise<void> {
 						<el-input v-model="search" :placeholder="t('subscribers.searchPlaceholder')" clearable class="search-input" />
 					</div>
 				</template>
-				<el-button :loading="refreshing" @click="reload">
+				<el-button :loading="refreshing" @click="refreshList">
 					<AppIcon name="refresh" :size="14" class="btn-icon" />
 					<span>{{ t('common.refresh') }}</span>
 				</el-button>
@@ -258,7 +344,33 @@ async function onGrantSaved(): Promise<void> {
 			</PageToolbar>
 
 			<el-card shadow="never">
-				<el-table v-loading="loading" :data="filteredSubscribers" :empty-text="t('common.noData')">
+				<el-table ref="tableRef" v-loading="loading" :data="filteredSubscribers" row-key="id" :empty-text="t('common.noData')">
+					<el-table-column type="expand">
+						<template #default="{ row }">
+							<div class="expand-panel">
+								<div class="expand-header">
+									<span class="expand-title">
+										<AppIcon name="subscriptions" :size="14" />
+										<span>{{ t('nav.subscriptions') }} ({{ subscriptionsFor(row.id).length }})</span>
+									</span>
+									<el-button type="primary" size="small" @click="subActions.openCreateFor({ id: row.id, name: row.name })">
+										<AppIcon name="plus" :size="13" class="btn-icon" />
+										<span>{{ t('subscriptions.create') }}</span>
+									</el-button>
+								</div>
+								<SubscriberSubscriptionsTable
+									size="small"
+									:subscriptions="subscriptionsFor(row.id)"
+									:profiles="profiles"
+									:loading="subscriptionsLoading"
+									:is-rotating="subActions.isRotating"
+									:is-revoking="subActions.isRevoking"
+									@rotate="subActions.rotate"
+									@revoke="subActions.revoke"
+								/>
+							</div>
+						</template>
+					</el-table-column>
 					<el-table-column prop="name" :label="t('common.name')" min-width="150">
 						<template #default="{ row }">
 							<div class="name-cell">
@@ -267,7 +379,7 @@ async function onGrantSaved(): Promise<void> {
 							</div>
 						</template>
 					</el-table-column>
-					<el-table-column :label="t('common.status')" width="115">
+					<el-table-column :label="t('common.status')" width="110">
 						<template #default="{ row }">
 							<StatusBadge
 								:label="subscriberStatusDescriptor(row.status).label"
@@ -276,7 +388,7 @@ async function onGrantSaved(): Promise<void> {
 							/>
 						</template>
 					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="260">
+					<el-table-column :label="t('subscribers.columns.usedQuota')" min-width="240">
 						<template #default="{ row }">
 							<div class="usage-cell">
 								<div class="usage-top">
@@ -294,19 +406,27 @@ async function onGrantSaved(): Promise<void> {
 							</div>
 						</template>
 					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.expiresAt')" width="175">
+					<el-table-column :label="t('subscribers.columns.expiresAt')" width="170">
 						<template #default="{ row }">
 							<span class="tnum">{{ formatTimestamp(row.expires_at) }}</span>
 						</template>
 					</el-table-column>
-					<el-table-column :label="t('subscribers.columns.grantedNodes')" width="110">
+					<el-table-column :label="t('subscribers.columns.grantedNodes')" width="95">
 						<template #default="{ row }">
 							<RouterLink :to="`/subscribers/${row.id}`" class="ui-link tnum">
 								{{ row.node_count }}
 							</RouterLink>
 						</template>
 					</el-table-column>
-					<el-table-column :label="t('common.actions')" width="260" fixed="right">
+					<el-table-column :label="t('subscribers.columns.subscriptions')" width="105">
+						<template #default="{ row }">
+							<button type="button" class="sub-count-btn tnum" @click="toggleExpand(row as Subscriber)">
+								<AppIcon name="subscriptions" :size="13" />
+								<span>{{ subscriptionsFor(row.id).length }}</span>
+							</button>
+						</template>
+					</el-table-column>
+					<el-table-column :label="t('common.actions')" width="250" fixed="right">
 						<template #default="{ row }">
 							<el-button link type="primary" @click="openEdit(row.id)">{{ t('common.edit') }}</el-button>
 							<el-button link type="primary" @click="openGrant(row as Subscriber)">{{ t('subscribers.actions.nodeGrant') }}</el-button>
@@ -322,14 +442,38 @@ async function onGrantSaved(): Promise<void> {
 			</el-card>
 		</el-tab-pane>
 
-		<el-tab-pane :label="`${t('recycleBin.tab')} (${recycleBin.items.length})`" name="recycle-bin">
+		<el-tab-pane :label="`${t('recycleBin.tab')} (${totalBinCount})`" name="recycle-bin">
+			<div class="bin-switcher ui-section">
+				<div class="filter-pills" role="group">
+					<button
+						type="button"
+						class="filter-pill"
+						:class="{ 'is-active': binCategory === 'subscriber' }"
+						:aria-pressed="binCategory === 'subscriber'"
+						@click="binCategory = 'subscriber'"
+					>
+						<span>{{ t('recycleBin.categories.subscriber') }}</span>
+						<span class="filter-pill-count">{{ subscriberBin.items.length }}</span>
+					</button>
+					<button
+						type="button"
+						class="filter-pill"
+						:class="{ 'is-active': binCategory === 'subscription' }"
+						:aria-pressed="binCategory === 'subscription'"
+						@click="binCategory = 'subscription'"
+					>
+						<span>{{ t('recycleBin.categories.subscription') }}</span>
+						<span class="filter-pill-count">{{ subscriptionBin.items.length }}</span>
+					</button>
+				</div>
+			</div>
 			<RecycleBinTab
-				item-type="subscriber"
-				:items="recycleBin.items"
-				:retention-days="recycleBin.retention_days"
-				:loading="binLoading"
-				:refreshing="binRefreshing"
-				@refresh="reloadBin"
+				:item-type="binCategory"
+				:items="activeBin.items"
+				:retention-days="activeBin.retention_days"
+				:loading="activeBinLoading"
+				:refreshing="activeBinRefreshing"
+				@refresh="refreshBins"
 				@changed="onBinChanged"
 			/>
 		</el-tab-pane>
@@ -378,6 +522,15 @@ async function onGrantSaved(): Promise<void> {
 	</el-dialog>
 
 	<NodeGrantDialog v-model:visible="grantVisible" :title="grantTitle" :subscriber="grantTarget" :nodes="nodes" @saved="onGrantSaved" />
+
+	<SubscriptionCreateDialog
+		v-model:visible="subActions.createVisible.value"
+		:subscriber="subActions.createTarget.value"
+		:profiles="profiles"
+		@created="subActions.onCreated"
+	/>
+
+	<SubscriptionTokenDialog v-model:visible="subActions.tokenVisible.value" :token="subActions.token.value" />
 </template>
 
 <style scoped>
@@ -393,7 +546,7 @@ async function onGrantSaved(): Promise<void> {
 }
 
 .search-input {
-	width: 220px;
+	width: 240px;
 }
 
 .name-cell {
@@ -461,6 +614,58 @@ async function onGrantSaved(): Promise<void> {
 .cycle-sub {
 	font-size: 11.5px;
 	color: var(--text-muted);
+}
+
+.sub-count-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 24px;
+	padding: 0 9px;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-pill);
+	background: var(--bg-muted);
+	color: var(--accent-primary);
+	font-family: inherit;
+	font-size: 12.5px;
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background-color var(--duration-fast) var(--ease-standard),
+		border-color var(--duration-fast) var(--ease-standard);
+}
+
+.sub-count-btn:hover {
+	background: var(--accent-primary-soft);
+	border-color: var(--accent-primary-border);
+}
+
+.expand-panel {
+	padding: 12px 18px 16px;
+	background: var(--bg-muted);
+	border-top: 1px solid var(--border-subtle);
+}
+
+.expand-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 10px;
+}
+
+.expand-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.bin-switcher {
+	display: flex;
+	align-items: center;
 }
 
 .full-width {

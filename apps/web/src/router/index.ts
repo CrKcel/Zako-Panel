@@ -46,9 +46,7 @@ const routes: RouteRecordRaw[] = [
 	},
 	{
 		path: '/subscriptions',
-		name: 'subscriptions',
-		component: () => import('../views/SubscriptionListView.vue'),
-		meta: { titleKey: 'nav.subscriptions' },
+		redirect: { name: 'subscribers' },
 	},
 	{
 		path: '/traffic',

@@ -61,7 +61,6 @@ const pageItems = computed<PaletteItem[]>(() => [
 	{ id: 'page-nodes', kind: 'page', label: t('nav.nodes'), icon: 'nodes', to: '/nodes' },
 	{ id: 'page-subscribers', kind: 'page', label: t('nav.subscribers'), icon: 'subscribers', to: '/subscribers' },
 	{ id: 'page-profiles', kind: 'page', label: t('nav.profiles'), icon: 'profiles', to: '/profiles' },
-	{ id: 'page-subscriptions', kind: 'page', label: t('nav.subscriptions'), icon: 'subscriptions', to: '/subscriptions' },
 	{ id: 'page-traffic', kind: 'page', label: t('nav.traffic'), icon: 'traffic', to: '/traffic' },
 ]);
 

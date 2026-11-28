@@ -39,7 +39,6 @@ const navGroups = computed<Array<{ key: string; title: string; items: NavItem[] 
 			{ path: '/nodes', label: t('nav.nodes'), icon: 'nodes' },
 			{ path: '/subscribers', label: t('nav.subscribers'), icon: 'subscribers' },
 			{ path: '/profiles', label: t('nav.profiles'), icon: 'profiles' },
-			{ path: '/subscriptions', label: t('nav.subscriptions'), icon: 'subscriptions' },
 		],
 	},
 ]);
